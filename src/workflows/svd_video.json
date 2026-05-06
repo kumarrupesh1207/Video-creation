@@ -1,0 +1,85 @@
+{
+  "_comment": "SVD-XT Image-to-Video Workflow — API Format (ComfyUI)",
+  "_instructions": [
+    "This is a TEMPLATE. Replace it with your actual 'Save (API Format)' export.",
+    "Node IDs here must match config.yaml → models.comfyui.video_overrides.",
+    "To get your real IDs: ComfyUI → Settings → Enable Dev Mode → Save (API Format).",
+    "Then run: python src/inspect_workflow.py --workflow src/workflows/svd_video.json"
+  ],
+
+  "1": {
+    "class_type": "ImageOnlyCheckpointLoader",
+    "inputs": {
+      "ckpt_name": "svd_xt.safetensors"
+    }
+  },
+
+  "10": {
+    "class_type": "LoadImage",
+    "_comment": "VIDEO_OVERRIDE: image_input_node — set to your First Light output",
+    "inputs": {
+      "image": "ComfyUI_00001_.png",
+      "upload": "image"
+    }
+  },
+
+  "11": {
+    "class_type": "SVD_img2vid_Conditioning",
+    "_comment": "VIDEO_OVERRIDE: svd_conditioning_node",
+    "inputs": {
+      "width":              576,
+      "height":             1024,
+      "video_frames":       14,
+      "motion_bucket_id":   127,
+      "fps":                6,
+      "augmentation_level": 0.0,
+      "clip_vision":        ["1", 1],
+      "init_image":         ["10", 0],
+      "vae":                ["1", 2]
+    }
+  },
+
+  "2": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": {
+      "add_noise":      "enable",
+      "noise_seed":     42,
+      "steps":          20,
+      "cfg":            2.5,
+      "sampler_name":   "euler",
+      "scheduler":      "karras",
+      "start_at_step":  0,
+      "end_at_step":    10000,
+      "return_with_leftover_noise": "disable",
+      "model":          ["1", 0],
+      "positive":       ["11", 0],
+      "negative":       ["11", 1],
+      "latent_image":   ["11", 2]
+    }
+  },
+
+  "3": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["2", 0],
+      "vae":     ["1", 2]
+    }
+  },
+
+  "12": {
+    "class_type": "VHS_VideoCombine",
+    "_comment": "VIDEO_OVERRIDE: output_node — requires ComfyUI-VideoHelperSuite",
+    "inputs": {
+      "frame_rate":       6,
+      "loop_count":       0,
+      "filename_prefix":  "SVD_output",
+      "format":           "video/h264-mp4",
+      "pix_fmt":          "yuv420p",
+      "crf":              19,
+      "save_metadata":    true,
+      "pingpong":         false,
+      "save_output":      true,
+      "images":           ["3", 0]
+    }
+  }
+}

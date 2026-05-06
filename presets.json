@@ -1,0 +1,81 @@
+[
+  {
+    "_name": "beach_run_720p",
+    "_description": "720p beach run — production locked config. VRAM: ~9.2 GB. No lipsync.",
+    "_vram_budget": "720x1280 SVD uses ~9.2 GB / 12 GB. 2.5 GB buffer for Windows + UI.",
+    "_clip_math": "20 frames @ 6fps = 3.3s per clip. 8 clips = ~26s total reel.",
+
+    "topic":        "Beach Run 720p",
+    "frames":       20,
+    "fps":          6,
+    "motion":       130,
+    "skip_lipsync": true,
+    "augmentation": 0.12,
+    "denoise":      0.75,
+    "resolution":   [720, 1280],
+
+    "positive_prompt": "A professional 720p cinematic medium tracking shot of a beautiful athletic woman in a high-end bikini, running along the shoreline, ocean waves crashing in the background, golden hour sunset lighting, skin with realistic sweat and water droplets, hair flowing in the wind, 8k detail, sharp focus on eyes, photorealistic, masterpiece.",
+    "negative_prompt": "extra limbs, missing fingers, distorted anatomy, blurry face, low quality, cartoon, anime, heavy makeup, artifacts, text, watermark, clothes.",
+
+    "_why_these_values": {
+      "motion_130":       "Lower than 150 — prevents body drift at 720p (more pixels = more SVD work per frame)",
+      "augmentation_0.12":"Adds water-splash realism without overworking SVD on high-res frames",
+      "denoise_0.75":     "Stabilizes skin/sand texture at 720p; prevents hallucination of extra detail",
+      "frames_20":        "3.3s clip — long enough for a clear running stride cycle",
+      "skip_lipsync":     "Running shot — no talking mouth needed. Audio = music overlay."
+    }
+  },
+
+  {
+    "_name": "beach_run",
+    "_description": "512p beach run — VRAM-safe fallback if 720p causes OOM",
+
+    "topic":        "Bikini girl running on beach",
+    "frames":       16,
+    "fps":          6,
+    "motion":       150,
+    "skip_lipsync": true,
+    "augmentation": 0.15,
+    "denoise":      0.7,
+    "resolution":   [512, 896],
+
+    "positive_prompt": "Cinematic medium-shot of a stunning athletic woman in a vibrant bikini, running towards the camera on a sunny tropical beach, splashing ocean water in the background, golden hour lighting, wet skin, lens flare, 8k resolution, highly detailed, sharp focus on face, photorealistic.",
+    "negative_prompt": "distorted legs, extra limbs, blurry face, low resolution, clothes, covering face, messy hair on face.",
+
+    "_vram_tip": "If 720p causes OOM, use this preset. Upscales cleanly to 1080x1920 via MediaAssembler."
+  },
+
+  {
+    "_name": "fintech_speaker",
+    "_description": "Talking head fintech expert — standard pipeline with lipsync",
+
+    "topic":        "Agile Transformations in Banking",
+    "frames":       12,
+    "fps":          6,
+    "motion":       80,
+    "skip_lipsync": false,
+    "augmentation": 0.0,
+    "denoise":      0.5,
+    "resolution":   [576, 1024],
+
+    "positive_prompt": "Cinematic medium-shot portrait of a confident South Asian man in his 40s, professional business attire, looking directly at camera, clean studio background, 8k, photorealistic, sharp focus on face.",
+    "negative_prompt": "blurry, watermark, distorted, low quality, glasses reflection, messy hair."
+  },
+
+  {
+    "_name": "product_showcase",
+    "_description": "Tech product B-roll — no lipsync, atmospheric motion",
+
+    "topic":        "AI-powered mobile banking app launch",
+    "frames":       14,
+    "fps":          6,
+    "motion":       110,
+    "skip_lipsync": true,
+    "augmentation": 0.08,
+    "denoise":      0.6,
+    "resolution":   [512, 896],
+
+    "positive_prompt": "Cinematic close-up of hands holding a sleek smartphone with glowing fintech app interface, dramatic lighting, dark background, holographic data streams, 8k, photorealistic.",
+    "negative_prompt": "blurry, low quality, distorted screen, extra fingers, ugly hands."
+  }
+]

@@ -1,0 +1,106 @@
+# ============================================================
+# AI Video Factory — Master Config
+# Windows 11 · 12 GB VRAM · 9:16 Vertical (Reels/Shorts)
+# ============================================================
+# HOW TO USE:
+#   1. Run src/inspect_workflow.py to get your real node IDs
+#   2. Replace the placeholder node IDs ("6", "10", "12") below
+#      with the actual IDs from your workflow_api.json
+#   3. Set your actual model/tool paths under [paths] and [models]
+# ============================================================
+
+project:
+  name: "video_factory"
+  resolution: [720, 1280]       # 9:16 vertical — 720p VRAM-safe (9.2 GB on 12GB card)
+  fps: 24
+  output_format: "mp4"
+
+paths:
+  base_output:      "outputs/"
+  scripts_dir:      "outputs/scripts/"
+  images_dir:       "outputs/images/"
+  videos_dir:       "outputs/videos/"
+  audio_dir:        "outputs/audio/"
+  final_dir:        "outputs/final/"
+  reference_voice:  "assets/reference_voice.wav"
+  face_reference:   "assets/face_reference.jpg"
+  wav2lip_root:     "C:/tools/Wav2Lip"
+  ffmpeg_bin:       "C:/Rupesh/App/ffmpeg/bin/ffmpeg.exe"
+
+models:
+
+  # ── LLM (CPU / RAM only — no VRAM) ─────────────────────────────────────
+  llm:
+    provider:       "ollama"
+    model_name:     "llama3:8b"
+    endpoint:       "http://127.0.0.1:11434/api/generate"
+    temperature:    0.7
+    max_tokens:     1024
+
+  # ── ComfyUI WebSocket API ───────────────────────────────────────────────
+  comfyui:
+    host:           "127.0.0.1"
+    port:           8188
+    ws_url:         "ws://127.0.0.1:8188/ws"
+    api_url:        "http://127.0.0.1:8188"
+    client_id:      "video_factory_client_01"
+    auto_start:     true
+    startup_timeout_sec: 180
+    launcher_dir:   "C:/Rupesh/App/ComfyUI_windows_portable_nvidia/ComfyUI_windows_portable"
+    launcher_cmd:   [".\\python_embeded\\python.exe", "-s", "ComfyUI\\main.py", "--cpu", "--windows-standalone-build"]
+
+    # ── Image Generation Workflow ──────────────────────────────────────
+    image_workflow: "src/workflows/image_gen.json"
+    # Node IDs — run: python src/inspect_workflow.py --workflow workflow_api.json
+    # Replace placeholder IDs ("6", "10") with real IDs from your workflow
+    image_overrides:
+      positive_prompt_node: "6"      # CLIPTextEncode (positive)
+      negative_prompt_node: "7"      # CLIPTextEncode (negative)
+      latent_size_node:     "5"      # EmptyLatentImage
+      sampler_node:         "3"      # KSampler
+      output_node:          "10"     # SaveImage (node 10 — after VAELoader on 8)
+
+    # ── SVD Video Workflow ─────────────────────────────────────────────
+    video_workflow: "src/workflows/svd_video.json"
+    video_overrides:
+      image_input_node:     "10"     # LoadImage (feed keyframe from image stage)
+      svd_conditioning_node: "11"    # SVD_img2vid_Conditioning
+      output_node:          "12"     # VHS_VideoCombine or SaveImage
+
+  # ── Coqui XTTS-v2 (loads to GPU, must be unloaded before Wav2Lip) ──────
+  xtts:
+    model_name:     "tts_models/multilingual/multi-dataset/xtts_v2"
+    language:       "en"
+    speed:          1.0
+    temperature:    0.65
+    # TTS cache dir (avoid re-downloading on each run)
+    # Set env var TTS_HOME or let Coqui use default ~/.local/share/tts
+
+  # ── Wav2Lip (isolated Python 3.8 venv — NEVER shares VRAM with XTTS) ───
+  wav2lip:
+    # ⚠️ HIGH RISK: Use the Wav2Lip-specific Python 3.8 venv below
+    python_bin:       "C:/tools/Wav2Lip/venv/Scripts/python.exe"
+    inference_script: "C:/tools/Wav2Lip/inference.py"
+    checkpoint:       "C:/tools/Wav2Lip/checkpoints/wav2lip_gan.pth"
+    resize_factor:    1
+    pad_top:          0
+    pad_bottom:       10
+    pad_left:         0
+    pad_right:        0
+
+  # ── FFmpeg Upscale / Encode ──────────────────────────────────────
+  upscale:
+    enabled:        true
+    # 720x1280 → 1080x1920 (1.5x Lanczos — sharp, fast)
+    # If OOM: set resolution to [512, 896] in config or --resolution 512 896
+    ffmpeg_crf:     18             # 18 = visually lossless; raise to 23 for smaller file
+    ffmpeg_preset:  "slow"         # slow = better compression at same CRF
+
+# ── VRAM Cleanup Protocol ─────────────────────────────────────────────────────
+# These flags are read by main.py's vram_cleanup() utility.
+# Do NOT disable unless you have >20 GB VRAM.
+vram:
+  cleanup_between_phases: true
+  torch_gc_after_each_module: true
+  sleep_after_cleanup_sec: 2
+  comfyui_free_memory_endpoint: "/free"

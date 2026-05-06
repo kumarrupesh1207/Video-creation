@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Video Factory</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./style.css">
+  </head>
+  <body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-icon"></div>
+        <div class="logo-text">
+          <h1>AI Video Factory</h1>
+          <span>Local AI Video Generation System</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <ul>
+          <li class="active"><i></i> Dashboard</li>
+          <li><i></i> New Project</li>
+          <li><i></i> Projects</li>
+          <li><i></i> Templates</li>
+          <li><i></i> Voices</li>
+          <li><i></i> Characters</li>
+          <li><i></i> Settings</li>
+        </ul>
+      </nav>
+
+      <div class="sidebar-section system-status">
+        <h3>SYSTEM STATUS</h3>
+        <div class="status-item">
+          <div class="status-label"><span>GPU</span> <span>42%</span></div>
+          <div class="progress-bar"><div class="fill green" style="width: 42%;"></div></div>
+        </div>
+        <div class="status-item">
+          <div class="status-label"><span>VRAM</span> <span>6.3 / 12 GB</span></div>
+          <div class="progress-bar"><div class="fill purple" style="width: 52%;"></div></div>
+        </div>
+        <div class="status-item">
+          <div class="status-label"><span>RAM</span> <span>11.2 / 32 GB</span></div>
+          <div class="progress-bar"><div class="fill blue" style="width: 35%;"></div></div>
+        </div>
+        <div class="status-item">
+          <div class="status-label"><span>Disk</span> <span>215 / 512 GB</span></div>
+          <div class="progress-bar"><div class="fill yellow" style="width: 42%;"></div></div>
+        </div>
+        <div class="version">Version 1.0.0</div>
+      </div>
+
+      <div class="sidebar-section quick-actions">
+        <h3>QUICK ACTIONS</h3>
+        <div class="action-buttons">
+          <button class="btn btn-outline btn-sm">Pause Job</button>
+          <button class="btn btn-outline btn-sm btn-danger">Stop Job</button>
+          <button class="btn btn-outline btn-sm">View Logs</button>
+          <button class="btn btn-outline btn-sm btn-success">Open Output Folder</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Topbar -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <div class="current-job">
+            <span class="label">Current Job</span>
+            <span class="value">vid_2026_01</span>
+          </div>
+          <div class="status-badge running">
+            <div class="dot"></div> Running
+          </div>
+          <div class="global-progress">
+            <span class="label">Progress</span>
+            <div class="progress-bar"><div class="fill purple" style="width: 66%;"></div></div>
+            <span class="value">66%</span>
+          </div>
+          <div class="elapsed-time">
+            <span class="label">Elapsed Time</span>
+            <span class="value">00:18:42</span>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <button class="btn btn-primary">+ New Project</button>
+          <button class="btn btn-danger-solid">Stop Job</button>
+          <div class="profile-dropdown">
+            <div class="avatar"></div>
+            <span>Admin</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Dashboard Grid -->
+      <div class="dashboard-grid">
+        
+        <!-- Panel 1: Create New Project -->
+        <section class="panel panel-1">
+          <div class="panel-header">
+            <h2>1. CREATE NEW PROJECT</h2>
+          </div>
+          <div class="panel-body">
+            <div class="form-group">
+              <label>Topic / Prompt</label>
+              <textarea placeholder="AI ka future kya hoga in next 5 years?"></textarea>
+              <div class="char-count">38 / 500</div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Content Type</label>
+                <select><option>Talking Head</option></select>
+              </div>
+              <div class="form-group">
+                <label>Duration</label>
+                <select><option>30 Seconds (25-35s)</option></select>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label>Voice</label>
+              <div class="upload-card">
+                <div class="icon voice-icon"></div>
+                <div class="info">
+                  <div class="filename">female_voice_sample.wav</div>
+                  <div class="meta">00:06</div>
+                </div>
+                <button class="icon-btn">↑</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Character Image (Optional)</label>
+              <div class="upload-card">
+                <div class="avatar-thumb"></div>
+                <div class="info">
+                  <div class="filename">character.png</div>
+                  <div class="meta">512 x 768</div>
+                </div>
+                <button class="icon-btn">↑</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Mode</label>
+              <select>
+                <option>Balanced (Recommended) - Good balance between quality and speed</option>
+              </select>
+            </div>
+
+            <button class="btn btn-primary btn-large btn-glow">🚀 Start Generation</button>
+          </div>
+        </section>
+
+        <!-- Panel 2: Pipeline Progress -->
+        <section class="panel panel-2">
+          <div class="panel-header">
+            <h2>2. PIPELINE PROGRESS</h2>
+          </div>
+          <div class="panel-body">
+            <div class="stepper">
+              <div class="step completed">
+                <div class="circle">1</div>
+                <div class="label">Script<br>Generation</div>
+                <div class="icon-box doc-icon"></div>
+                <div class="status-text green">Completed</div>
+                <div class="time">00:00:18</div>
+                <div class="subtext">script.txt</div>
+              </div>
+              <div class="step-connector completed"></div>
+              
+              <div class="step completed">
+                <div class="circle">2</div>
+                <div class="label">Image<br>Generation</div>
+                <div class="icon-box img-icon"></div>
+                <div class="status-text green">Completed</div>
+                <div class="time">00:00:26</div>
+                <div class="subtext">character.png</div>
+                <div class="tool-text">Tool: ComfyUI</div>
+              </div>
+              <div class="step-connector in-progress"></div>
+
+              <div class="step in-progress">
+                <div class="circle">3</div>
+                <div class="label">Video<br>Generation</div>
+                <div class="icon-box video-icon"></div>
+                <div class="status-text blue">In Progress</div>
+                <div class="time">ETA: 00:08:15</div>
+                <div class="subtext">4 / 8 clips done</div>
+                <div class="tool-text">Tool: SVD-XT</div>
+              </div>
+              <div class="step-connector"></div>
+
+              <div class="step">
+                <div class="circle">4</div>
+                <div class="label">Voice<br>Generation</div>
+                <div class="icon-box voice-wave-icon"></div>
+                <div class="status-text gray">Pending</div>
+                <div class="tool-text">Tool: XTTS</div>
+              </div>
+              <div class="step-connector"></div>
+
+              <div class="step">
+                <div class="circle">5</div>
+                <div class="label">Lip Sync</div>
+                <div class="icon-box lip-icon"></div>
+                <div class="status-text gray">Pending</div>
+                <div class="tool-text">Tool: Wav2Lip</div>
+              </div>
+              <div class="step-connector"></div>
+
+              <div class="step">
+                <div class="circle">6</div>
+                <div class="label">Final<br>Export</div>
+                <div class="icon-box export-icon"></div>
+                <div class="status-text gray">Pending</div>
+                <div class="tool-text">Tool: FFmpeg</div>
+              </div>
+            </div>
+
+            <div class="mini-logs">
+              <div class="log-line"><span class="time">10:17:58</span> <span class="tag video">[VIDEO]</span> Generating clip 2/8...</div>
+              <div class="log-line"><span class="time">10:18:18</span> <span class="tag video">[VIDEO]</span> Clip 1 completed</div>
+              <button class="btn btn-outline btn-sm float-right">View Full Logs</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Panel 3: Video Preview -->
+        <section class="panel panel-3">
+          <div class="panel-header">
+            <h2>3. VIDEO PREVIEW <span class="dim">(LATEST CLIP)</span></h2>
+            <span class="badge">Clip 2 / 8</span>
+          </div>
+          <div class="panel-body preview-container">
+            <div class="video-player">
+              <div class="video-placeholder">
+                <!-- Fallback gradient if no video -->
+              </div>
+              <div class="player-controls">
+                <button class="play-btn">▶</button>
+                <div class="progress-bar"><div class="fill purple" style="width: 50%;"></div></div>
+                <span class="time">00:02 / 00:04</span>
+                <button class="vol-btn">🔊</button>
+                <button class="fs-btn">⛶</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Panel 4: Job Details -->
+        <section class="panel panel-4">
+          <div class="panel-header">
+            <h2>4. JOB DETAILS</h2>
+          </div>
+          <div class="panel-body">
+            <table class="details-table">
+              <tr><td>Job ID</td><td>vid_2026_01</td></tr>
+              <tr><td>Created At</td><td>22 May 2025, 10:15 AM</td></tr>
+              <tr><td>Started At</td><td>22 May 2025, 10:16 AM</td></tr>
+              <tr><td>Duration (Target)</td><td>30 seconds</td></tr>
+              <tr><td>Resolution</td><td>1080 x 1920 (9:16)</td></tr>
+              <tr><td>Status</td><td><span class="badge green">Running</span></td></tr>
+              <tr><td>Priority</td><td><span class="badge purple">Normal</span></td></tr>
+            </table>
+          </div>
+        </section>
+
+        <!-- Panel 5: Live Logs -->
+        <section class="panel panel-5">
+          <div class="panel-header">
+            <h2>5. LIVE LOGS</h2>
+            <button class="btn btn-outline btn-xs">Clear</button>
+          </div>
+          <div class="panel-body terminal">
+            <div class="log-line"><span class="time">10:16:12</span> <span class="tag script">[SCRIPT]</span> Generating script using Ollama...</div>
+            <div class="log-line"><span class="time">10:16:30</span> <span class="tag success">[SCRIPT]</span> Script generated successfully</div>
+            <div class="log-line"><span class="time">10:16:31</span> <span class="tag image">[IMAGE]</span> Sending request to ComfyUI...</div>
+            <div class="log-line"><span class="time">10:16:57</span> <span class="tag success">[IMAGE]</span> Image generated successfully</div>
+            <div class="log-line"><span class="time">10:17:05</span> <span class="tag video">[VIDEO]</span> Initializing SVD-XT pipeline...</div>
+            <div class="log-line"><span class="time">10:17:25</span> <span class="tag video">[VIDEO]</span> Generating clip 1/8 ...</div>
+            <div class="log-line"><span class="time">10:17:58</span> <span class="tag video">[VIDEO]</span> Clip 1 completed</div>
+            <div class="log-line active"><span class="time">10:18:03</span> <span class="tag video">[VIDEO]</span> Generating clip 2/8 ... <span class="cursor">█</span></div>
+          </div>
+        </section>
+
+        <!-- Panel 6: Outputs -->
+        <section class="panel panel-6">
+          <div class="panel-header">
+            <h2>6. OUTPUTS</h2>
+            <button class="btn btn-outline btn-xs">Open Output Folder</button>
+          </div>
+          <div class="panel-body outputs-grid">
+            <div class="output-group">
+              <h4>Generated Image</h4>
+              <div class="output-card image">
+                <div class="thumb avatar-thumb"></div>
+                <div class="label">character.png<br>512 x 768</div>
+              </div>
+            </div>
+            <div class="output-group">
+              <h4>Video Clips (4 / 8)</h4>
+              <div class="clips-row">
+                <div class="output-card clip"><div class="thumb"></div><div class="label">clip_01.mp4</div></div>
+                <div class="output-card clip active"><div class="thumb"></div><div class="label">clip_02.mp4</div></div>
+                <div class="output-card clip"><div class="thumb"></div><div class="label">clip_03.mp4</div></div>
+                <div class="output-card clip"><div class="thumb"></div><div class="label">clip_04.mp4</div></div>
+                <div class="more-box">+4<br>more</div>
+              </div>
+            </div>
+            <div class="output-row">
+              <div class="output-group inline">
+                <h4>Voiceover</h4>
+                <div class="output-card audio"><div class="wave-icon"></div><div class="label">voice.wav<br>00:30</div></div>
+              </div>
+              <div class="output-group inline">
+                <h4>Lip Synced Clips</h4>
+                <div class="clips-row">
+                  <div class="output-card audio"><div class="wave-icon"></div><div class="label">synced_01.mp4</div></div>
+                  <div class="output-card audio"><div class="wave-icon"></div><div class="label">synced_02.mp4</div></div>
+                  <div class="more-box mini">+6<br>more</div>
+                </div>
+              </div>
+              <div class="output-group inline end">
+                <h4>Final Video</h4>
+                <div class="output-card empty-final">
+                  Not ready
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+    <script src="./main.js" type="module"></script>
+  </body>
+</html>
