@@ -1,0 +1,37 @@
+{
+  "ledger_name": "goku_vs_saitama_climax_60s",
+  "target_resolution": "1080x1920",
+  "fps": 24,
+  "total_frames": 1440,
+  "duration_secs": 60,
+  "seed": 9001,
+  "visual_complexity": "high action",
+  "motion_mode": "full_i2v_motion",
+  "global_character_specs": {
+    "goku": "Mastered Ultra Instinct form, spiky glowing silver-white hair, intense metallic silver eyes, bare muscular torso with fine battle scratches, glowing fluid neon-blue cosmic fire aura with drifting violet plasma particles, highly detailed modern cinematic anime style.",
+    "saitama": "Serious Mode Saitama, flawless bald head reflecting high-contrast environment rim lighting, hyper-defined intense facial lines, sharp black pupils, yellow hero suit, dark red gloves, stark white cape billowing and reacting violently to intense aerodynamic drag."
+  },
+  "segments": [
+    {
+      "segment_id": 1,
+      "frame_start": 0,
+      "frame_end": 359,
+      "duration_secs": 15,
+      "prompt": "Hyper-speed continuous 360-degree orbital tracking shot of Mastered Ultra Instinct Goku fighting Serious Mode Saitama in a crumbling post-apocalyptic canyon under a dark violet twilight sky. Saitama unleashing a barrage of continuous 'Consecutive Normal Punches' directly at the camera. Goku utilizing flawless Ultra Instinct dodging, his body blurring into silver micro-teleportation frames, cleanly weaving between massive shockwave-inducing fist silhouettes. Canyon walls shattering into zero-gravity floating boulders, extreme kinetic motion, high-contrast dynamic cel-shading, Ufotable animation style."
+    },
+    {
+      "segment_id": 2,
+      "frame_start": 360,
+      "frame_end": 839,
+      "duration_secs": 20,
+      "prompt": "Extreme wide-angle master shot transitioning to a tight downward high-angle crane shot. Mastered Ultra Instinct Goku and Serious Saitama tearing through the Earth's atmosphere into low Earth orbit with the blue curvature of the planet visible against a pitch-black cosmic vacuum. Goku charging a massive, blinding blue-white plasma energy Kamehameha wave between his palms, casting intense blue rim lighting. Saitama drawing back his red glove for a 'Serious Punch', space-time visibly warping and bending around his fist in a localized gravitational lens effect. Absolute kinetic explosion, blinding light flashes, massive expanding white kinetic energy rings splitting the planetary clouds below."
+    },
+    {
+      "segment_id": 3,
+      "frame_start": 840,
+      "frame_end": 1439,
+      "duration_secs": 25,
+      "prompt": "The ultimate martial arts climax in a void of fractured conceptual reality. Rapid-fire sequence of high-velocity whip-pans and handheld camera shake emulation. Extreme close-up macro shots of Goku's intense silver eyes intercut with Saitama's hyper-defined serious expression. Goku delivering precision silver-streaked fluid strikes countered by Saitama's reality-shattering shockwaves. Every punch impact creates a single-frame inverted black-and-white color flash. Goku’s neon-blue cosmic aura and Saitama's white cape intertwining into a hyper-stylized spiral of pure kinetic force. Final frame is a dramatic split-screen profile view of both fists colliding dead-center, freezing the frame as a massive spherical shockwave shatters the virtual camera lens into a grid of clean stylized cracks."
+    }
+  ]
+}

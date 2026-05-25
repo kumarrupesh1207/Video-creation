@@ -1,0 +1,1 @@
+"""Aurora motion provider switchboard."""
