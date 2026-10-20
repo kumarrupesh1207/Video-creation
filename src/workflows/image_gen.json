@@ -2,16 +2,16 @@
   "3": {
     "class_type": "KSampler",
     "inputs": {
-      "cfg": 7,
+      "cfg": 8.0,
       "denoise": 1,
       "latent_image": ["5", 0],
       "model": ["4", 0],
       "negative": ["7", 0],
       "positive": ["6", 0],
-      "sampler_name": "euler",
-      "scheduler": "normal",
+      "sampler_name": "uni_pc",
+      "scheduler": "karras",
       "seed": 42,
-      "steps": 20
+      "steps": 15
     }
   },
   "4": {
@@ -39,7 +39,7 @@
     "class_type": "CLIPTextEncode",
     "inputs": {
       "clip": ["4", 1],
-      "text": "text, watermark, low quality, blurry, deformed, bad anatomy, (worst quality, low quality:1.4)"
+      "text": "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name, realistic, 3d, photorealistic"
     }
   },
   "8": {
@@ -49,10 +49,14 @@
     }
   },
   "9": {
-    "class_type": "VAEDecode",
+    "class_type": "VAEDecodeTiled",
     "inputs": {
       "samples": ["3", 0],
-      "vae": ["8", 0]
+      "vae": ["8", 0],
+      "tile_size": 512,
+      "overlap": 64,
+      "temporal_size": 64,
+      "temporal_overlap": 8
     }
   },
   "10": {

@@ -66,6 +66,8 @@ class ComfyOrchestrator:
                      Default 900s (15 min) — covers CPU-mode SD 1.5 generation.
                      For GPU: typically 30-120s per image.
         """
+        if Path(workflow_path).name == "image_gen.json":
+            timeout = max(timeout, 3600)
         return self._execute(workflow_path, overrides, timeout)
 
     # Alias for backward compat
@@ -123,10 +125,13 @@ class ComfyOrchestrator:
             return False
 
         cmd = launcher_cmd if isinstance(launcher_cmd, list) else [str(launcher_cmd)]
+        launch_dir = Path(launcher_dir)
+        if cmd and not Path(cmd[0]).is_absolute():
+            cmd = [str(launch_dir / cmd[0]), *cmd[1:]]
         try:
             subprocess.Popen(
                 cmd,
-                cwd=launcher_dir,
+                cwd=str(launch_dir),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
@@ -284,6 +289,7 @@ class ComfyOrchestrator:
                     node = data.get("node")
                     pid  = data.get("prompt_id", "")
                     if node is None and pid == prompt_id:
+                        self._wait_for_history_terminal(prompt_id, deadline)
                         print("\n[ComfyUI] ✅ Execution complete.")
                         return
                     elif node:
@@ -291,9 +297,7 @@ class ComfyOrchestrator:
                               end="", flush=True)
 
                 elif mtype in ("execution_error", "execution_interrupted"):
-                    raise RuntimeError(
-                        f"[ComfyUI] ❌ Execution failed ({mtype}): {data}"
-                    )
+                    self._wait_for_history_terminal(prompt_id, deadline, expected_failure=mtype)
 
             raise TimeoutError(
                 f"[ComfyUI] ❌ Timed out after {timeout}s.\n"
@@ -310,27 +314,45 @@ class ComfyOrchestrator:
     def _poll_until_done(self, prompt_id: str, timeout: int = 900) -> None:
         """Fallback: poll /history until the prompt appears (CPU-safe)."""
         deadline = time.time() + timeout
-        dot = 0
         print(f"[ComfyUI] Polling for completion (up to {timeout}s)...")
+        self._wait_for_history_terminal(prompt_id, deadline)
+        print(f"\n[ComfyUI] ✅ Poll: prompt done.")
+
+    def _wait_for_history_terminal(self, prompt_id: str, deadline: float,
+                                   expected_failure: str = None) -> None:
+        """Poll /history until the prompt reaches a terminal success/failure state."""
         while time.time() < deadline:
             try:
-                resp = requests.get(
-                    f"{self.api_url}/history/{prompt_id}", timeout=5)
+                resp = requests.get(f"{self.api_url}/history/{prompt_id}", timeout=5)
                 if resp.status_code == 200:
                     history = resp.json()
                     if prompt_id in history:
-                        status = history[prompt_id].get("status", {})
+                        prompt_state = history[prompt_id]
+                        status = prompt_state.get("status", {})
                         if status.get("completed"):
-                            print(f"\n[ComfyUI] ✅ Poll: prompt done.")
                             return
+
+                        status_str = str(status.get("status_str", "")).lower()
+                        messages = status.get("messages") or prompt_state.get("messages") or []
+                        interrupted = expected_failure == "execution_interrupted"
+                        errored = expected_failure == "execution_error"
+                        if status_str in {"error", "failed", "interrupted"} or interrupted or errored:
+                            raise RuntimeError(
+                                f"[ComfyUI] ❌ Execution failed ({expected_failure or status_str or 'history'}): "
+                                f"{status or prompt_state}"
+                            )
+            except RuntimeError:
+                raise
             except Exception:
                 pass
-            elapsed = int(time.time() - (deadline - timeout))
-            print(f"\r  Waiting... {elapsed}s / {timeout}s   ", end="", flush=True)
-            dot += 1
+
+            elapsed = int(time.time() - (deadline - 1 if deadline <= time.time() else 0))
+            print(f"\r  Waiting for history... {int(max(0, deadline - time.time()))}s left   ",
+                  end="", flush=True)
             time.sleep(3)
+
         raise TimeoutError(
-            f"[ComfyUI] Prompt {prompt_id[:8]} did not complete in {timeout}s\n"
+            f"[ComfyUI] Prompt {prompt_id[:8]} did not reach a terminal /history state in time\n"
             f"  → Increase timeout or reduce --frames / --resolution"
         )
 
@@ -391,6 +413,13 @@ class ComfyOrchestrator:
         print(f"\n[ComfyUI] Loading workflow: {workflow_path}")
         workflow  = self._load_workflow(workflow_path)
         workflow  = self._apply_overrides(workflow, overrides or {})
+        sampler_cfg = workflow.get("3", {}).get("inputs", {})
+        if workflow_path.endswith("image_gen.json") and sampler_cfg:
+            print("[ComfyUI] Image workflow sampler settings: "
+                  f"steps={sampler_cfg.get('steps')} | "
+                  f"cfg={sampler_cfg.get('cfg')} | "
+                  f"sampler={sampler_cfg.get('sampler_name')} | "
+                  f"scheduler={sampler_cfg.get('scheduler')}")
         prompt_id = self._post_prompt(workflow)
         self._wait_for_completion(prompt_id, timeout)
         outputs   = self._fetch_outputs(prompt_id)

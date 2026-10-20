@@ -27,6 +27,65 @@ paths:
   wav2lip_root:     "C:/tools/Wav2Lip"
   ffmpeg_bin:       "C:/Rupesh/App/ffmpeg/bin/ffmpeg.exe"
 
+assets:
+  reuse_existing_asset: true
+
+motion:
+  liveportrait:
+    enabled: true
+    request_dir: "outputs/liveportrait_requests"
+    response_dir: "outputs/liveportrait_responses"
+    archive_dir: "outputs/liveportrait_archived_requests"
+    aurora_log: "aurora.jsonl"
+    wait_for_remote_response_sec: 120
+  i2v:
+    enabled: true
+    request_dir: "outputs/i2v_requests"
+    response_dir: "outputs/i2v_responses"
+    archive_dir: "outputs/i2v_archived_requests"
+    aurora_log: "aurora.jsonl"
+    wait_for_remote_response_sec: 120
+    min_vram_mb: 8192
+    recommended_vram_mb: 12288
+    framepack_high_fidelity_vram_mb: 24576
+    svdxt:
+      model_id: "stabilityai/stable-video-diffusion-img2vid-xt"
+      width: 576
+      height: 1024
+      num_frames: 25
+      fps: 5
+      motion_bucket_id: 127
+      decode_chunk_size: 4
+      noise_aug_strength: 0.08
+      num_inference_steps: 25
+    framepack:
+      repo_dir: ""
+      python_bin: "python"
+      entry_script: "inference.py"
+      driver_video: ""
+      output_dir: "outputs/framepack_worker_runs"
+    wan2gp:
+      runtime_cmd: ""
+      output_dir: "outputs/wan2gp_worker_runs"
+
+providers:
+  default: "nvidia_nim"
+  fallback_order: ["nvidia_nim", "local_comfyui", "manual_upload"]
+  nvidia_nim:
+    enabled: true
+    base_url: "https://ai.api.nvidia.com/v1/genai/"
+    endpoint_mode: "direct_model"
+    credit_cost: 1.0
+    models:
+      anime: "black-forest-labs/flux.2-klein-4b"
+      cinematic: "black-forest-labs/flux.2-klein-4b"
+    timeout: 60
+    quota: 80
+  local_comfyui:
+    negative_prompt: "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name, realistic, 3d, photorealistic"
+  manual_upload:
+    enabled: true
+
 models:
 
   # ── LLM (CPU / RAM only — no VRAM) ─────────────────────────────────────

@@ -105,7 +105,7 @@
           <div class="panel-body">
             <div class="form-group">
               <label>Topic / Prompt</label>
-              <textarea placeholder="AI ka future kya hoga in next 5 years?"></textarea>
+              <textarea placeholder="One topic per line&#10;Vegeta's Pride, cinematic anime&#10;Eren Yeager Freedom, cinematic anime"></textarea>
               <div class="char-count">38 / 500</div>
             </div>
             <div class="form-row">
@@ -145,8 +145,9 @@
 
             <div class="form-group">
               <label>Mode</label>
-              <select>
-                <option>Balanced (Recommended) - Good balance between quality and speed</option>
+              <select id="mode-select">
+                <option value="cinematic">Cinematic (Fast/Stable)</option>
+                <option value="animated">Animated (Experimental)</option>
               </select>
             </div>
 
@@ -236,6 +237,7 @@
           </div>
           <div class="panel-body preview-container">
             <div class="video-player">
+              <video class="preview-video" playsinline controls preload="metadata" style="display:none;"></video>
               <div class="video-placeholder">
                 <!-- Fallback gradient if no video -->
               </div>

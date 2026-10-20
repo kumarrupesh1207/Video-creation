@@ -5,5 +5,5 @@ from .video_engine       import VideoEngine
 from .audio_engine       import AudioEngine
 from .lipsync_processor  import LipSyncProcessor
 from .media_assembler    import MediaAssembler
+from .motion_engine      import MotionEngine
 from .pipeline_logger    import PipelineLogger
-

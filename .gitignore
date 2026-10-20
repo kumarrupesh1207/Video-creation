@@ -11,3 +11,9 @@ ui/dist/
 .env
 .env.*
 !.env.example
+
+# runtime logs / test temp
+logs/
+aurora.jsonl
+.test_tmp/
+.pytest_cache/

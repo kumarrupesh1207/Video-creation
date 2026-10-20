@@ -4,10 +4,16 @@ import os
 import threading
 import queue
 import time
+import json
+import shutil
+import yaml
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from pathlib import Path
+from datetime import datetime
 
 app = FastAPI()
 
@@ -22,13 +28,19 @@ app.add_middleware(
 _active_process: subprocess.Popen = None
 _log_queue: queue.Queue = queue.Queue(maxsize=500)
 _pipeline_phase = {"current": 0, "label": "Idle", "progress": 0}
+_batch_thread: threading.Thread = None
+_batch_running = False
+_batch_stop_requested = False
 
 PHASE_MAP = {
     "script_gen":  (1, "Script Generation"),
     "image_gen":   (2, "Image Generation"),
     "video_gen":   (3, "Video Generation"),
+    "talking_motion_gen": (3, "Talking Motion"),
+    "full_i2v_motion_gen": (3, "Full Motion"),
     "audio_gen":   (4, "Voice Generation"),
     "lipsync":     (5, "Lip Sync"),
+    "final_assembly": (6, "Final Export"),
     "assembler":   (6, "Final Export"),
 }
 
@@ -45,20 +57,353 @@ def _parse_phase(line: str):
         _pipeline_phase["progress"] = 100 if "Complete" in line else _pipeline_phase["progress"]
         _pipeline_phase["label"] = "Done" if "Complete" in line else "Failed"
 
+def _push_log_line(line: str):
+    """Append one log line to the in-memory stream buffer."""
+    _parse_phase(line)
+    try:
+        _log_queue.put_nowait(line)
+    except queue.Full:
+        _log_queue.get_nowait()
+        _log_queue.put_nowait(line)
+
+
 def _stream_process_output(proc: subprocess.Popen):
     """Background thread: reads stdout from main.py and puts lines into the queue."""
-    global _active_process
+    global _active_process, _batch_running
     for raw in proc.stdout:
-        line = raw.rstrip()
-        _parse_phase(line)
-        try:
-            _log_queue.put_nowait(line)
-        except queue.Full:
-            _log_queue.get_nowait()  # drop oldest
-            _log_queue.put_nowait(line)
+        _push_log_line(raw.rstrip())
     proc.wait()
-    _log_queue.put_nowait("[SERVER] Process finished.")
+    _push_log_line("[SERVER] Process finished.")
     _active_process = None
+    _batch_running = False
+    _pipeline_phase.update({"current": 0, "label": "Idle", "progress": 0})
+
+
+def _batch_log_path() -> Path:
+    return _output_root() / "batch_log.json"
+
+
+def _pipeline_log_path() -> Path:
+    return Path(os.getcwd()) / "outputs" / "log.json"
+
+
+def _output_root() -> Path:
+    return Path(os.getcwd()) / "outputs"
+
+
+def _load_config() -> dict:
+    cfg_path = Path(os.getcwd()) / "config.yaml"
+    if not cfg_path.exists():
+        return {}
+    return yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+
+
+def _manifest_path() -> Path:
+    return Path(os.getcwd()) / "assets" / "images" / "manifest.json"
+
+
+def _load_manifest() -> list[dict]:
+    manifest_path = _manifest_path()
+    if not manifest_path.exists():
+        return []
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _latest_job() -> dict:
+    jobs = _collect_jobs()
+    return jobs[0] if jobs else {}
+
+
+def _ffprobe_path() -> str:
+    cfg = _load_config()
+    ffmpeg_bin = cfg.get("paths", {}).get("ffmpeg_bin", "ffmpeg")
+    ffprobe_candidate = Path(ffmpeg_bin).with_name("ffprobe.exe")
+    if ffprobe_candidate.exists():
+        return str(ffprobe_candidate)
+    return "ffprobe"
+
+
+def _probe_video(path: str | None) -> dict:
+    if not path:
+        return {"playable": False, "width": None, "height": None}
+    target = Path(path)
+    if not target.exists():
+        return {"playable": False, "width": None, "height": None}
+    ffprobe = _ffprobe_path()
+    try:
+        result = subprocess.run(
+            [
+                ffprobe, "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height",
+                "-of", "csv=p=0:s=x",
+                str(target),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return {"playable": False, "width": None, "height": None}
+        width, height = result.stdout.strip().split("x")
+        return {"playable": True, "width": int(width), "height": int(height)}
+    except Exception:
+        return {"playable": False, "width": None, "height": None}
+
+
+def _probe_audio_video_streams(path: str | None) -> dict:
+    if not path:
+        return {"audio_stream_present": False, "video_duration_sec": None, "audio_duration_sec": None}
+    target = Path(path)
+    if not target.exists():
+        return {"audio_stream_present": False, "video_duration_sec": None, "audio_duration_sec": None}
+    try:
+        result = subprocess.run(
+            [
+                _ffprobe_path(), "-v", "error",
+                "-show_entries", "stream=codec_type,duration",
+                "-of", "json",
+                str(target),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return {"audio_stream_present": False, "video_duration_sec": None, "audio_duration_sec": None}
+        payload = json.loads(result.stdout or "{}")
+        streams = payload.get("streams", [])
+        video = next((float(s.get("duration")) for s in streams if s.get("codec_type") == "video" and s.get("duration")), None)
+        audio = next((float(s.get("duration")) for s in streams if s.get("codec_type") == "audio" and s.get("duration")), None)
+        return {
+            "audio_stream_present": audio is not None,
+            "video_duration_sec": video,
+            "audio_duration_sec": audio,
+        }
+    except Exception:
+        return {"audio_stream_present": False, "video_duration_sec": None, "audio_duration_sec": None}
+
+
+def _quality_check(final_output: str | None) -> dict:
+    probe = _probe_video(final_output)
+    av = _probe_audio_video_streams(final_output)
+    delta = (
+        abs(av["video_duration_sec"] - av["audio_duration_sec"])
+        if av["video_duration_sec"] is not None and av["audio_duration_sec"] is not None
+        else None
+    )
+    fr010 = bool(probe["playable"] and probe["width"] == 1080 and probe["height"] == 1920)
+    fr011 = bool(av["audio_stream_present"] and delta is not None and delta <= 0.1)
+    return {
+        "passed": fr010 and fr011,
+        "label": "FR-010/011 Pass" if fr010 and fr011 else "Needs Review",
+        "fr010_passed": fr010,
+        "fr011_passed": fr011,
+        "audio_duration_delta_sec": delta,
+        **probe,
+        **av,
+    }
+
+
+def _collect_jobs() -> list[dict]:
+    jobs = []
+    for job_json in sorted(_output_root().glob("*/logs/job.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(job_json.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        quality = _quality_check(data.get("final_output"))
+        g12_check = data.get("g12_check") or {}
+        if g12_check.get("checked") and not g12_check.get("passed", False):
+            quality["passed"] = False
+            quality["label"] = "Needs Review"
+        quality["g12_passed"] = g12_check.get("passed")
+        data["quality_check"] = quality
+        events = data.get("events", [])
+        data["using_cached_asset"] = any(evt.get("event") == "asset_cache_hit" for evt in events)
+        jobs.append(data)
+    return jobs
+
+
+def _cache_hit_count(jobs: list[dict] | None = None) -> int:
+    items = jobs or _collect_jobs()
+    return sum(1 for job in items if job.get("using_cached_asset"))
+
+
+def _credit_cost_per_image() -> float:
+    cfg = _load_config()
+    return float(cfg.get("providers", {}).get("nvidia_nim", {}).get("credit_cost", 1.0))
+
+
+def _batch_progress_payload(batch_state: dict) -> dict:
+    items = batch_state.get("items", [])
+    if not items:
+        return {**batch_state, "aggregate_progress_percent": 0}
+
+    latest_job = _latest_job()
+    running_progress = int(latest_job.get("progress_percent", _pipeline_phase.get("progress", 0)) or 0)
+    total = 0
+    running_assigned = False
+    for item in items:
+        status = item.get("status")
+        if status in {"success", "failed"}:
+            total += 100
+        elif status == "running" and not running_assigned:
+            total += running_progress
+            running_assigned = True
+    return {
+        **batch_state,
+        "aggregate_progress_percent": int(total / max(len(items), 1)),
+    }
+
+
+def _write_batch_log(batch_state: dict):
+    log_path = _batch_log_path()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(json.dumps(batch_state, indent=2), encoding="utf-8")
+
+
+def _build_child_command(req: "StartJobRequest", topic: str) -> list:
+    cmd = [
+        "python", "-u", "main.py",
+        "--topic", topic,
+        "--mode", req.mode,
+        "--motion-mode", req.motion_mode,
+        "--visual-complexity", req.visual_complexity,
+        "--frames", str(req.frames),
+        "--timeout", "2700",
+    ]
+    if req.preset:
+        cmd.extend(["--preset", req.preset])
+    if req.skip_upscale:
+        cmd.append("--skip-upscale")
+    if req.skip_lipsync:
+        cmd.append("--skip-lipsync")
+    if req.force_new_image:
+        cmd.append("--force-new-image")
+    if req.narration_audio_path:
+        cmd.extend(["--audio-narration-path", req.narration_audio_path])
+    if req.identity_lock:
+        cmd.append("--identity-lock")
+    if req.width and req.height:
+        cmd.extend(["--resolution", str(req.width), str(req.height)])
+    return cmd
+
+
+def _build_asset_child_command(req: "StartJobRequest") -> list:
+    cmd = [
+        "python", "-u", "scripts/render_from_asset.py",
+        "--asset-key", req.asset_key,
+        "--topic", (req.topic or ""),
+        "--mode", req.mode,
+        "--motion-mode", req.motion_mode,
+        "--visual-complexity", req.visual_complexity,
+        "--config", "config.yaml",
+    ]
+    if req.narration_audio_path:
+        cmd.extend(["--audio-narration-path", req.narration_audio_path])
+    if req.identity_lock:
+        cmd.append("--identity-lock")
+    return cmd
+
+
+def _run_batch(req: "StartJobRequest", topics: list[str]):
+    """Sequentially process each topic and maintain a batch-level log file."""
+    global _active_process, _batch_running, _batch_stop_requested
+
+    child_env = os.environ.copy()
+    child_env["PYTHONIOENCODING"] = "utf-8"
+    child_env["PYTHONUTF8"] = "1"
+
+    batch_state = {
+        "session_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+        "mode": req.mode,
+        "started_at": datetime.now().isoformat(timespec="seconds"),
+        "status": "running",
+        "items": [
+            {
+                "topic": topic,
+                "status": "pending",
+                "started_at": None,
+                "completed_at": None,
+                "final_output": None,
+                "error": None,
+            }
+            for topic in topics
+        ],
+    }
+    _write_batch_log(batch_state)
+
+    try:
+        for idx, topic in enumerate(topics, start=1):
+            if _batch_stop_requested:
+                break
+
+            _pipeline_phase.update({"current": 0, "label": f"Batch {idx}/{len(topics)}", "progress": 0})
+            batch_state["items"][idx - 1]["status"] = "running"
+            batch_state["items"][idx - 1]["started_at"] = datetime.now().isoformat(timespec="seconds")
+            _write_batch_log(batch_state)
+
+            _push_log_line(f"[Batch] ▶ Item {idx}/{len(topics)}: {topic}")
+            cmd = _build_child_command(req, topic)
+            proc = subprocess.Popen(
+                cmd,
+                cwd=os.getcwd(),
+                env=child_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+            _active_process = proc
+
+            for raw in proc.stdout:
+                _push_log_line(raw.rstrip())
+            proc.wait()
+            _active_process = None
+            _push_log_line(f"[SERVER] Process finished for batch item {idx}/{len(topics)}.")
+
+            child_log = {}
+            try:
+                child_log = json.loads(_pipeline_log_path().read_text(encoding="utf-8"))
+            except Exception:
+                child_log = {}
+
+            item = batch_state["items"][idx - 1]
+            item["completed_at"] = datetime.now().isoformat(timespec="seconds")
+            item["final_output"] = child_log.get("final_output")
+            if proc.returncode == 0:
+                item["status"] = "success"
+                _push_log_line(f"[Batch] ✅ Item {idx}/{len(topics)} complete.")
+            else:
+                item["status"] = "failed"
+                item["error"] = child_log.get("steps", {}).get("image_gen", {}).get("error") or \
+                                child_log.get("steps", {}).get("talking_motion_gen", {}).get("error") or \
+                                child_log.get("steps", {}).get("full_i2v_motion_gen", {}).get("error") or \
+                                child_log.get("steps", {}).get("video_gen", {}).get("error") or \
+                                child_log.get("steps", {}).get("audio_gen", {}).get("error") or \
+                                child_log.get("steps", {}).get("script_gen", {}).get("error") or \
+                                "Pipeline failed"
+                _push_log_line(f"[Batch] ❌ Item {idx}/{len(topics)} failed: {item['error']}")
+            _write_batch_log(batch_state)
+
+        completed = all(item["status"] == "success" for item in batch_state["items"])
+        stopped = _batch_stop_requested
+        batch_state["status"] = "stopped" if stopped else ("success" if completed else "completed_with_errors")
+        batch_state["completed_at"] = datetime.now().isoformat(timespec="seconds")
+        _write_batch_log(batch_state)
+    finally:
+        _batch_running = False
+        _batch_stop_requested = False
+        _active_process = None
+        _pipeline_phase.update({"current": 0, "label": "Idle", "progress": 0})
+        _push_log_line("[SERVER] Batch finished.")
 
 
 # ─── Process Discovery (for pause/stop on externally launched jobs) ──────────
@@ -91,36 +436,38 @@ def get_active_job_process():
 # ─── API Endpoints ────────────────────────────────────────────
 
 class StartJobRequest(BaseModel):
-    topic: str
+    topics: list[str] = Field(default_factory=list)
+    topic: str | None = None
+    asset_key: str | None = None
+    mode: str = "cinematic"
+    motion_mode: str = "static_cinematic"
+    visual_complexity: str = "standard"
     preset: str = ""
     frames: int = 1
+    width: int | None = None
+    height: int | None = None
     skip_upscale: bool = True
     skip_lipsync: bool = True
+    force_new_image: bool = False
+    reuse_existing_asset: bool = True
+    narration_audio_path: str | None = None
+    identity_lock: bool = False
 
-@app.post("/api/start")
-def start_job(req: StartJobRequest):
-    global _active_process
-    if _active_process and _active_process.poll() is None:
+def _start_job_impl(req: StartJobRequest):
+    global _active_process, _batch_thread, _batch_running, _batch_stop_requested
+    if _batch_running or (_active_process and _active_process.poll() is None):
         return {"status": "error", "message": "A job is already running. Please stop it first."}
     if get_active_job_process():
         return {"status": "error", "message": "An external job is running. Please stop it first."}
 
-    cmd = [
-        "python", "-u", "main.py",
-        "--topic", req.topic,
-        "--frames", str(req.frames),
-        "--timeout", "2700",
-    ]
-    if req.preset:
-        cmd.extend(["--preset", req.preset])
-    if req.skip_upscale:
-        cmd.append("--skip-upscale")
-    if req.skip_lipsync:
-        cmd.append("--skip-lipsync")
-
-    child_env = os.environ.copy()
-    child_env["PYTHONIOENCODING"] = "utf-8"
-    child_env["PYTHONUTF8"] = "1"
+    if req.asset_key:
+        topics = []
+    else:
+        topics = [topic.strip() for topic in (req.topics or []) if topic.strip()]
+        if req.topic and req.topic.strip():
+            topics.insert(0, req.topic.strip())
+        if not topics:
+            return {"status": "error", "message": "Provide at least one topic."}
 
     # Reset state
     _pipeline_phase.update({"current": 0, "label": "Starting...", "progress": 0})
@@ -129,22 +476,171 @@ def start_job(req: StartJobRequest):
         except: break
 
     try:
-        _active_process = subprocess.Popen(
-            cmd,
-            cwd=os.getcwd(),
-            env=child_env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-        )
-        t = threading.Thread(target=_stream_process_output, args=(_active_process,), daemon=True)
-        t.start()
-        return {"status": "success", "message": "Job started.", "pid": _active_process.pid}
+        _batch_running = True
+        _batch_stop_requested = False
+        if req.asset_key:
+            _write_batch_log({"status": "idle", "items": [], "aggregate_progress_percent": 0})
+            child_env = os.environ.copy()
+            child_env["PYTHONIOENCODING"] = "utf-8"
+            child_env["PYTHONUTF8"] = "1"
+            cmd = _build_asset_child_command(req)
+            _active_process = subprocess.Popen(
+                cmd,
+                cwd=os.getcwd(),
+                env=child_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+            threading.Thread(target=_stream_process_output, args=(_active_process,), daemon=True).start()
+            return {
+                "status": "success",
+                "message": "Asset-based job started.",
+                "asset_key": req.asset_key,
+                "mode": req.mode,
+            }
+        _batch_thread = threading.Thread(target=_run_batch, args=(req, topics), daemon=True)
+        _batch_thread.start()
+        return {
+            "status": "success",
+            "message": "Batch started.",
+            "batch_size": len(topics),
+            "mode": req.mode,
+        }
     except Exception as e:
+        _batch_running = False
         return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/start")
+def start_job(req: StartJobRequest):
+    return _start_job_impl(req)
+
+
+@app.post("/api/jobs")
+def create_job(req: StartJobRequest):
+    return _start_job_impl(req)
+
+
+@app.get("/api/jobs")
+def list_jobs():
+    return {"items": _collect_jobs()}
+
+
+@app.get("/api/batch")
+def batch_status():
+    log_path = _batch_log_path()
+    if not log_path.exists():
+        return {"status": "idle", "items": [], "aggregate_progress_percent": 0}
+    try:
+        return _batch_progress_payload(json.loads(log_path.read_text(encoding="utf-8")))
+    except json.JSONDecodeError:
+        return {"status": "unknown", "items": [], "aggregate_progress_percent": 0}
+
+
+@app.get("/api/jobs/{job_id}")
+def get_job(job_id: str):
+    job_path = _output_root() / job_id / "logs" / "job.json"
+    if not job_path.exists():
+        return {"status": "error", "message": "Job not found."}
+    data = json.loads(job_path.read_text(encoding="utf-8"))
+    data["quality_check"] = _quality_check(data.get("final_output"))
+    return data
+
+
+@app.get("/api/providers/status")
+def provider_status():
+    cfg = _load_config()
+    providers_cfg = cfg.get("providers", {})
+    manifest = _load_manifest()
+    manifest_count = len(manifest)
+    nim_enabled = providers_cfg.get("nvidia_nim", {}).get("enabled", False)
+    quota_limit = providers_cfg.get("nvidia_nim", {}).get("quota", 0)
+    jobs = _collect_jobs()
+    cache_hits = _cache_hit_count(jobs)
+    credit_cost = _credit_cost_per_image()
+    return {
+        "backend": {
+            "online": True,
+            "api_base": "http://127.0.0.1:8000",
+        },
+        "nvidia_nim": {
+            "enabled": nim_enabled,
+            "api_key_present": bool(os.getenv("NVIDIA_API_KEY")),
+            "model": providers_cfg.get("nvidia_nim", {}).get("models", {}).get("cinematic"),
+            "base_url": providers_cfg.get("nvidia_nim", {}).get("base_url"),
+            "quota_limit_pct": quota_limit,
+            "quota_usage_pct": None,
+            "credit_cost": credit_cost,
+        },
+        "local_comfyui": {
+            "enabled": True,
+            "api_url": cfg.get("models", {}).get("comfyui", {}).get("api_url"),
+        },
+        "asset_library": {
+            "count": manifest_count,
+            "reuse_existing_asset": cfg.get("assets", {}).get("reuse_existing_asset", True),
+            "cached_hits": cache_hits,
+            "credit_savings": round(cache_hits * credit_cost, 2),
+            "avg_latency_ms": round(
+                sum(float(item.get("latency_ms", 0) or 0) for item in manifest) / manifest_count, 1
+            ) if manifest_count else 0,
+        },
+    }
+
+
+@app.get("/api/assets")
+def list_assets():
+    items = []
+    for record in _load_manifest():
+        asset_path = Path(record.get("output_path", ""))
+        items.append({
+            **record,
+            "latency_ms": int(record.get("latency_ms", 0) or 0),
+            "generation_cost": float(record.get("generation_cost", 0.0) or 0.0),
+            "image_url": f"/api/assets/image/{asset_path.name}" if asset_path.name else None,
+        })
+    return {"items": items}
+
+
+@app.post("/api/smoke-test")
+def create_smoke_test():
+    manifest = _load_manifest()
+    if manifest:
+        first_asset = manifest[-1]
+        req = StartJobRequest(
+            asset_key=first_asset.get("asset_key"),
+            topic=first_asset.get("normalized_prompt", "Aurora smoke test cached asset"),
+            mode="static_cinematic",
+            force_new_image=False,
+            reuse_existing_asset=True,
+        )
+    else:
+        req = StartJobRequest(
+            topic="Aurora smoke test cinematic warrior",
+            mode="static_cinematic",
+            width=384,
+            height=640,
+            frames=1,
+            force_new_image=False,
+            reuse_existing_asset=True,
+        )
+    return _start_job_impl(req)
+
+
+@app.get("/api/assets/image/{filename}")
+def get_asset_image(filename: str):
+    asset_dir = Path(os.getcwd()) / "assets" / "images"
+    target = (asset_dir / filename).resolve()
+    if asset_dir.resolve() not in target.parents and target != asset_dir.resolve():
+        return {"status": "error", "message": "Invalid asset path."}
+    if not target.exists():
+        return {"status": "error", "message": "Asset not found."}
+    media_type = "image/jpeg" if target.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
+    return FileResponse(target, media_type=media_type, filename=target.name)
 
 
 @app.get("/api/logs/stream")
@@ -167,7 +663,7 @@ def stream_logs():
 
 @app.get("/api/status")
 def get_status():
-    global _active_process
+    global _active_process, _batch_running
 
     # Check our managed process
     if _active_process and _active_process.poll() is None:
@@ -184,6 +680,16 @@ def get_status():
             }
         except Exception:
             pass
+
+    if _batch_running:
+        return {
+            "running": True,
+            "paused": False,
+            "pid": None,
+            "phase": _pipeline_phase["current"],
+            "phase_label": _pipeline_phase["label"],
+            "progress": _pipeline_phase["progress"],
+        }
 
     # Check for external processes
     p = get_active_job_process()
@@ -202,6 +708,33 @@ def get_status():
             pass
 
     return {"running": False, "paused": False, "phase": 0, "phase_label": "Idle", "progress": 0}
+
+
+@app.get("/api/latest-output")
+def latest_output():
+    final_dir = Path(os.getcwd()) / "outputs" / "final"
+    final_dir.mkdir(parents=True, exist_ok=True)
+    videos = sorted(final_dir.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not videos:
+        return {"video_url": None}
+
+    latest = videos[0]
+    return {
+        "filename": latest.name,
+        "video_url": f"/api/output/final/{latest.name}",
+        "updated_at": int(latest.stat().st_mtime),
+    }
+
+
+@app.get("/api/output/final/{filename}")
+def get_final_output(filename: str):
+    final_dir = Path(os.getcwd()) / "outputs" / "final"
+    target = (final_dir / filename).resolve()
+    if final_dir.resolve() not in target.parents:
+        return {"status": "error", "message": "Invalid file path."}
+    if not target.exists():
+        return {"status": "error", "message": "File not found."}
+    return FileResponse(target, media_type="video/mp4", filename=target.name)
 
 
 @app.get("/api/metrics")
@@ -259,8 +792,10 @@ def resume_job():
 
 @app.post("/api/stop")
 def stop_job():
-    global _active_process
+    global _active_process, _batch_stop_requested, _batch_running
     killed = False
+    if _batch_running:
+        _batch_stop_requested = True
     if _active_process and _active_process.poll() is None:
         try:
             _active_process.terminate()

@@ -30,7 +30,24 @@ from pathlib import Path
 class PipelineLogger:
     """Tracks pipeline execution state and writes outputs/log.json."""
 
-    STEPS = ["script_gen", "image_gen", "video_gen", "audio_gen", "lipsync"]
+    STEPS = [
+        "script_gen",
+        "image_gen",
+        "video_gen",
+        "talking_motion_gen",
+        "full_i2v_motion_gen",
+        "audio_gen",
+        "lipsync",
+        "final_assembly",
+    ]
+    PROGRESS_BY_STEP = {
+        "script_gen": 20,
+        "image_gen": 50,
+        "video_gen": 80,
+        "talking_motion_gen": 80,
+        "full_i2v_motion_gen": 80,
+        "final_assembly": 100,
+    }
     STATUS_PENDING = "pending"
     STATUS_RUNNING = "running"
     STATUS_SUCCESS = "success"
@@ -38,15 +55,18 @@ class PipelineLogger:
     STATUS_SKIPPED = "skipped"
 
     def __init__(self, config: dict, topic: str = ""):
-        self.log_dir = Path(config.get("paths", {}).get(
-            "base_output", "outputs"))
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.log_path = self.log_dir / "log.json"
-
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.topic      = topic
         self._start     = time.time()
         self._step_start: float = 0.0
+
+        self.log_dir = Path(config.get("paths", {}).get(
+            "base_output", "outputs"))
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.log_path = self.log_dir / "log.json"
+        self.job_log_dir = self.log_dir / self.session_id / "logs"
+        self.job_log_dir.mkdir(parents=True, exist_ok=True)
+        self.job_log_path = self.job_log_dir / "job.json"
 
         self.data = {
             "session_id":       self.session_id,
@@ -115,6 +135,10 @@ class PipelineLogger:
         self._flush()
         self._print_summary()
 
+    def set_metadata(self, **fields) -> None:
+        self.data.update(fields)
+        self._flush()
+
     def get_step_status(self, step: str) -> str:
         return self.data["steps"].get(step, {}).get("status", "unknown")
 
@@ -129,9 +153,42 @@ class PipelineLogger:
     # Internal
     # ──────────────────────────────────────────────────────────────────────────
     def _flush(self) -> None:
-        self.log_path.write_text(
-            json.dumps(self.data, indent=2), encoding="utf-8"
+        serialized = json.dumps(self.data, indent=2)
+        self.log_path.write_text(serialized, encoding="utf-8")
+
+        existing = {}
+        if self.job_log_path.exists():
+            try:
+                existing = json.loads(self.job_log_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                existing = {}
+
+        job_payload = {
+            **existing,
+            "job_id": self.session_id,
+            "topic": self.topic,
+            "started_at": self.data["started_at"],
+            "steps": self.data["steps"],
+            "final_output": self.data["final_output"],
+            "completed_at": self.data["completed_at"],
+            "total_elapsed_sec": self.data["total_elapsed_sec"],
+            "progress_percent": self._compute_progress_percent(),
+        }
+        for key, value in self.data.items():
+            if key not in job_payload:
+                job_payload[key] = value
+        self.job_log_path.write_text(
+            json.dumps(job_payload, indent=2), encoding="utf-8"
         )
+
+    def _compute_progress_percent(self) -> int:
+        if self.data["completed_at"]:
+            return 100
+        progress = 0
+        for step, pct in self.PROGRESS_BY_STEP.items():
+            if self.data["steps"][step]["status"] == self.STATUS_SUCCESS:
+                progress = max(progress, pct)
+        return progress
 
     def _validate_step(self, step: str) -> None:
         if step not in self.STEPS:

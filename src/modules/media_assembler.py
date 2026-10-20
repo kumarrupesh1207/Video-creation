@@ -19,7 +19,6 @@ Upscale math for 12GB VRAM workflow:
 """
 
 import subprocess
-import shutil
 from pathlib import Path
 
 
@@ -45,6 +44,72 @@ class MediaAssembler:
     # ──────────────────────────────────────────────────────────────────────────
     # Public API
     # ──────────────────────────────────────────────────────────────────────────
+    def assemble_final_video(self, video_path: Path, audio_path: Path,
+                             output_name: str = "final.mp4",
+                             target: str = "reels",
+                             target_duration: float = None,
+                             crf: int = None,
+                             preset: str = None) -> Path:
+        """
+        Single-pass final assembly for audio mux + upscale/encode.
+        Keeps the local desktop on one FFmpeg encode path instead of
+        merge-first then upscale-second for talking/full-motion outputs.
+        """
+        video_path = Path(video_path)
+        audio_path = Path(audio_path)
+        if not video_path.exists():
+            raise FileNotFoundError(f"[Assembler] Input not found: {video_path}")
+        if not audio_path.exists():
+            raise FileNotFoundError(f"[Assembler] Audio not found: {audio_path}")
+
+        out_path = self.out_dir / output_name
+        crf = crf or self.uscfg.get("ffmpeg_crf", 18)
+        preset = preset or self.uscfg.get("ffmpeg_preset", "slow")
+        res = self.RESOLUTIONS.get(target, self.RESOLUTIONS["reels"])
+        is_image = video_path.suffix.lower() in [".png", ".jpg", ".jpeg"]
+
+        cmd = [self.ffmpeg, "-y"]
+        if is_image:
+            cmd.extend(["-loop", "1", "-framerate", "25"])
+        cmd.extend(["-i", str(video_path), "-i", str(audio_path)])
+
+        if res and self.uscfg.get("enabled", True):
+            w, h = res
+            vf = (
+                f"scale={w}:{h}:flags=lanczos:force_original_aspect_ratio=decrease,"
+                f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2"
+            )
+            print(f"[Assembler] Single-pass final export → {w}x{h} ({target})")
+        else:
+            vf = None
+            print("[Assembler] Single-pass final export → native")
+
+        if vf:
+            cmd.extend(["-vf", vf])
+        if target_duration is not None:
+            target_duration = float(target_duration)
+            cmd.extend([
+                "-af", f"apad=whole_dur={target_duration},atrim=duration={target_duration}",
+                "-t", str(target_duration),
+            ])
+        if is_image:
+            cmd.extend(["-c:v", "libx264", "-tune", "stillimage"])
+        else:
+            cmd.extend(["-c:v", "libx264"])
+        cmd.extend([
+            "-crf", str(crf),
+            "-preset", preset,
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-movflags", "+faststart",
+            "-pix_fmt", "yuv420p",
+            str(out_path),
+        ])
+        self._run(cmd, "assemble_final_video")
+        size_mb = out_path.stat().st_size / (1024 * 1024)
+        print(f"[Assembler] ✅ Final: {out_path.name} ({size_mb:.1f} MB)")
+        return out_path
+
     def upscale_and_encode(self, input_path: Path,
                            output_name: str = "final.mp4",
                            target: str = "reels",
@@ -100,7 +165,8 @@ class MediaAssembler:
         return out_path
 
     def merge_audio_video(self, video_path: Path, audio_path: Path,
-                          output_name: str = "merged.mp4") -> Path:
+                          output_name: str = "merged.mp4",
+                          target_duration: float = None) -> Path:
         """
         Mux an audio track onto a video (replaces existing audio).
         Used when Wav2Lip is skipped (--skip-lipsync) and we just need music/VO.
@@ -114,13 +180,20 @@ class MediaAssembler:
         cmd = [self.ffmpeg, "-y"]
         
         if is_image:
-            cmd.extend(["-loop", "1", "-framerate", "1"])
+            cmd.extend(["-loop", "1", "-framerate", "25"])
             
         cmd.extend([
             "-i",    str(video_path),
             "-i",    str(audio_path),
         ])
         
+        if target_duration is not None:
+            target_duration = float(target_duration)
+            cmd.extend([
+                "-af", f"apad=whole_dur={target_duration},atrim=duration={target_duration}",
+                "-t", str(target_duration),
+            ])
+
         if is_image:
             cmd.extend(["-c:v", "libx264", "-tune", "stillimage"])
         else:
@@ -129,7 +202,6 @@ class MediaAssembler:
         cmd.extend([
             "-c:a",  "aac",
             "-b:a",  "192k",
-            "-shortest",           # trim to shorter of video/audio
             "-pix_fmt", "yuv420p",
             str(out_path)
         ])
@@ -210,14 +282,10 @@ class MediaAssembler:
                 cmd, capture_output=True, text=True, timeout=300
             )
         except FileNotFoundError:
-            print(f"[Assembler] ⚠️ FFmpeg not found: {cmd[0]}")
-            print(f"[Assembler] ⚠️ Simulating output for pipeline completion...")
-            # The output path is always the last argument in our cmds
-            out_path = Path(cmd[-1])
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_bytes(b"DUMMY_MP4_CONTENT")
-            print(f"[Assembler] ✅ Simulated {label} complete.")
-            return
+            raise RuntimeError(
+                f"[Assembler] ❌ FFmpeg not found: {cmd[0]}\n"
+                "  Install FFmpeg and update paths.ffmpeg_bin in config.yaml."
+            )
         if result.returncode != 0:
             # Extract last 10 lines of stderr for the key error message
             err_lines = [l for l in result.stderr.splitlines() if l.strip()]

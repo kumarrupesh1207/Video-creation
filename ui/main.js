@@ -6,11 +6,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // ─── Element References ───────────────────────────────────
     const startBtn      = document.querySelector('.btn-glow');
     const topicTextarea = document.querySelector('textarea');
+    const modeSelect    = document.querySelector('#mode-select');
     const logContainer  = document.querySelector('.panel-5 .terminal, .logs-body, .terminal');
     const statusBadge   = document.querySelector('.status-badge');
     const progressFill  = document.querySelector('.progress-bar .fill, .global-progress .fill');
     const progressValue = document.querySelector('.progress-value, .global-progress .value');
     const elapsedEl     = document.querySelector('.elapsed-value, .elapsed');
+    const previewVideo  = document.querySelector('.preview-video');
+    const previewPlaceholder = document.querySelector('.video-placeholder');
 
     // Clip card selection
     const clipCards = document.querySelectorAll('.output-card.clip');
@@ -78,19 +81,45 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     startLogStream();
 
+    let currentPreviewUrl = '';
+
+    async function refreshPreview() {
+        if (!previewVideo) return;
+        try {
+            const res = await fetch(`${API_URL}/latest-output`);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (!data.video_url) return;
+
+            const nextUrl = `http://127.0.0.1:8000${data.video_url}?t=${encodeURIComponent(data.updated_at || '')}`;
+            if (nextUrl === currentPreviewUrl) return;
+
+            currentPreviewUrl = nextUrl;
+            previewVideo.src = nextUrl;
+            previewVideo.style.display = '';
+            if (previewPlaceholder) previewPlaceholder.style.display = 'none';
+        } catch (err) {
+            console.error('Preview refresh failed:', err);
+        }
+    }
+
+    refreshPreview();
+
     // ─── Start Generation ─────────────────────────────────────
     if (startBtn) {
         startBtn.addEventListener('click', async () => {
-            const topic = topicTextarea ? topicTextarea.value.trim() : '';
-            if (!topic) { alert('Please enter a Topic / Prompt first!'); return; }
+            const rawText = topicTextarea ? topicTextarea.value.trim() : '';
+            const topics = rawText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+            if (!topics.length) { alert('Please enter at least one Topic / Prompt first!'); return; }
 
             startBtn.textContent = 'Initializing...';
             startBtn.disabled = true;
 
-            const res = await callApi('/start', { topic });
+            const mode = modeSelect ? modeSelect.value : 'cinematic';
+            const res = await callApi('/start', { topics, mode });
             if (res.status === 'success') {
                 startBtn.textContent = 'Job Running...';
-                appendLog(`[UI] Job started — PID: ${res.pid}`);
+                appendLog(`[UI] Batch started — ${topics.length} topic(s) | mode=${mode}`);
             } else {
                 alert('Error: ' + res.message);
                 startBtn.textContent = 'Start Generation';
@@ -215,6 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     statusBadge.className = 'status-badge';
                     stopElapsed();
                     jobStartTime = null;
+                    refreshPreview();
                     if (startBtn && startBtn.textContent === 'Job Running...') {
                         startBtn.textContent = 'Start Generation';
                         startBtn.disabled = false;
@@ -231,6 +261,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } catch (e) { /* backend offline — silent */ }
     }, 2000);
+
+    setInterval(refreshPreview, 5000);
 
     // ─── Real System Metrics (every 3s) ──────────────────────
     setInterval(async () => {
