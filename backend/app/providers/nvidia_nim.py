@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import logging
+import math
 import os
 import random
 import time
@@ -11,11 +13,33 @@ import requests
 from backend.app.providers.base import ImageProvider, ImageResult
 from aurora.assets.manifest import normalize_prompt
 
+logger = logging.getLogger(__name__)
+
 
 class NvidiaNIMProvider(ImageProvider):
     """OpenAI-compatible NVIDIA NIM image provider."""
 
     FLUX_PORTRAIT = (768, 1344)
+    # Sizes the Flux endpoint accepts; the request is mapped to the nearest aspect ratio.
+    FLUX_SIZES = ((1024, 1024), (768, 1344), (1344, 768), (896, 1152), (1152, 896))
+
+    ASPECT_RATIOS = ("1:1", "2:3", "3:2", "4:5", "5:4", "9:16", "16:9")
+
+    @classmethod
+    def nearest_aspect_ratio(cls, width: int, height: int) -> str:
+        target = math.log(max(width, 1) / max(height, 1))
+
+        def dist(ratio: str) -> float:
+            w, h = (int(x) for x in ratio.split(":"))
+            return abs(math.log(w / h) - target)
+
+        return min(cls.ASPECT_RATIOS, key=dist)
+
+    @classmethod
+    def nearest_flux_size(cls, width: int, height: int) -> tuple[int, int]:
+        """Pick the supported size whose aspect ratio is closest to the request."""
+        target = math.log(max(width, 1) / max(height, 1))
+        return min(cls.FLUX_SIZES, key=lambda s: abs(math.log(s[0] / s[1]) - target))
 
     def _resolve_endpoint(
         self,
@@ -81,9 +105,13 @@ class NvidiaNIMProvider(ImageProvider):
         if resolved_seed <= 0:
             resolved_seed = random.randint(1, 2**31 - 1)
         negative_prompt_bypassed = False
+        adjustments: list[dict] = []
 
         if model == "black-forest-labs/flux.2-klein-4b":
-            flux_width, flux_height = self.FLUX_PORTRAIT if height > width else self.FLUX_PORTRAIT[::-1]
+            flux_width, flux_height = self.nearest_flux_size(width, height)
+            logger.info("[NVIDIA NIM] size map %sx%s -> %sx%s", width, height, flux_width, flux_height)
+            if (flux_width, flux_height) != (width, height):
+                adjustments.append({"field": "size", "requested": f"{width}x{height}", "used": f"{flux_width}x{flux_height}"})
             actual_width = flux_width
             actual_height = flux_height
             payload.update({
@@ -95,7 +123,9 @@ class NvidiaNIMProvider(ImageProvider):
             })
             negative_prompt_bypassed = bool(resolved_negative_prompt)
         else:
-            aspect_ratio = "9:16" if height > width else "16:9"
+            aspect_ratio = self.nearest_aspect_ratio(width, height)
+            logger.info("[NVIDIA NIM] aspect map %sx%s -> %s", width, height, aspect_ratio)
+            adjustments.append({"field": "aspect_ratio", "requested": f"{width}x{height}", "used": aspect_ratio})
             payload["aspect_ratio"] = aspect_ratio
             payload["negative_prompt"] = resolved_negative_prompt
             payload["seed"] = resolved_seed
@@ -164,5 +194,6 @@ class NvidiaNIMProvider(ImageProvider):
             context={
                 "request_payload": payload,
                 "negative_prompt_bypassed": negative_prompt_bypassed,
+                "adjustments": adjustments,
             },
         )

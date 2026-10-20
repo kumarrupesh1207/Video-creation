@@ -2,16 +2,16 @@
   "3": {
     "class_type": "KSampler",
     "inputs": {
-      "cfg": 8.0,
+      "cfg": 5.5,
       "denoise": 1,
       "latent_image": ["5", 0],
       "model": ["4", 0],
       "negative": ["7", 0],
       "positive": ["6", 0],
-      "sampler_name": "uni_pc",
+      "sampler_name": "dpmpp_2m",
       "scheduler": "karras",
       "seed": 42,
-      "steps": 15
+      "steps": 25
     }
   },
   "4": {
@@ -24,7 +24,7 @@
     "class_type": "EmptyLatentImage",
     "inputs": {
       "batch_size": 1,
-      "height": 512,
+      "height": 768,
       "width": 512
     }
   },
@@ -39,7 +39,7 @@
     "class_type": "CLIPTextEncode",
     "inputs": {
       "clip": ["4", 1],
-      "text": "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name, realistic, 3d, photorealistic"
+      "text": "lowres, bad anatomy, bad hands, extra fingers, deformed, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name"
     }
   },
   "8": {

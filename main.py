@@ -698,4 +698,7 @@ Examples:
 
 
 if __name__ == "__main__":
+    from aurora import ensure_utf8_console
+
+    ensure_utf8_console()  # emoji prints must not crash on Windows cp1252 consoles
     main()

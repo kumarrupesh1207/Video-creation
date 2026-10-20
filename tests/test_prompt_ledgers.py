@@ -53,7 +53,7 @@ def test_run_prompt_ledger_generates_segments_and_concats(workspace_tmp_path: Pa
     output_path = workspace_tmp_path / "master.mp4"
     generated_durations: list[float] = []
 
-    def fake_generate(self, image_path: Path, output_path: Path, duration_secs: float, fps: int, job_id: str) -> VideoResult:
+    def fake_generate(self, image_path: Path, output_path: Path, duration_secs: float, fps: int, job_id: str, **kwargs) -> VideoResult:
         del self, image_path, fps, job_id
         generated_durations.append(duration_secs)
         output_path.write_bytes(b"segment")

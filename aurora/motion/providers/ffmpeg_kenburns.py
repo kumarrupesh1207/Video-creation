@@ -11,6 +11,15 @@ from aurora.logs import StructuredLogger
 from aurora.motion.base import ExecutionTier, MotionMode, MotionProvider, MotionResult, VideoResult
 
 
+def audio_args(audio_path: Path | str | None) -> tuple[list[str], list[str]]:
+    """Return (input args, output codec args): the given audio, or a silent stereo track."""
+    if audio_path:
+        inputs = ["-i", str(audio_path)]
+    else:
+        inputs = ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
+    return inputs, ["-af", "apad", "-c:a", "aac", "-b:a", "128k", "-shortest"]
+
+
 class FFmpegKenBurns(MotionProvider):
     """CPU-only Ken Burns motion provider implemented with FFmpeg."""
 
@@ -49,9 +58,12 @@ class FFmpegKenBurns(MotionProvider):
         duration_secs: float = 25.0,
         fps: int = 24,
         job_id: str | None = None,
+        width: int = 1080,
+        height: int = 1920,
+        audio_path: Path | str | None = None,
         **kwargs: object,
     ) -> VideoResult | MotionResult:
-        """Render a 1080x1920 MP4 with a 1.0 to 1.08 Ken Burns zoom."""
+        """Render a width x height (default 1080x1920) MP4 with a 1.0 to 1.08 Ken Burns zoom and an audio track."""
         legacy_call = output_path is None and "duration" in kwargs
         if legacy_call:
             duration_secs = float(kwargs.get("duration", duration_secs))
@@ -69,13 +81,13 @@ class FFmpegKenBurns(MotionProvider):
         frame_count = max(1, int(duration_secs * fps))
         zoom_denominator = max(1, frame_count - 1)
         filter_chain = (
-            "scale=1080:1920:force_original_aspect_ratio=increase,"
-            "crop=1080:1920,"
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},"
             "setsar=1,"
             f"zoompan=z='min(1.0+0.08*on/{zoom_denominator},1.08)':"
             "x='iw/2-(iw/zoom/2)':"
             "y='ih/2-(ih/zoom/2)':"
-            f"d={frame_count}:s=1080x1920:fps={fps},"
+            f"d={frame_count}:s={width}x{height}:fps={fps},"
             "format=yuv420p"
         )
         self.logger.info(
@@ -88,6 +100,7 @@ class FFmpegKenBurns(MotionProvider):
             duration_secs=duration_secs,
         )
         started = time.perf_counter()
+        audio_in, audio_out = audio_args(audio_path)
         cmd = [
             self.ffmpeg,
             "-y",
@@ -95,6 +108,7 @@ class FFmpegKenBurns(MotionProvider):
             "1",
             "-i",
             str(image_path),
+            *audio_in,
             "-vf",
             filter_chain,
             "-frames:v",
@@ -111,6 +125,7 @@ class FFmpegKenBurns(MotionProvider):
             "yuv420p",
             "-movflags",
             "+faststart",
+            *audio_out,
             str(output_path),
         ]
         try:
@@ -157,8 +172,8 @@ class FFmpegKenBurns(MotionProvider):
             gen_time_secs=gen_time_secs,
             cost_usd=0.0,
             fps=fps,
-            width=1080,
-            height=1920,
+            width=width,
+            height=height,
         )
 
     def _image_hash(self, image_path: Path) -> str:

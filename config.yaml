@@ -82,7 +82,17 @@ providers:
     timeout: 60
     quota: 80
   local_comfyui:
-    negative_prompt: "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name, realistic, 3d, photorealistic"
+    cfg: 5.5
+    steps: 25
+    sampler_name: "dpmpp_2m"
+    scheduler: "karras"
+    default_resolution: [512, 768]   # used when the request gives none
+    refine:                          # optional hires-fix style 2nd pass (slow on CPU)
+      enabled: false
+      scale: 1.5
+      denoise: 0.45
+      steps: 15
+    negative_prompt: "lowres, bad anatomy, bad hands, extra fingers, deformed, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name"
   manual_upload:
     enabled: true
 

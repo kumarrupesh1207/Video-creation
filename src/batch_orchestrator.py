@@ -213,4 +213,7 @@ def _save_report(path: Path, results: list, start: float, total: int) -> None:
 
 
 if __name__ == "__main__":
+    from aurora import ensure_utf8_console
+
+    ensure_utf8_console()  # emoji prints must not crash on Windows cp1252 consoles
     main()

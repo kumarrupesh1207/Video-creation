@@ -7,16 +7,39 @@ import time
 from pathlib import Path
 from typing import Any, Sequence
 
+if not __package__:  # `python aurora/pipeline.py ...` puts aurora/ (not the repo root) on sys.path
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from aurora import ensure_utf8_console
 from aurora.logs import StructuredLogger
 from aurora.motion.providers.ffmpeg_kenburns import FFmpegKenBurns
 
 
-def run(image_path: Path, output_path: Path, duration_secs: float = 25.0) -> Path:
+def run(
+    image_path: Path,
+    output_path: Path,
+    duration_secs: float = 25.0,
+    fps: int = 24,
+    width: int = 1080,
+    height: int = 1920,
+    audio_path: Path | None = None,
+) -> Path:
     """Run the Sprint 1 static cinematic pipeline."""
     logger = StructuredLogger(component="pipeline")
     provider = FFmpegKenBurns(logger=logger)
     logger.info("pipeline_start", provider=provider.name, mode=provider.mode.value, tier=provider.tier.value, duration_secs=duration_secs)
-    result = provider.generate(image_path=image_path, output_path=output_path, duration_secs=duration_secs, job_id=logger.job_id)
+    result = provider.generate(
+        image_path=image_path,
+        output_path=output_path,
+        duration_secs=duration_secs,
+        fps=fps,
+        job_id=logger.job_id,
+        width=width,
+        height=height,
+        audio_path=audio_path,
+    )
     logger.info(
         "pipeline_complete",
         provider=result.provider,
@@ -38,6 +61,7 @@ def run_prompt_ledger(image_path: Path, output_path: Path, prompt_ledger: Path) 
     seed = ledger.get("seed")
     visual_complexity = str(ledger.get("visual_complexity", "standard"))
     target_resolution = ledger.get("target_resolution", {"width": 1080, "height": 1920})
+    size_kwargs = _size_kwargs(target_resolution)
     segments = ledger.get("segments", [])
     if not isinstance(segments, list) or not segments:
         raise ValueError(f"Prompt ledger has no segments: {prompt_ledger}")
@@ -99,6 +123,7 @@ def run_prompt_ledger(image_path: Path, output_path: Path, prompt_ledger: Path) 
             duration_secs=duration_secs,
             fps=fps,
             job_id=logger.job_id,
+            **size_kwargs,
         )
         segment_gen_time_secs = time.perf_counter() - segment_started
         total_gen_time_secs += segment_gen_time_secs
@@ -133,6 +158,18 @@ def run_prompt_ledger(image_path: Path, output_path: Path, prompt_ledger: Path) 
         segment_count=len(segment_paths),
     )
     return output_path
+
+
+def _size_kwargs(target_resolution: Any) -> dict[str, int]:
+    """Width/height kwargs from a ledger resolution ({"width","height"} or "WxH"); empty when unparseable."""
+    try:
+        if isinstance(target_resolution, dict):
+            width, height = int(target_resolution["width"]), int(target_resolution["height"])
+        else:
+            width, height = (int(v) for v in str(target_resolution).lower().split("x"))
+    except (KeyError, ValueError, TypeError):
+        return {}
+    return {"width": width, "height": height}
 
 
 def _load_prompt_ledger(prompt_ledger: Path) -> dict[str, Any]:
@@ -218,16 +255,24 @@ def _concat_segments(ffmpeg: str, segment_paths: list[Path], output_path: Path, 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse CLI arguments and render a Ken Burns MP4."""
+    ensure_utf8_console()
     parser = argparse.ArgumentParser(description="Project Aurora Sprint 1 pipeline")
     parser.add_argument("image_path", type=Path)
     parser.add_argument("output_path", type=Path)
     parser.add_argument("--duration-secs", type=float, default=25.0)
+    parser.add_argument("--fps", type=int, default=24)
+    parser.add_argument("--width", type=int, default=1080)
+    parser.add_argument("--height", type=int, default=1920)
+    parser.add_argument("--audio", type=Path, default=None, help="optional audio file (silent track if omitted)")
     parser.add_argument("--prompt-ledger", type=Path, default=None)
     args = parser.parse_args(argv)
     if args.prompt_ledger is not None:
         output_path = run_prompt_ledger(args.image_path, args.output_path, args.prompt_ledger)
     else:
-        output_path = run(args.image_path, args.output_path, args.duration_secs)
+        output_path = run(
+            args.image_path, args.output_path, args.duration_secs,
+            fps=args.fps, width=args.width, height=args.height, audio_path=args.audio,
+        )
     print(output_path)
     return 0
 

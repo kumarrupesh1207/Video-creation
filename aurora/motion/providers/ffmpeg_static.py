@@ -4,35 +4,27 @@ import subprocess
 from pathlib import Path
 
 from aurora.motion.base import MotionProvider, MotionResult
+from aurora.motion.providers.ffmpeg_kenburns import audio_args
 
 
 class FFmpegStaticMotionProvider(MotionProvider):
-    UPSCALE_FILTER = (
-        "scale=1080:1920:flags=lanczos:force_original_aspect_ratio=decrease,"
-        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2"
-    )
-    ZOOMPAN_FILTER = (
-        f"{UPSCALE_FILTER},"
-        "unsharp=3:3:1.5:3:3:0.5,"
-        "noise=alls=7:allf=t:all_seed=123,"
-        "zoompan="
-        "z='zoom+0.0008':"
-        "x='iw/2-(iw/zoom/2)':"
-        "y='ih/2-(ih/zoom/2)':"
-        "d=125:"
-        "s=1080x1920:"
-        "fps=25"
-    )
-    SIDE_DRIFT_FILTER = (
-        "crop="
-        "iw/1.1:"
-        "ih/1.1:"
-        "x='(iw-ow)/2+(iw-ow)/2*sin(t/2)':"
-        "y='(ih-oh)/2',"
-        f"{UPSCALE_FILTER},"
-        "unsharp=3:3:1.5:3:3:0.5,"
-        "noise=alls=7:allf=t:all_seed=123"
-    )
+    @staticmethod
+    def build_filter(template_name: str, width: int, height: int, fps: int, duration: float) -> str:
+        upscale = (
+            f"scale={width}:{height}:flags=lanczos:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+        )
+        grain = "unsharp=3:3:1.5:3:3:0.5,noise=alls=7:allf=t:all_seed=123"
+        if template_name == "ken_burns":
+            return (
+                f"{upscale},{grain},"
+                "zoompan=z='zoom+0.0008':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                f"d={max(1, int(duration * fps))}:s={width}x{height}:fps={fps}"
+            )
+        return (
+            "crop=iw/1.1:ih/1.1:x='(iw-ow)/2+(iw-ow)/2*sin(t/2)':y='(ih-oh)/2',"
+            f"{upscale},{grain}"
+        )
 
     def __init__(self, config: dict):
         super().__init__(config)
@@ -54,27 +46,34 @@ class FFmpegStaticMotionProvider(MotionProvider):
         generation_seed: int | None = None,
         reference_image_path: Path | None = None,
         identity_lock: bool = False,
+        fps: int = 24,
+        width: int = 1080,
+        height: int = 1920,
+        audio_path: Path | str | None = None,
     ) -> MotionResult:
         del job_id, asset_key
         del visual_complexity, audio_narration_path, generation_seed, reference_image_path, identity_lock
         del caption_text
-        filter_chain = self.ZOOMPAN_FILTER if template_name == "ken_burns" else self.SIDE_DRIFT_FILTER
+        filter_chain = self.build_filter(template_name, width, height, fps, duration)
         image_path = Path(image_path)
         if not image_path.exists():
             raise FileNotFoundError(f"[MotionEngine] Image not found: {image_path}")
         out_path = self.out_dir / f"{image_path.stem}_{template_name}.mp4"
+        audio_in, audio_out = audio_args(audio_path)
         cmd = [
             self.ffmpeg, "-y",
             "-loop", "1",
             "-i", str(image_path),
+            *audio_in,
             "-vf", filter_chain,
             "-t", str(duration),
-            "-r", "25",
+            "-r", str(fps),
             "-c:v", "libx264",
             "-preset", "slow",
             "-crf", "18",
             "-pix_fmt", "yuv420p",
             "-movflags", "+faststart",
+            *audio_out,
             str(out_path),
         ]
         print(f"[MotionEngine] Template: {template_name}")

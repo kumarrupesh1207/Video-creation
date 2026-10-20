@@ -33,9 +33,12 @@ except ImportError:
     _TORCH_AVAILABLE = False
 
 try:
-    from modules.comfy_orchestrator import ComfyOrchestrator
+    from .comfy_orchestrator import ComfyOrchestrator
 except ImportError:
-    from comfy_orchestrator import ComfyOrchestrator
+    try:
+        from modules.comfy_orchestrator import ComfyOrchestrator
+    except ImportError:
+        from comfy_orchestrator import ComfyOrchestrator
 
 
 class VideoEngine:
