@@ -55,7 +55,7 @@ class LocalComfyUIProvider(ImageProvider):
         img_wf = comfy_cfg.get("image_workflow", "src/workflows/image_gen.json")
         overrides_cfg = comfy_cfg.get("image_overrides", {})
         runtime_negative = negative_prompt
-        if runtime_negative is None:
+        if not runtime_negative:  # None or "" (switchboard default) -> configured default
             runtime_negative = (
                 self.config.get("providers", {})
                 .get("local_comfyui", {})

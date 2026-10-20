@@ -1,0 +1,90 @@
+"""Kaggle free-GPU image->video provider (prepared, OFF by default).
+
+Reuses RemoteI2VProvider's polling/timeout/error contract. Needs KAGGLE_USERNAME + KAGGLE_KEY in the
+environment and ``motion.i2v.kaggle.enabled: true`` in config.yaml. No account is created here.
+UNTESTED against the live Kaggle API (no credentials were available when written).
+"""
+from __future__ import annotations
+
+import base64
+import json
+import os
+import re
+import shutil
+import tempfile
+from pathlib import Path
+
+from aurora.motion.providers.remote_i2v_base import (
+    RemoteAuthenticationError,
+    RemoteI2VProvider,
+    RemoteWorkerCrashError,
+)
+
+WORKER_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "kaggle" / "aurora_kaggle_worker.py"
+
+
+class KaggleProvider(RemoteI2VProvider):
+    provider_name = "kaggle_provider"
+
+    def _provider_config(self) -> dict:
+        return self.config.get("motion", {}).get("i2v", {}).get("kaggle", {})
+
+    def _api(self):
+        user, key = os.getenv("KAGGLE_USERNAME", "").strip(), os.getenv("KAGGLE_KEY", "").strip()
+        if not user or not key:
+            raise RemoteAuthenticationError(f"[{self.provider_name}] KAGGLE_USERNAME / KAGGLE_KEY are not set.")
+        from kaggle.api.kaggle_api_extended import KaggleApi  # pip install kaggle
+
+        api = KaggleApi()
+        api.authenticate()
+        return api, user
+
+    def _submit_remote_job(self, payload, request_path, response_path, response_json):
+        del request_path, response_path, response_json
+        cfg = self._provider_config()
+        if not cfg.get("enabled", False):
+            raise RuntimeError(f"[{self.provider_name}] Provider disabled in config (motion.i2v.kaggle.enabled).")
+        api, user = self._api()
+        slug = re.sub(r"[^a-z0-9-]", "-", f"aurora-i2v-{payload['request_id']}".lower())[:50]
+        request = {
+            "mode": "i2v",
+            "prompt": payload.get("motion_prompt") or "gentle cinematic camera motion",
+            "seed": payload.get("seed"),
+            "width": int(cfg.get("width", 832)),
+            "height": int(cfg.get("height", 480)),
+            "num_frames": int(cfg.get("num_frames", 49)),
+            "steps": int(cfg.get("steps", 30)),
+            "model": cfg.get("model", "Wan-AI/Wan2.2-TI2V-5B-Diffusers"),
+            "image_b64": base64.b64encode(Path(payload["source_image"]).read_bytes()).decode("ascii"),
+        }
+        folder = Path(tempfile.mkdtemp(prefix="aurora_kaggle_"))
+        (folder / "script.py").write_text(
+            f"REQUEST = {json.dumps(request)}\n" + WORKER_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
+        (folder / "kernel-metadata.json").write_text(json.dumps({
+            "id": f"{user}/{slug}", "title": slug, "code_file": "script.py", "language": "python",
+            "kernel_type": "script", "is_private": True, "enable_gpu": True, "enable_internet": True,
+        }), encoding="utf-8")
+        api.kernels_push(str(folder))
+        shutil.rmtree(folder, ignore_errors=True)
+        return {"ref": f"{user}/{slug}"}
+
+    def _poll_remote_status(self, remote_job, response_json):
+        del response_json
+        api, _ = self._api()
+        status = str(api.kernels_status(remote_job["ref"]).status).lower()
+        if "error" in status or "cancel" in status:
+            raise RemoteWorkerCrashError(f"[{self.provider_name}] Kaggle kernel ended with status: {status}")
+        return {"status": "COMPLETED" if "complete" in status else "processing", "raw_status": status}
+
+    def _download_remote_artifact(self, remote_job, response_path, status_details=None):
+        del status_details
+        api, _ = self._api()
+        out = Path(tempfile.mkdtemp(prefix="aurora_kaggle_out_"))
+        api.kernels_output(remote_job["ref"], path=str(out))
+        clips = sorted(out.rglob("*.mp4"))
+        if not clips:
+            raise RuntimeError(f"[{self.provider_name}] Kaggle kernel finished without an .mp4 output.")
+        response_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(clips[0], response_path)
+        shutil.rmtree(out, ignore_errors=True)
+        return response_path

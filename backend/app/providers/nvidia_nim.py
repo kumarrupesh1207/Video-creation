@@ -84,7 +84,7 @@ class NvidiaNIMProvider(ImageProvider):
         height = int(resolution[1])
         endpoint = self._resolve_endpoint(model, base_url, endpoint_mode)
         resolved_negative_prompt = negative_prompt
-        if resolved_negative_prompt is None:
+        if not resolved_negative_prompt:  # None or "" -> configured default
             resolved_negative_prompt = (
                 self.config.get("providers", {})
                 .get("local_comfyui", {})

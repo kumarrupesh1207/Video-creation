@@ -14,6 +14,7 @@ if not __package__:  # `python aurora/pipeline.py ...` puts aurora/ (not the rep
 
 from aurora import ensure_utf8_console
 from aurora.logs import StructuredLogger
+from aurora.monitoring.media_validator import validate_video
 from aurora.motion.providers.ffmpeg_kenburns import FFmpegKenBurns
 
 
@@ -30,16 +31,28 @@ def run(
     logger = StructuredLogger(component="pipeline")
     provider = FFmpegKenBurns(logger=logger)
     logger.info("pipeline_start", provider=provider.name, mode=provider.mode.value, tier=provider.tier.value, duration_secs=duration_secs)
-    result = provider.generate(
-        image_path=image_path,
-        output_path=output_path,
-        duration_secs=duration_secs,
-        fps=fps,
-        job_id=logger.job_id,
-        width=width,
-        height=height,
-        audio_path=audio_path,
-    )
+    report = None
+    for attempt in (1, 2):  # one retry if the render is missing/corrupt
+        result = provider.generate(
+            image_path=image_path,
+            output_path=output_path,
+            duration_secs=duration_secs,
+            fps=fps,
+            job_id=logger.job_id,
+            width=width,
+            height=height,
+            audio_path=audio_path,
+        )
+        report = validate_video(
+            result.output_path, width, height, fps=fps, duration_secs=duration_secs,
+            require_audio=True, input_path=image_path,
+        )
+        if report.ok:
+            break
+        logger.error("output_validation_failed", provider=result.provider, attempt=attempt, errors=report.errors,
+                     output_path=str(result.output_path))
+    if not report.ok:
+        raise RuntimeError(f"Reel failed validation: {'; '.join(report.errors)}")
     logger.info(
         "pipeline_complete",
         provider=result.provider,

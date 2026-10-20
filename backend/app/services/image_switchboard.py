@@ -12,6 +12,7 @@ from aurora.assets.manifest import (
     ManifestManager,
     normalize_prompt,
 )
+from aurora.monitoring.media_validator import validate_image
 from backend.app.providers.base import ImageResult
 from backend.app.providers.local_comfyui import LocalComfyUIProvider
 from backend.app.providers.manual_upload import ManualUploadProvider
@@ -115,6 +116,14 @@ class ImageSwitchboard:
                     )
                 else:
                     result = provider.generate(prompt, style, resolution, job_id)
+                if not result.needs_manual_upload:
+                    report = validate_image(result.output_path, result.width, result.height)
+                    if not report.ok:
+                        self._append_event(job_id, "output_validation_failed", {
+                            "provider": provider_name,
+                            "errors": report.errors,
+                        })
+                        raise RuntimeError(f"Invalid image from {provider_name}: {'; '.join(report.errors)}")
                 result.prompt_hash = prompt_hash
                 result.fallback_used = index > 0
                 if not result.normalized_prompt:

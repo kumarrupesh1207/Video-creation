@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from aurora.assets.manifest import find_asset, register_motion_variant
+from aurora.monitoring.media_validator import validate_video
 from aurora.monitoring.observability import TelemetryCollector
 from aurora.motion.base import MotionResult
 
@@ -14,6 +15,17 @@ logger = logging.getLogger("aurora.motion.switchboard")
 
 
 class MotionSwitchboard:
+    @staticmethod
+    def _require_valid_video(result: MotionResult, provider_key: str, duration: float | None = None) -> None:
+        """Never report success for a missing, corrupt or known-mock clip (Rule 4/5): raise so fallback runs."""
+        expect = {}
+        if provider_key == "static_cinematic" and duration:  # our own renderer: size/fps/duration are exact
+            expect = {"width": 1080, "height": 1920, "fps": 24, "duration_secs": float(duration)}
+        report = validate_video(result.output_path, **expect)
+        if not report.ok:
+            logger.error(f"[Log] ❌ Output validation failed for '{provider_key}': {report.errors}")
+            raise RuntimeError(f"[MotionSwitchboard] Invalid output from {provider_key}: {'; '.join(report.errors)}")
+
     def __init__(self, config: dict):
         self.config = config
         self.provider_registry = {
@@ -23,6 +35,7 @@ class MotionSwitchboard:
             "framepack_provider": ("aurora.motion.providers.framepack_provider", "FramepackProvider"),
             "svdxt_provider": ("aurora.motion.providers.svdxt_provider", "SVDXTProvider"),
             "wan2gp_provider": ("aurora.motion.providers.wan2gp_provider", "Wan2GPProvider"),
+            "kaggle_provider": ("aurora.motion.providers.kaggle_provider", "KaggleProvider"),  # OFF (config)
         }
         self._provider_cache: dict[str, object] = {}
         self.telemetry = TelemetryCollector()
@@ -86,6 +99,7 @@ class MotionSwitchboard:
                 reference_image_path=effective_reference_image,
                 identity_lock=reference_lock,
             )
+            self._require_valid_video(result, provider_key, duration)
             motion_telemetry = {
                 "requested_motion_intent": requested_motion_intent,
                 "selected_provider": selected_provider,
@@ -139,6 +153,7 @@ class MotionSwitchboard:
                     job_id=job_id,
                     asset_key=asset_key,
                 )
+                self._require_valid_video(result, fallback_key, duration)
                 result.motion_mode = motion_mode
                 result.degraded_from = provider_key
                 result.badge = "Motion R&D"

@@ -67,6 +67,13 @@ motion:
     wan2gp:
       runtime_cmd: ""
       output_dir: "outputs/wan2gp_worker_runs"
+    kaggle:                          # free-GPU tier, OFF until KAGGLE_USERNAME/KAGGLE_KEY exist
+      enabled: false
+      model: "Wan-AI/Wan2.2-TI2V-5B-Diffusers"   # 24 GB model: runs with offload at 480p on 16 GB Kaggle GPUs
+      width: 832
+      height: 480
+      num_frames: 49
+      steps: 30
 
 providers:
   default: "nvidia_nim"

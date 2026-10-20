@@ -71,6 +71,20 @@ def _rate(text: str) -> float:
         return 0.0
 
 
+def _sample_luma(path: Path, duration: float) -> list[float]:
+    """Mean luma (0-255) of frames at start/middle/end via ffmpeg; empty when sampling fails."""
+    out = []
+    for t in (0.0, duration / 2, max(duration - 0.2, 0.0)):
+        proc = subprocess.run(
+            [shutil.which("ffmpeg") or "ffmpeg", "-v", "error", "-ss", f"{t:.2f}", "-i", str(path), "-frames:v", "1",
+             "-vf", "scale=32:32", "-pix_fmt", "gray", "-f", "rawvideo", "-"],
+            capture_output=True, timeout=60,
+        )
+        if proc.returncode == 0 and proc.stdout:
+            out.append(round(sum(proc.stdout) / len(proc.stdout), 1))
+    return out
+
+
 def validate_image(path: Path | str, width: int | None = None, height: int | None = None) -> MediaReport:
     from PIL import Image
 
@@ -151,5 +165,9 @@ def validate_video(
         )
         if proc.returncode != 0 or proc.stderr.strip():
             rep.errors.append(f"decode errors: {proc.stderr.strip()[:200]}")
+    if deep and rep.duration_secs > 0:
+        luma = _sample_luma(p, rep.duration_secs)
+        if luma and max(luma) < 5:
+            rep.errors.append(f"black video (sampled mean luma {luma})")
     rep.ok = not rep.errors
     return rep

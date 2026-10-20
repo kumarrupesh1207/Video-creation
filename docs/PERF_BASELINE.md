@@ -16,3 +16,18 @@ Notes
 - Outputs: `outputs/perf_nim_{before,after}/`, `outputs/perf_comfy_{before2,after}/`, `outputs/perf/reel_*.mp4`.
 
 Review follow-ups (not in Phase 0): wire `media_validator` into provider result writing / job records (QA, Architect); dHash placeholder detection and a batch-uniqueness scan; black/frozen-frame checks. NIM size mapping is reported in `ImageResult.context["adjustments"]`.
+
+## Phase 1 (validator wiring + autorun), measured 2026-10-21
+
+| Path | Result |
+|---|---|
+| `pytest -q` | 24 passed |
+| Reel render incl. built-in validation (ffprobe + hash), 15 s 1080x1920 24 fps | 4.4 s and 4.7 s inside autorun (Phase-0 reel: 4.4-4.9 s) -> no regression |
+| Autorun topic 1 via local_comfyui, 512x768, 25 steps, dpmpp_2m, cfg 5.5 | image 594 s + reel 4.7 s = **599 s** (CPU; ~1.7x steps x 1.5x pixels vs the 221 s 512x512/15-step bench; pytest ran concurrently for a few seconds) |
+| Autorun topic 2 via nvidia_nim | image 6.9 s (768x1344, mapped from 512x768, recorded in sidecar `adjustments`) + reel 4.4 s = **11.9 s**; 1 NIM credit |
+| Resume | second run skipped topic 1, rendered only topic 2 |
+
+Outputs: `outputs/final/2026-10-21/*.mp4` + `.json` sidecars (1080x1920, 24 fps, 15.0 s, audio track present). Command: `python -m aurora.autorun --topics topics.txt --providers local_comfyui --no-llm`.
+Notes: Ollama is up but only `qwen3:8b` is installed (config says llama3:8b); autorun picks an installed model, but on this CPU the call exceeded the 120 s timeout, so it fell back to the topic text. Use `--no-llm` to skip the wait. Kaggle tier (`kaggle_provider`, `scripts/kaggle/aurora_kaggle_worker.py`) is prepared, OFF, untested (no credentials).
+
+QA follow-ups applied: switchboard checks exact size/fps/duration for its own static renderer, deep mode adds black-frame sampling, autorun rejects a reel byte-identical to another topic's and records `engine_mode`. Still open: dHash placeholder list, job-record rule (SUCCESS vs mock/null GPU), non-silent audio check when `--music`/`--voiceover`, Kaggle fake-worker contract test.
