@@ -38,7 +38,7 @@ def provider(workspace_tmp_path, monkeypatch):
 def test_workflow_structure():
     wf = json.loads(Path("src/workflows/img2img.json").read_text(encoding="utf-8"))
     assert wf["12"]["class_type"] == "LoadImage" and wf["11"]["class_type"] == "VAEEncode"
-    assert wf["3"]["inputs"]["latent_image"] == ["11", 0] and wf["3"]["inputs"]["denoise"] == 0.55
+    assert wf["3"]["inputs"]["latent_image"] == ["11", 0] and wf["3"]["inputs"]["denoise"] == 0.45
     assert wf["9"]["class_type"] == "VAEDecode" and "5" not in wf
 
 
@@ -60,3 +60,15 @@ def test_generate_from_image(provider, workspace_tmp_path):
 def test_missing_source_raises(provider):
     with pytest.raises(FileNotFoundError):
         provider.generate_from_image("nope.jpg", "x", "cinematic", [512, 768], "j2")
+
+
+def test_facelock_workflow_and_override(provider, workspace_tmp_path):
+    wf = json.loads(Path("src/workflows/img2img_facelock.json").read_text(encoding="utf-8"))
+    assert wf["15"]["class_type"] == "IPAdapterAdvanced" and wf["3"]["inputs"]["model"] == ["15", 0]
+    assert wf["15"]["inputs"]["image"] == ["12", 0] and wf["15"]["inputs"]["weight"] == 0.8
+    src = workspace_tmp_path / "photo.jpg"
+    Image.new("RGB", (300, 200), (200, 100, 50)).save(src)
+    res = provider.generate_from_image(src, "same man in a suit", "cinematic", [512, 768], "j3", face_lock=True)
+    wf_path, ov = FakeOrch.last
+    assert wf_path.endswith("img2img_facelock.json") and ov["15"] == {"weight": 0.8}
+    assert ov["3"]["denoise"] == 0.45 and res.context["face_lock"] is True

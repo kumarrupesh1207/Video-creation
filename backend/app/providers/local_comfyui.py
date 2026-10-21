@@ -149,12 +149,17 @@ class LocalComfyUIProvider(ImageProvider):
         resolution: list[int],
         job_id: str,
         negative_prompt: str | None = None,
-        denoise: float = 0.55,
+        denoise: float = 0.45,
         seed: int | None = None,
         steps: int | None = None,
         cfg_scale: float | None = None,
+        face_lock: bool = False,
     ) -> ImageResult:
-        """img2img: restyle/edit an uploaded photo. Lower denoise keeps more of the person/composition."""
+        """img2img: restyle/edit an uploaded photo. Lower denoise keeps more of the person/composition.
+
+        face_lock=True adds IP-Adapter (plus-face) conditioned on the same photo to keep the person's face
+        (needs the ComfyUI_IPAdapter_plus node + models; weight from providers.local_comfyui.face_lock_weight).
+        """
         from PIL import Image, ImageOps
 
         from aurora.monitoring.media_validator import validate_image
@@ -202,6 +207,8 @@ class LocalComfyUIProvider(ImageProvider):
             if value is not None:
                 sampler[key] = value
         img_wf = comfy_cfg.get("img2img_workflow", "src/workflows/img2img.json")
+        if face_lock:
+            img_wf = comfy_cfg.get("img2img_facelock_workflow", "src/workflows/img2img_facelock.json")
         overrides = {
             "3": sampler,
             "6": {"text": prompt},
@@ -209,6 +216,8 @@ class LocalComfyUIProvider(ImageProvider):
             "10": {"filename_prefix": f"vf_{job_id}_img2img"},
             "12": {"image": uploaded},
         }
+        if face_lock:
+            overrides["15"] = {"weight": float(lc_cfg.get("face_lock_weight", 0.8))}
         orch = ComfyOrchestrator(cfg)
         outputs = orch.run_workflow(img_wf, overrides)
         if not outputs:
@@ -233,6 +242,7 @@ class LocalComfyUIProvider(ImageProvider):
                 "orchestrator": orch,
                 "mode": "img2img",
                 "denoise": denoise,
+                "face_lock": face_lock,
                 "source_path": str(source_path),
                 "workflow_overrides": overrides,
             },

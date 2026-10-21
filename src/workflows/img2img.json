@@ -3,7 +3,7 @@
     "class_type": "KSampler",
     "inputs": {
       "cfg": 5.5,
-      "denoise": 0.55,
+      "denoise": 0.45,
       "latent_image": [
         "11",
         0
