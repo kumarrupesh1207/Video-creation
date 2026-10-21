@@ -47,7 +47,7 @@ class FakeSwitchboard:
 @needs_ffmpeg
 def test_process_topic_writes_valid_reel_sidecar_and_is_resumable(workspace_tmp_path):
     args = argparse.Namespace(no_llm=True, style="cinematic", width=270, height=480, duration=2.0, fps=24,
-                              music=None, voiceover=False)
+                              music=None, voiceover=False, motion="camera")
     board = FakeSwitchboard(workspace_tmp_path)
     out_dir = workspace_tmp_path / "final" / "2026-01-01"
     info = autorun.process_topic({}, board, "a man in a navy suit", args, out_dir)
@@ -63,7 +63,7 @@ def test_process_topic_writes_valid_reel_sidecar_and_is_resumable(workspace_tmp_
 @needs_ffmpeg
 def test_failed_validation_leaves_no_final_file_and_is_not_skipped(workspace_tmp_path, monkeypatch):
     args = argparse.Namespace(no_llm=True, style="cinematic", width=270, height=480, duration=2.0, fps=24,
-                              music=None, voiceover=False)
+                              music=None, voiceover=False, motion="camera")
     board = FakeSwitchboard(workspace_tmp_path)
     out_dir = workspace_tmp_path / "final" / "2026-01-01"
 
@@ -88,3 +88,28 @@ def test_black_video_fails_deep_check(workspace_tmp_path):
     subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=black:s=64x64:d=1", str(p)], capture_output=True, check=True)
     rep = validate_video(p, deep=True)
     assert not rep.ok and any("black" in e for e in rep.errors)
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("clip_ok", [True, False])
+def test_ai_motion_reel_composes_clip_or_falls_back(workspace_tmp_path, monkeypatch, clip_ok):
+    import subprocess
+
+    from aurora.monitoring.media_validator import validate_video
+    from aurora.motion.providers import kaggle_provider
+    from aurora.pipeline import run
+
+    clip = workspace_tmp_path / "clip.mp4"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=s=160x96:d=1:r=24", str(clip)], capture_output=True, check=True)
+
+    def fake_generate(self, *a, **k):
+        if not clip_ok:
+            raise RuntimeError("kaggle down")
+        return SimpleNamespace(output_path=clip)
+
+    monkeypatch.setattr(kaggle_provider.KaggleProvider, "__init__", lambda self, cfg: None)
+    monkeypatch.setattr(kaggle_provider.KaggleProvider, "generate", fake_generate)
+    img = workspace_tmp_path / "in.png"
+    Image.new("RGB", (200, 300), (10, 120, 60)).save(img)
+    out = run(img, workspace_tmp_path / "o.mp4", 3, 24, 270, 480, None, motion="ai", config={})
+    assert validate_video(out, 270, 480, fps=24, duration_secs=3, require_audio=True, deep=True).ok

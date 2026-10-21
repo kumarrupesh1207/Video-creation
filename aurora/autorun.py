@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from aurora import ensure_utf8_console
+from aurora import ensure_utf8_console, load_env
 from aurora.monitoring.media_validator import validate_image, validate_video
 from aurora.pipeline import run as render_reel
 
@@ -127,7 +127,8 @@ def process_topic(cfg: dict, switchboard, topic: str, args: argparse.Namespace, 
     out_dir.mkdir(parents=True, exist_ok=True)
     mp4 = out_dir / f"{slug}.mp4"
     t0 = time.perf_counter()
-    render_reel(Path(image.output_path), mp4, args.duration, args.fps, 1080, 1920, audio)
+    render_reel(Path(image.output_path), mp4, args.duration, args.fps, 1080, 1920, audio,
+                motion=("ai" if args.motion == "ai" else "camera"), config={**cfg, "_motion_prompt": text["caption"]})
     t_reel = time.perf_counter() - t0
     video_report = validate_video(mp4, 1080, 1920, args.fps, args.duration, require_audio=True,
                                   deep=True, input_path=image.output_path)
@@ -146,7 +147,7 @@ def process_topic(cfg: dict, switchboard, topic: str, args: argparse.Namespace, 
         "reel": {"path": str(mp4), "width": video_report.width, "height": video_report.height, "fps": video_report.fps,
                  "duration_secs": video_report.duration_secs, "has_audio": video_report.has_audio,
                  "md5": video_report.md5, "sha256": video_report.sha256},
-        "audio": audio_note,
+        "audio": audio_note, "motion": args.motion,
         "timings_secs": {"llm": round(t_llm, 1), "image": round(t_img, 1), "reel": round(t_reel, 1),
                          "total": round(time.perf_counter() - started, 1)},
     }
@@ -172,6 +173,7 @@ def lower_priority() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ensure_utf8_console()
+    load_env()
     ap = argparse.ArgumentParser(description="Aurora autorun: topics -> reels")
     ap.add_argument("--topics", type=Path, required=True, help="text file, one topic per line")
     ap.add_argument("--config", type=Path, default=ROOT / "config.yaml")
@@ -184,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--height", type=int, default=768)
     ap.add_argument("--duration", type=float, default=15.0)
     ap.add_argument("--fps", type=int, default=24)
+    ap.add_argument("--motion", choices=["camera", "ai"], default="camera",
+                    help="camera = local Ken Burns (free, fast); ai = Kaggle Wan image-to-video (falls back to camera)")
     ap.add_argument("--no-llm", action="store_true", help="skip the LLM; use the topic text as prompt and caption")
     ap.add_argument("--limit", type=int, default=0, help="max topics to render this run (0 = all)")
     args = ap.parse_args(argv)

@@ -1,7 +1,8 @@
 import psutil
-from aurora import ensure_utf8_console
+from aurora import ensure_utf8_console, load_env
 
 ensure_utf8_console()
+load_env()
 import subprocess
 import os
 import threading

@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from aurora.motion.providers.remote_i2v_base import (
@@ -26,6 +27,12 @@ WORKER_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "kaggle" / "au
 class KaggleProvider(RemoteI2VProvider):
     provider_name = "kaggle_provider"
 
+    def __init__(self, config: dict):
+        super().__init__(config)
+        cfg = self._provider_config()
+        self.timeout_sec = int(cfg.get("timeout_sec", 3600))  # first run downloads ~30 GB of weights
+        self.poll_sec = int(cfg.get("poll_sec", 20))
+
     def _provider_config(self) -> dict:
         return self.config.get("motion", {}).get("i2v", {}).get("kaggle", {})
 
@@ -33,6 +40,8 @@ class KaggleProvider(RemoteI2VProvider):
         user, key = os.getenv("KAGGLE_USERNAME", "").strip(), os.getenv("KAGGLE_KEY", "").strip()
         if not user or not key:
             raise RemoteAuthenticationError(f"[{self.provider_name}] KAGGLE_USERNAME / KAGGLE_KEY are not set.")
+        if key.startswith("KGAT") and not os.getenv("KAGGLE_API_TOKEN"):
+            os.environ["KAGGLE_API_TOKEN"] = key  # new-format token; legacy keys keep using KAGGLE_KEY
         from kaggle.api.kaggle_api_extended import KaggleApi  # pip install kaggle
 
         api = KaggleApi()
@@ -46,12 +55,18 @@ class KaggleProvider(RemoteI2VProvider):
             raise RuntimeError(f"[{self.provider_name}] Provider disabled in config (motion.i2v.kaggle.enabled).")
         api, user = self._api()
         slug = re.sub(r"[^a-z0-9-]", "-", f"aurora-i2v-{payload['request_id']}".lower())[:50]
+        from PIL import Image
+
+        with Image.open(payload["source_image"]) as src:
+            portrait = src.height > src.width
+        long_side, short_side = int(cfg.get("width", 832)), int(cfg.get("height", 480))
+        width, height = (short_side, long_side) if portrait else (long_side, short_side)
         request = {
             "mode": "i2v",
             "prompt": payload.get("motion_prompt") or "gentle cinematic camera motion",
             "seed": payload.get("seed"),
-            "width": int(cfg.get("width", 832)),
-            "height": int(cfg.get("height", 480)),
+            "width": width,
+            "height": height,
             "num_frames": int(cfg.get("num_frames", 49)),
             "steps": int(cfg.get("steps", 30)),
             "model": cfg.get("model", "Wan-AI/Wan2.2-TI2V-5B-Diffusers"),
@@ -70,6 +85,7 @@ class KaggleProvider(RemoteI2VProvider):
 
     def _poll_remote_status(self, remote_job, response_json):
         del response_json
+        time.sleep(self.poll_sec)  # be gentle with the Kaggle API
         api, _ = self._api()
         status = str(api.kernels_status(remote_job["ref"]).status).lower()
         if "error" in status or "cancel" in status:

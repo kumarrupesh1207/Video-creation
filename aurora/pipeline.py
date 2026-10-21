@@ -12,7 +12,7 @@ if not __package__:  # `python aurora/pipeline.py ...` puts aurora/ (not the rep
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from aurora import ensure_utf8_console
+from aurora import ensure_utf8_console, load_env
 from aurora.logs import StructuredLogger
 from aurora.monitoring.media_validator import validate_video
 from aurora.motion.providers.ffmpeg_kenburns import FFmpegKenBurns
@@ -26,11 +26,23 @@ def run(
     width: int = 1080,
     height: int = 1920,
     audio_path: Path | None = None,
+    motion: str = "camera",
+    config: dict | None = None,
 ) -> Path:
     """Run the Sprint 1 static cinematic pipeline."""
     logger = StructuredLogger(component="pipeline")
     provider = FFmpegKenBurns(logger=logger)
     logger.info("pipeline_start", provider=provider.name, mode=provider.mode.value, tier=provider.tier.value, duration_secs=duration_secs)
+    if motion == "ai":
+        ai_path = _ai_motion_reel(image_path, output_path, duration_secs, fps, width, height, audio_path,
+                                  config or {}, provider.ffmpeg, logger)
+        if ai_path:
+            report = validate_video(ai_path, width, height, fps=fps, duration_secs=duration_secs,
+                                    require_audio=True, deep=True, input_path=image_path)
+            if report.ok:
+                return ai_path
+            logger.error("output_validation_failed", provider="kaggle_provider", errors=report.errors)
+        logger.warning("ai_motion_fallback", provider="ffmpeg_kenburns", reason="AI motion unavailable or invalid")
     report = None
     for attempt in (1, 2):  # one retry if the render is missing/corrupt
         result = provider.generate(
@@ -64,6 +76,34 @@ def run(
         cost_usd=result.cost_usd,
     )
     return result.output_path
+
+
+def _ai_motion_reel(image_path, output_path, duration_secs, fps, width, height, audio_path, config, ffmpeg, logger):
+    """AI motion (Kaggle Wan clip, boomerang-looped to duration). Returns the reel path, or None to fall back."""
+    try:
+        from aurora.motion.providers.ffmpeg_kenburns import audio_args
+        from aurora.motion.providers.kaggle_provider import KaggleProvider
+
+        clip = KaggleProvider(config).generate(
+            image_path, duration=int(duration_secs), caption_text=config.get("_motion_prompt", ""),
+            job_id=logger.job_id,
+        ).output_path
+        boom = Path(output_path).with_suffix(".boom.mp4")
+        subprocess.run([ffmpeg, "-y", "-i", str(clip), "-filter_complex",
+                        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},"
+                        f"setsar=1,fps={fps},split[f][r];[r]reverse[rr];[f][rr]concat=n=2:v=1:a=0[v]",
+                        "-map", "[v]", "-an", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", str(boom)],
+                       capture_output=True, text=True, timeout=300, check=True)
+        audio_in, audio_out = audio_args(audio_path)
+        subprocess.run([ffmpeg, "-y", "-stream_loop", "-1", "-i", str(boom), *audio_in, "-t", str(duration_secs),
+                        "-r", str(fps), "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
+                        "-movflags", "+faststart", *audio_out, str(output_path)],
+                       capture_output=True, text=True, timeout=300, check=True)
+        boom.unlink(missing_ok=True)
+        return Path(output_path)
+    except Exception as exc:  # noqa: BLE001 - any failure -> local camera motion
+        logger.error("ai_motion_failed", provider="kaggle_provider", error=str(exc))
+        return None
 
 
 def run_prompt_ledger(image_path: Path, output_path: Path, prompt_ledger: Path) -> Path:
@@ -269,6 +309,7 @@ def _concat_segments(ffmpeg: str, segment_paths: list[Path], output_path: Path, 
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse CLI arguments and render a Ken Burns MP4."""
     ensure_utf8_console()
+    load_env()
     parser = argparse.ArgumentParser(description="Project Aurora Sprint 1 pipeline")
     parser.add_argument("image_path", type=Path)
     parser.add_argument("output_path", type=Path)

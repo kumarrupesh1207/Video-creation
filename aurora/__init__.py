@@ -13,3 +13,14 @@ def ensure_utf8_console() -> None:
         except (ValueError, OSError):
             pass
 
+
+def load_env() -> None:
+    """Load the project .env into os.environ (never overrides real env vars; no-op if python-dotenv is absent)."""
+    try:
+        from pathlib import Path
+
+        from dotenv import load_dotenv
+
+        load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+    except ImportError:
+        pass

@@ -43,11 +43,13 @@ if mode == "t2i":
                      num_inference_steps=REQUEST.get("steps", 30), guidance_scale=5.5, generator=gen).images[0]  # noqa: F821
     image.save(os.path.join(OUT, "out.png"))
 elif mode == "i2v":
-    from diffusers import WanImageToVideoPipeline
+    from diffusers import AutoencoderKLWan, WanImageToVideoPipeline
     from diffusers.utils import export_to_video
 
-    pipe = WanImageToVideoPipeline.from_pretrained(REQUEST["model"], torch_dtype=torch.bfloat16)  # noqa: F821
+    vae = AutoencoderKLWan.from_pretrained(REQUEST["model"], subfolder="vae", torch_dtype=torch.float32)  # noqa: F821
+    pipe = WanImageToVideoPipeline.from_pretrained(REQUEST["model"], vae=vae, torch_dtype=torch.bfloat16)  # noqa: F821
     pipe.enable_model_cpu_offload()
+    print("loaded", torch.cuda.get_device_name(0), flush=True)
     pipe.vae.enable_tiling()
     image = Image.open(io.BytesIO(base64.b64decode(REQUEST["image_b64"]))).convert("RGB")  # noqa: F821
     w, h = REQUEST.get("width", 832), REQUEST.get("height", 480)  # noqa: F821
