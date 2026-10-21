@@ -61,12 +61,10 @@ def test_ai_motion_job_falls_back_and_reports(monkeypatch):
     tmp.cleanup()
 
 
-def test_upload_requires_consent_and_uploads_path():
+def test_upload_requires_uploads_path():
     with pytest.raises(server.HTTPException) as e:
-        server.create_single(server.CreateRequest(prompt="", source="upload", image_path="x.png"))
-    assert e.value.status_code == 422 and "permission" in e.value.detail
-    with pytest.raises(server.HTTPException):
-        server.create_single(server.CreateRequest(prompt="", source="upload", consent=True, image_path="C:/Windows/win.ini"))
+        server.create_single(server.CreateRequest(prompt="", source="upload", image_path="C:/Windows/win.ini"))
+    assert e.value.status_code == 422
     with pytest.raises(ValidationError):
         server.CreateRequest(prompt="x", source="upload", denoise=0.9)
 
@@ -92,7 +90,7 @@ def test_upload_job_asis_and_restyle(monkeypatch, restyle):
     monkeypatch.setattr(lc.LocalComfyUIProvider, "generate_from_image", lambda self, source_path, prompt, style, resolution, job_id, negative_prompt=None, denoise=0.55, **k: (calls.update(denoise=denoise, source_path=source_path) or SimpleNamespace(
         output_path=photo, width=512, height=768, provider="local_comfyui", model="m", seed=1)), raising=False)
     req = server.CreateRequest(prompt="restyled" if restyle else "", source="upload", restyle=restyle, denoise=0.6,
-                               consent=True, image_path=str(photo), mode="image")
+                               image_path=str(photo), mode="image")
     server._create_jobs["u1"] = {"status": "running", "stage": "queued"}
     server._run_create_job("u1", req)
     job = server._create_jobs["u1"]

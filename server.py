@@ -868,7 +868,6 @@ class CreateRequest(BaseModel):
     image_path: str | None = None     # upload only: a file from /api/upload-image
     restyle: bool = False             # upload only: ComfyUI img2img instead of using the photo as-is
     denoise: float = Field(0.55, ge=0.35, le=0.75)
-    consent: bool = False             # upload only: user owns the photo / has permission
 
 
 class _Tee:
@@ -933,7 +932,7 @@ def _run_create_job(job_id: str, req: CreateRequest):
         shutil.copyfile(image.output_path, img_copy)
         sidecar = {"status": "ok", "engine_mode": "real", "source": "ui", "topic": req.prompt or "Uploaded photo", "slug": slug,
                    "created_at": datetime.now().isoformat(timespec="seconds"), "mode": req.mode,
-                   "input": ({"source": "upload", "restyle": req.restyle, "denoise": req.denoise, "consent": True}
+                   "input": ({"source": "upload", "restyle": req.restyle, "denoise": req.denoise}
                              if req.source == "upload" else {"source": "prompt"}),
                    "negative_prompt": req.negative_prompt, "aspect": req.aspect, "caption": req.prompt,
                    "image": {"provider": image.provider, "model": image.model, "seed": image.seed,
@@ -985,8 +984,6 @@ def _run_create_job(job_id: str, req: CreateRequest):
 @app.post("/api/create")
 def create_single(req: CreateRequest):
     if req.source == "upload":
-        if not req.consent:
-            raise HTTPException(status_code=422, detail="Confirm you own this photo or have the person's permission.")
         up = (_output_root() / "uploads").resolve()
         if not req.image_path or up not in Path(req.image_path).resolve().parents or not Path(req.image_path).is_file():
             raise HTTPException(status_code=422, detail="image_path must be a file uploaded via /api/upload-image.")

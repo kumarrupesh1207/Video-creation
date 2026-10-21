@@ -116,9 +116,8 @@ $('createForm').addEventListener('submit', async (e) => {
     music_path: state.mode === 'reel' ? state.musicPath : null,
   };
   const up = state.source === 'upload', restyle = up && state.restyle === 'restyle';
-  Object.assign(body, { source: state.source, image_path: up ? state.photoPath : null, restyle, denoise: +$('denoise').value, consent: up && $('consent').checked });
+  Object.assign(body, { source: state.source, image_path: up ? state.photoPath : null, restyle, denoise: +$('denoise').value });
   if (up && !state.photoPath) { msg.textContent = 'Choose a photo first.'; msg.className = 'hint err'; return; }
-  if (up && !body.consent) { msg.textContent = 'Please confirm you own the photo or have permission.'; msg.className = 'hint err'; return; }
   if ((!up || restyle) && !body.prompt) { msg.textContent = 'Write a prompt first.'; msg.className = 'hint err'; return; }
   $('submit').disabled = true;
   try {
