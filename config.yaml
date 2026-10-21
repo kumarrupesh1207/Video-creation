@@ -72,10 +72,10 @@ motion:
       timeout_sec: 3600
       poll_sec: 20
       model: "Wan-AI/Wan2.2-TI2V-5B-Diffusers"   # 24 GB model: runs with offload at 480p on 16 GB Kaggle GPUs
-      width: 832
-      height: 480
-      num_frames: 49
-      steps: 30
+      width: 576                     # 16 GB Kaggle T4: 832x480x49 OOMs in attention
+      height: 320
+      num_frames: 33
+      steps: 25
 
 providers:
   default: "nvidia_nim"

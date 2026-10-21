@@ -103,6 +103,7 @@ def _ai_motion_reel(image_path, output_path, duration_secs, fps, width, height, 
         return Path(output_path)
     except Exception as exc:  # noqa: BLE001 - any failure -> local camera motion
         logger.error("ai_motion_failed", provider="kaggle_provider", error=str(exc))
+        print(f"[pipeline] WARNING: AI motion failed, falling back to camera motion: {exc}", flush=True)
         return None
 
 

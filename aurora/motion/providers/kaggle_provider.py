@@ -74,7 +74,8 @@ class KaggleProvider(RemoteI2VProvider):
         }
         folder = Path(tempfile.mkdtemp(prefix="aurora_kaggle_"))
         (folder / "script.py").write_text(
-            f"REQUEST = {json.dumps(request)}\n" + WORKER_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
+            f"import json as _json\nREQUEST = _json.loads({json.dumps(request)!r})\n"
+            + WORKER_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
         (folder / "kernel-metadata.json").write_text(json.dumps({
             "id": f"{user}/{slug}", "title": slug, "code_file": "script.py", "language": "python",
             "kernel_type": "script", "is_private": True, "enable_gpu": True, "enable_internet": True,
@@ -96,7 +97,16 @@ class KaggleProvider(RemoteI2VProvider):
         del status_details
         api, _ = self._api()
         out = Path(tempfile.mkdtemp(prefix="aurora_kaggle_out_"))
-        api.kernels_output(remote_job["ref"], path=str(out))
+        # kaggle writes the run log with the locale encoding; on Windows (cp1252) that crashes, so download in UTF-8 mode
+        import subprocess
+        import sys
+        subprocess.run(
+            [sys.executable, "-X", "utf8", "-c",
+             "import sys; from kaggle.api.kaggle_api_extended import KaggleApi; "
+             "a = KaggleApi(); a.authenticate(); a.kernels_output(sys.argv[1], path=sys.argv[2])",
+             remote_job["ref"], str(out)],
+            check=True, env=os.environ.copy(), timeout=600,
+        )
         clips = sorted(out.rglob("*.mp4"))
         if not clips:
             raise RuntimeError(f"[{self.provider_name}] Kaggle kernel finished without an .mp4 output.")

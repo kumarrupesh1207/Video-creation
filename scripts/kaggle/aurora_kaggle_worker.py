@@ -7,6 +7,8 @@
 # Outputs land in /kaggle/working (.png for t2i, .mp4 for i2v). OFF until the user supplies Kaggle credentials.
 # CAVEAT (docs/research/GPU_BACKENDS.md): TI2V-5B is officially a 24 GB model. On 16 GB Kaggle GPUs this uses
 # CPU offload + 480p + ~2 s clips; expect slow or OOM-prone runs. Use a Kaggle T4x2/P100 and lower num_frames if it fails.
+import os as _os
+_os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 import base64
 import io
 import os
@@ -47,7 +49,8 @@ elif mode == "i2v":
     from diffusers.utils import export_to_video
 
     vae = AutoencoderKLWan.from_pretrained(REQUEST["model"], subfolder="vae", torch_dtype=torch.float32)  # noqa: F821
-    pipe = WanImageToVideoPipeline.from_pretrained(REQUEST["model"], vae=vae, torch_dtype=torch.bfloat16)  # noqa: F821
+    dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16  # T4/P100 have no native bf16
+    pipe = WanImageToVideoPipeline.from_pretrained(REQUEST["model"], vae=vae, torch_dtype=dtype)  # noqa: F821
     pipe.enable_model_cpu_offload()
     print("loaded", torch.cuda.get_device_name(0), flush=True)
     pipe.vae.enable_tiling()
