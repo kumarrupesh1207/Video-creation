@@ -10,7 +10,9 @@ import time
 import json
 import shutil
 import yaml
-from fastapi import FastAPI
+import re
+import uuid
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
@@ -530,7 +532,13 @@ def create_job(req: StartJobRequest):
 
 @app.get("/api/jobs")
 def list_jobs():
-    return {"items": _collect_jobs()}
+    create = []
+    for raw in _create_jobs.values():
+        j = {k: v for k, v in raw.items() if not k.startswith("_")}
+        if raw["status"] == "running":
+            j["elapsed_secs"] = round(time.time() - raw["_t0"], 1)
+        create.append(j)
+    return {"items": _collect_jobs(), "create_jobs": create[::-1]}
 
 
 @app.get("/api/batch")
@@ -754,6 +762,7 @@ def get_metrics():
         "disk_used_gb": round(disk.used / 1e9, 1),
         "disk_total_gb": round(disk.total / 1e9, 1),
         "disk_percent": disk.percent,
+        "gpu": _gpu_info(),
     }
 
 
@@ -828,6 +837,188 @@ def open_output():
         return {"status": "success"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+# ─── Create flow (single prompt -> image [-> reel]) ──────────
+# Reuses ImageSwitchboard + aurora.pipeline.run + the media validators; status is exposed via /api/jobs.
+_create_jobs: dict[str, dict] = {}
+_create_lock = threading.Lock()
+_ASPECTS = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080)}
+_AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".ogg"}
+
+
+class CreateRequest(BaseModel):
+    prompt: str = Field(..., max_length=1000)
+    negative_prompt: str = Field("", max_length=600)
+    mode: str = Field("reel", pattern="^(image|reel)$")
+    aspect: str = Field("9:16", pattern="^(9:16|1:1|16:9|custom)$")
+    width: int = Field(1080, ge=256, le=2160)   # custom only (reel size)
+    height: int = Field(1920, ge=256, le=2160)
+    duration: float = Field(15.0, ge=3, le=60)
+    fps: int = Field(24, ge=12, le=60)
+    provider: str = Field("auto", pattern="^(auto|local_comfyui|nvidia_nim)$")
+    music_path: str | None = None
+
+
+def _gen_size(w: int, h: int) -> list[int]:
+    """Generation size: long side 768, multiples of 8 (SD1.5-friendly)."""
+    k = 768 / max(w, h)
+    return [max(256, round(w * k / 8) * 8), max(256, round(h * k / 8) * 8)]
+
+
+def _run_create_job(job_id: str, req: CreateRequest):
+    import yaml
+    from datetime import date
+    job = _create_jobs[job_id]
+    t0 = time.perf_counter()
+    try:
+        from aurora.autorun import QUALITY_SUFFIX, slugify
+        from aurora.monitoring.media_validator import validate_image, validate_video
+        from aurora.pipeline import run as render_reel
+        from backend.app.services.image_switchboard import ImageSwitchboard
+
+        cfg = yaml.safe_load((Path(__file__).resolve().parent / "config.yaml").read_text(encoding="utf-8"))
+        if req.provider in ("local_comfyui", "nvidia_nim"):
+            cfg.setdefault("providers", {})["fallback_order"] = [req.provider]
+        rw, rh = _ASPECTS.get(req.aspect) or (max(256, req.width // 2 * 2), max(256, req.height // 2 * 2))
+        out_dir = _output_root() / "final" / date.today().isoformat()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        slug = f"{slugify(req.prompt)[:-7].rstrip('-')}-{datetime.now():%H%M%S}"
+        job.update(stage="image", slug=slug)
+        t_img = time.perf_counter()
+        image = ImageSwitchboard(cfg).generate(
+            req.prompt + QUALITY_SUFFIX, "cinematic", _gen_size(rw, rh), job_id,
+            negative_prompt=req.negative_prompt, force_new_image=True)
+        t_img = time.perf_counter() - t_img
+        report = validate_image(image.output_path, image.width, image.height)
+        if not report.ok:
+            raise RuntimeError(f"image failed validation: {report.errors}")
+        img_copy = out_dir / f"{slug}{Path(image.output_path).suffix}"
+        shutil.copyfile(image.output_path, img_copy)
+        sidecar = {"status": "ok", "engine_mode": "real", "source": "ui", "topic": req.prompt, "slug": slug,
+                   "created_at": datetime.now().isoformat(timespec="seconds"), "mode": req.mode,
+                   "negative_prompt": req.negative_prompt, "aspect": req.aspect, "caption": req.prompt,
+                   "image": {"provider": image.provider, "model": image.model, "seed": image.seed,
+                             "path": str(img_copy), "width": image.width, "height": image.height},
+                   "reel": None, "timings_secs": {"image": round(t_img, 1)}}
+        if req.mode == "reel":
+            job["stage"] = "reel"
+            mp4 = out_dir / f"{slug}.mp4"
+            audio = Path(req.music_path) if req.music_path else None
+            t_reel = time.perf_counter()
+            render_reel(Path(image.output_path), mp4, req.duration, req.fps, rw, rh, audio)
+            vr = validate_video(mp4, rw, rh, req.fps, req.duration, require_audio=True, deep=True,
+                                input_path=image.output_path)
+            if not vr.ok:
+                raise RuntimeError(f"reel failed validation: {vr.errors}")
+            sidecar["reel"] = {"path": str(mp4), "width": vr.width, "height": vr.height, "fps": vr.fps,
+                               "duration_secs": vr.duration_secs, "has_audio": vr.has_audio, "sha256": vr.sha256}
+            sidecar["audio"] = "music" if audio else "silent"
+            sidecar["timings_secs"]["reel"] = round(time.perf_counter() - t_reel, 1)
+        sidecar["timings_secs"]["total"] = round(time.perf_counter() - t0, 1)
+        (out_dir / f"{slug}.json").write_text(json.dumps(sidecar, indent=2, ensure_ascii=False), encoding="utf-8")
+        job.update(status="done", stage="done", outputs=_gallery_item(sidecar))
+    except Exception as exc:  # noqa: BLE001 - report to the UI
+        job.update(status="failed", stage="failed", error=str(exc))
+    finally:
+        job["finished_at"] = datetime.now().isoformat(timespec="seconds")
+        job["elapsed_secs"] = round(time.perf_counter() - t0, 1)
+
+
+@app.post("/api/create")
+def create_single(req: CreateRequest):
+    if not req.prompt.strip():
+        return {"status": "error", "message": "Prompt is empty."}
+    if req.music_path:
+        uploads = (_output_root() / "uploads").resolve()
+        if uploads not in Path(req.music_path).resolve().parents or not Path(req.music_path).is_file():
+            return {"status": "error", "message": "music_path must be a file uploaded via /api/upload-music."}
+    with _create_lock:
+        if _batch_running or any(j["status"] == "running" for j in _create_jobs.values()):
+            return {"status": "error", "message": "A job is already running."}
+        job_id = f"create_{datetime.now():%Y%m%d_%H%M%S}"
+        _create_jobs[job_id] = {
+            "job_id": job_id, "status": "running", "stage": "queued", "prompt": req.prompt,
+            "mode": req.mode, "aspect": req.aspect, "provider": req.provider, "duration": req.duration,
+            "fps": req.fps, "started_at": datetime.now().isoformat(timespec="seconds"),
+            "_t0": time.time(),
+        }
+    threading.Thread(target=_run_create_job, args=(job_id, req), daemon=True).start()
+    return {"status": "success", "job_id": job_id}
+
+
+@app.post("/api/upload-music")
+async def upload_music(request: Request, name: str = "music.mp3"):
+    ext = Path(name).suffix.lower()
+    if ext not in _AUDIO_EXT:
+        return {"status": "error", "message": f"Unsupported audio type {ext or '(none)'}."}
+    if int(request.headers.get("content-length") or 0) > 50 * 1024 * 1024:
+        return {"status": "error", "message": "File empty or larger than 50 MB."}
+    body = await request.body()
+    if not body or len(body) > 50 * 1024 * 1024:
+        return {"status": "error", "message": "File empty or larger than 50 MB."}
+    dest_dir = _output_root() / "uploads"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", Path(name).stem)[:40]
+    dest = dest_dir / f"{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}_{safe}{ext}"
+    dest.write_bytes(body)
+    return {"status": "success", "path": str(dest), "name": name, "size": len(body)}
+
+
+def _rel_final(path: str | None) -> str | None:
+    root = (_output_root() / "final").resolve()
+    try:
+        return Path(path).resolve().relative_to(root).as_posix() if path and Path(path).exists() else None
+    except ValueError:
+        return None
+
+
+def _gallery_item(data: dict) -> dict:
+    reel, img = _rel_final((data.get("reel") or {}).get("path")), _rel_final((data.get("image") or {}).get("path"))
+    dims = data.get("reel") or data.get("image") or {}
+    return {"slug": data.get("slug"), "prompt": data.get("topic"), "created_at": data.get("created_at"),
+            "provider": (data.get("image") or {}).get("provider"), "mode": "reel" if reel else "image",
+            "video_url": f"/api/files/{reel}" if reel else None, "image_url": f"/api/files/{img}" if img else None,
+            "duration_secs": (data.get("reel") or {}).get("duration_secs"),
+            "size": f"{dims.get('width', '?')}x{dims.get('height', '?')}"}
+
+
+@app.get("/api/gallery")
+def gallery():
+    items = []
+    for sc in (_output_root() / "final").glob("*/*.json"):
+        try:
+            data = json.loads(sc.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if data.get("status") == "ok":
+            item = _gallery_item(data)
+            if item["video_url"] or item["image_url"]:
+                items.append(item)
+    items.sort(key=lambda i: i.get("created_at") or "", reverse=True)
+    return {"items": items}
+
+
+@app.get("/api/files/{rel_path:path}")
+def get_output_file(rel_path: str, download: bool = False):
+    root = (_output_root() / "final").resolve()
+    target = (root / rel_path).resolve()
+    if root not in target.parents or not target.is_file() or target.suffix.lower() not in {".mp4", ".png", ".jpg", ".jpeg", ".webp"}:
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(target, filename=target.name if download else None)
+
+
+def _gpu_info():
+    exe = shutil.which("nvidia-smi")
+    if not exe:
+        return None
+    try:
+        out = subprocess.run([exe, "--query-gpu=name,utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=3).stdout.strip().splitlines()[0].split(",")
+        return {"name": out[0].strip(), "util_percent": float(out[1]), "vram_used_gb": round(float(out[2]) / 1024, 1),
+                "vram_total_gb": round(float(out[3]) / 1024, 1)}
+    except Exception:  # noqa: BLE001
+        return None
 
 
 if __name__ == "__main__":

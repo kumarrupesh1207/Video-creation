@@ -1,294 +1,213 @@
-// main.js — AI Video Factory Dashboard (Fully Wired)
+// Aurora Studio — Create / Queue / Gallery / System. Same-origin /api (Vite proxies to :8000).
+const API = '/api';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const getJson = async (path) => (await fetch(API + path)).json();
+const fmtSecs = (s) => { s = Math.round(s || 0); return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`; };
 
-document.addEventListener('DOMContentLoaded', () => {
-    const API_URL = 'http://127.0.0.1:8000/api';
+const state = { mode: 'reel', aspect: '9:16', musicPath: null, tab: 'create', jobs: [], prevRunning: false, galleryKey: '' };
 
-    // ─── Element References ───────────────────────────────────
-    const startBtn      = document.querySelector('.btn-glow');
-    const topicTextarea = document.querySelector('textarea');
-    const modeSelect    = document.querySelector('#mode-select');
-    const logContainer  = document.querySelector('.panel-5 .terminal, .logs-body, .terminal');
-    const statusBadge   = document.querySelector('.status-badge');
-    const progressFill  = document.querySelector('.progress-bar .fill, .global-progress .fill');
-    const progressValue = document.querySelector('.progress-value, .global-progress .value');
-    const elapsedEl     = document.querySelector('.elapsed-value, .elapsed');
-    const previewVideo  = document.querySelector('.preview-video');
-    const previewPlaceholder = document.querySelector('.video-placeholder');
+// ─── Tabs ────────────────────────────────────────────────
+function showTab(name) {
+  state.tab = name;
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.id === `tab-${name}`));
+  document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
+  if (name === 'gallery') loadGallery();
+  if (name === 'system') loadSystem();
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
-    // Clip card selection
-    const clipCards = document.querySelectorAll('.output-card.clip');
-    clipCards.forEach(card => {
-        card.addEventListener('click', () => {
-            clipCards.forEach(c => c.classList.remove('active'));
-            card.classList.add('active');
-        });
-    });
+// ─── Create form ─────────────────────────────────────────
+function bindSeg(id, key, after) {
+  $(id).addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    $(id).querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    state[key] = b.dataset.v;
+    after?.();
+  });
+}
+function syncForm() {
+  const reel = state.mode === 'reel';
+  $('reelOpts').hidden = !reel;
+  $('musicWrap').hidden = !reel;
+  $('customSize').hidden = state.aspect !== 'custom';
+  $('submit').textContent = reel ? 'Generate image + reel' : 'Generate image';
+  updateEstimate();
+}
+function updateEstimate() {
+  const p = $('provider').value;
+  const img = p === 'nvidia_nim' ? '~10 s · uses 1 NIM credit' : p === 'local_comfyui' ? '~5–10 min · free (local CPU)' : '~10 s with NIM (1 credit) or ~5–10 min on local CPU';
+  $('estimate').textContent = `Image: ${img}` + (state.mode === 'reel' ? ' · Reel: ~30 s' : '');
+}
+bindSeg('modeSeg', 'mode', syncForm);
+bindSeg('aspectSeg', 'aspect', syncForm);
+syncForm();
 
-    // ─── API Helper ───────────────────────────────────────────
-    async function callApi(endpoint, body = null) {
-        try {
-            const opts = { method: 'POST', headers: {} };
-            if (body) {
-                opts.headers['Content-Type'] = 'application/json';
-                opts.body = JSON.stringify(body);
-            }
-            const res = await fetch(`${API_URL}${endpoint}`, opts);
-            return await res.json();
-        } catch (err) {
-            console.error('API Error:', err);
-            return { status: 'error', message: err.message };
-        }
-    }
+const PROVIDER_HINTS = {
+  auto: 'Uses the order in config.yaml (NIM first if enabled, else ComfyUI).',
+  local_comfyui: 'Free, runs on this PC’s CPU: expect roughly 5–10 minutes per image.',
+  nvidia_nim: 'Fast (seconds) but spends free NIM credits.',
+};
+$('provider').addEventListener('change', () => { updateEstimate(); $('providerHint').textContent = PROVIDER_HINTS[$('provider').value]; });
+$('providerHint').textContent = PROVIDER_HINTS.auto;
 
-    // ─── Log Appender ─────────────────────────────────────────
-    function appendLog(line) {
-        if (!logContainer) return;
-        if (line === '[ping]') return;
-
-        const el = document.createElement('div');
-        el.className = 'log-line';
-
-        // Colour-code by tag
-        if (line.includes('[Log] ✅') || line.includes('Complete'))
-            el.style.color = '#22C55E';
-        else if (line.includes('[Log] ❌') || line.includes('FAILED') || line.includes('Aborted'))
-            el.style.color = '#EF4444';
-        else if (line.includes('[Log] ▶') || line.includes('Starting'))
-            el.style.color = '#A78BFA';
-        else if (line.includes('[ComfyUI]'))
-            el.style.color = '#38BDF8';
-        else if (line.includes('[LLM]'))
-            el.style.color = '#FB923C';
-        else if (line.includes('[VRAM]') || line.includes('[SERVER]'))
-            el.style.color = '#64748B';
-
-        el.textContent = line;
-        logContainer.appendChild(el);
-        logContainer.scrollTop = logContainer.scrollHeight;
-    }
-
-    // ─── Live Log Streaming (SSE) ─────────────────────────────
-    let logEventSource = null;
-
-    function startLogStream() {
-        if (logEventSource) logEventSource.close();
-        logEventSource = new EventSource(`${API_URL}/logs/stream`);
-        logEventSource.onmessage = (e) => appendLog(e.data);
-        logEventSource.onerror   = () => {
-            // Silently reconnect after 3s if server is up
-            setTimeout(startLogStream, 3000);
-        };
-    }
-    startLogStream();
-
-    let currentPreviewUrl = '';
-
-    async function refreshPreview() {
-        if (!previewVideo) return;
-        try {
-            const res = await fetch(`${API_URL}/latest-output`);
-            if (!res.ok) return;
-            const data = await res.json();
-            if (!data.video_url) return;
-
-            const nextUrl = `http://127.0.0.1:8000${data.video_url}?t=${encodeURIComponent(data.updated_at || '')}`;
-            if (nextUrl === currentPreviewUrl) return;
-
-            currentPreviewUrl = nextUrl;
-            previewVideo.src = nextUrl;
-            previewVideo.style.display = '';
-            if (previewPlaceholder) previewPlaceholder.style.display = 'none';
-        } catch (err) {
-            console.error('Preview refresh failed:', err);
-        }
-    }
-
-    refreshPreview();
-
-    // ─── Start Generation ─────────────────────────────────────
-    if (startBtn) {
-        startBtn.addEventListener('click', async () => {
-            const rawText = topicTextarea ? topicTextarea.value.trim() : '';
-            const topics = rawText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-            if (!topics.length) { alert('Please enter at least one Topic / Prompt first!'); return; }
-
-            startBtn.textContent = 'Initializing...';
-            startBtn.disabled = true;
-
-            const mode = modeSelect ? modeSelect.value : 'cinematic';
-            const res = await callApi('/start', { topics, mode });
-            if (res.status === 'success') {
-                startBtn.textContent = 'Job Running...';
-                appendLog(`[UI] Batch started — ${topics.length} topic(s) | mode=${mode}`);
-            } else {
-                alert('Error: ' + res.message);
-                startBtn.textContent = 'Start Generation';
-                startBtn.disabled = false;
-            }
-        });
-    }
-
-    // ─── All Buttons ──────────────────────────────────────────
-    let isPaused = false;
-    document.querySelectorAll('button').forEach(btn => {
-        const t = btn.innerText.trim();
-
-        if (t.includes('Stop Job')) {
-            btn.addEventListener('click', async () => {
-                const res = await callApi('/stop');
-                if (res.status === 'success') {
-                    appendLog('[UI] Task terminated.');
-                    if (startBtn) { startBtn.textContent = 'Start Generation'; startBtn.disabled = false; }
-                } else alert('Error: ' + res.message);
-            });
-        }
-
-        if (t.includes('Pause Job')) {
-            btn.addEventListener('click', async () => {
-                if (isPaused) {
-                    const res = await callApi('/resume');
-                    if (res.status === 'success') { btn.textContent = 'Pause Job'; isPaused = false; appendLog('[UI] Job resumed.'); }
-                } else {
-                    const res = await callApi('/pause');
-                    if (res.status === 'success') { btn.textContent = 'Resume Job'; isPaused = true; appendLog('[UI] Job paused.'); }
-                }
-            });
-        }
-
-        if (t.includes('Clear')) {
-            btn.addEventListener('click', () => { if (logContainer) logContainer.innerHTML = ''; });
-        }
-
-        if (t.includes('Open Output Folder')) {
-            btn.addEventListener('click', () => callApi('/open-output'));
-        }
-
-        if (t.includes('View Logs') || t.includes('View Full Logs')) {
-            btn.addEventListener('click', () => {
-                const panel = document.querySelector('.panel-5');
-                if (panel) {
-                    panel.scrollIntoView({ behavior: 'smooth' });
-                    panel.style.boxShadow = '0 0 24px rgba(123,77,255,0.7)';
-                    setTimeout(() => panel.style.boxShadow = '', 2000);
-                }
-            });
-        }
-
-        if (t.includes('+ New Project') || t.includes('New Project')) {
-            btn.addEventListener('click', () => {
-                if (topicTextarea) topicTextarea.value = '';
-                const p = document.querySelector('.panel-1');
-                if (p) p.scrollIntoView({ behavior: 'smooth' });
-                if (startBtn) { startBtn.textContent = 'Start Generation'; startBtn.disabled = false; }
-            });
-        }
-    });
-
-    // Upload / player placeholders
-    document.querySelectorAll('.upload-card, .play-btn, .vol-btn, .fs-btn').forEach(el => {
-        el.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (el.classList.contains('upload-card'))
-                alert('File upload will be enabled in Phase 3.');
-            else
-                alert('Video player will stream output in Phase 3.');
-        });
-    });
-
-    // ─── Pipeline Stepper Updater ─────────────────────────────
-    function updateStepper(phase) {
-        const steps = document.querySelectorAll('.step, .stepper-step');
-        steps.forEach((s, i) => {
-            s.classList.remove('active', 'completed', 'in-progress');
-            if (i + 1 < phase)  s.classList.add('completed');
-            if (i + 1 === phase) s.classList.add('active', 'in-progress');
-        });
-    }
-
-    // ─── Status Polling (every 2s) ────────────────────────────
-    let jobStartTime = null;
-    let elapsedTimer = null;
-
-    function startElapsed() {
-        jobStartTime = Date.now();
-        if (elapsedTimer) clearInterval(elapsedTimer);
-        elapsedTimer = setInterval(() => {
-            if (!elapsedEl) return;
-            const s = Math.floor((Date.now() - jobStartTime) / 1000);
-            const h = String(Math.floor(s / 3600)).padStart(2, '0');
-            const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
-            const sec = String(s % 60).padStart(2, '0');
-            elapsedEl.textContent = `${h}:${m}:${sec}`;
-        }, 1000);
-    }
-
-    function stopElapsed() {
-        if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
-    }
-
-    setInterval(async () => {
-        try {
-            const status = await (await fetch(`${API_URL}/status`)).json();
-
-            // Badge
-            if (statusBadge) {
-                if (status.running && status.paused) {
-                    statusBadge.innerHTML = 'Paused';
-                    statusBadge.className = 'status-badge paused';
-                } else if (status.running) {
-                    statusBadge.innerHTML = '<div class="dot"></div> Running';
-                    statusBadge.className = 'status-badge running';
-                    if (!jobStartTime) startElapsed();
-                } else {
-                    statusBadge.innerHTML = 'Idle';
-                    statusBadge.className = 'status-badge';
-                    stopElapsed();
-                    jobStartTime = null;
-                    refreshPreview();
-                    if (startBtn && startBtn.textContent === 'Job Running...') {
-                        startBtn.textContent = 'Start Generation';
-                        startBtn.disabled = false;
-                    }
-                }
-            }
-
-            // Progress bar
-            if (progressFill) progressFill.style.width = (status.progress || 0) + '%';
-            if (progressValue) progressValue.textContent = (status.progress || 0) + '%';
-
-            // Stepper
-            updateStepper(status.phase || 0);
-
-        } catch (e) { /* backend offline — silent */ }
-    }, 2000);
-
-    setInterval(refreshPreview, 5000);
-
-    // ─── Real System Metrics (every 3s) ──────────────────────
-    setInterval(async () => {
-        try {
-            const m = await (await fetch(`${API_URL}/metrics`)).json();
-
-            const setGauge = (sel, val, label) => {
-                const fill = document.querySelector(sel + ' .fill');
-                const txt  = document.querySelector(sel + ' .value');
-                if (fill) fill.style.width = val + '%';
-                if (txt)  txt.textContent  = label;
-            };
-
-            setGauge('.gauge-cpu',  m.cpu_percent, m.cpu_percent.toFixed(0) + '%');
-            setGauge('.gauge-ram',  m.ram_percent,  `${m.ram_used_gb} / ${m.ram_total_gb} GB`);
-            setGauge('.gauge-disk', m.disk_percent, `${m.disk_used_gb} / ${m.disk_total_gb} GB`);
-
-            // Simple text fallback for any stat bars in sidebar
-            const cpuEl  = document.querySelector('.stat-cpu  .stat-val');
-            const ramEl  = document.querySelector('.stat-ram  .stat-val');
-            const diskEl = document.querySelector('.stat-disk .stat-val');
-            if (cpuEl)  cpuEl.textContent  = m.cpu_percent.toFixed(0) + '%';
-            if (ramEl)  ramEl.textContent   = `${m.ram_used_gb} / ${m.ram_total_gb} GB`;
-            if (diskEl) diskEl.textContent  = `${m.disk_used_gb} / ${m.disk_total_gb} GB`;
-
-        } catch (e) { /* silent */ }
-    }, 3000);
-
+$('music').addEventListener('change', async () => {
+  const f = $('music').files[0];
+  state.musicPath = null;
+  if (!f) { $('musicName').textContent = 'No file chosen — reel will be silent'; return; }
+  $('musicName').textContent = `Uploading ${f.name}…`;
+  try {
+    const res = await (await fetch(`${API}/upload-music?name=${encodeURIComponent(f.name)}`, { method: 'POST', body: f })).json();
+    if (res.status !== 'success') throw new Error(res.message);
+    state.musicPath = res.path;
+    $('musicName').textContent = `${f.name} (${(f.size / 1e6).toFixed(1)} MB) ready`;
+  } catch (err) {
+    $('musicName').textContent = `Upload failed: ${err.message}`;
+    $('music').value = '';
+  }
 });
+
+$('createForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = $('formMsg');
+  msg.className = 'hint';
+  const body = {
+    prompt: $('prompt').value.trim(),
+    negative_prompt: $('negative').value.trim(),
+    mode: state.mode,
+    aspect: state.aspect,
+    width: +$('cw').value, height: +$('ch').value,
+    duration: +$('duration').value, fps: +$('fps').value,
+    provider: $('provider').value,
+    music_path: state.mode === 'reel' ? state.musicPath : null,
+  };
+  if (!body.prompt) { msg.textContent = 'Write a prompt first.'; msg.className = 'hint err'; return; }
+  $('submit').disabled = true;
+  try {
+    const res = await (await fetch(`${API}/create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+    if (res.status !== 'success') throw new Error(res.message || (Array.isArray(res.detail) ? res.detail.map((d) => `${d.loc.slice(-1)}: ${d.msg}`).join('; ') : 'Request failed'));
+    msg.textContent = '';
+    showTab('queue');
+    pollJobs();
+  } catch (err) {
+    msg.textContent = err.message; msg.className = 'hint err';
+  } finally {
+    $('submit').disabled = false;
+  }
+});
+
+// ─── Queue ───────────────────────────────────────────────
+const STAGES = [['image', 'Image'], ['reel', 'Reel'], ['done', 'Done']];
+function renderActive(job) {
+  const box = $('activeJob');
+  if (!job) { box.innerHTML = '<p class="empty">No job yet. Start one from Create.</p>'; return; }
+  const idx = STAGES.findIndex(([k]) => k === job.stage);
+  const steps = STAGES.filter(([k]) => k !== 'reel' || job.mode === 'reel').map(([k, label]) => {
+    const i = STAGES.findIndex(([x]) => x === k);
+    const cls = job.status === 'done' || i < idx ? 'done' : (i === idx && job.status === 'running' ? 'cur' : '');
+    return `<div class="${cls}">${label}</div>`;
+  }).join('');
+  const hint = job.status === 'running' && job.stage === 'image' && job.provider !== 'nvidia_nim'
+    ? '<p class="hint">Image generation on CPU can take 5–10 minutes. You can leave this page.</p>' : '';
+  const out = job.outputs;
+  box.innerHTML = `
+    <div class="bar"><b>${esc(job.status === 'running' ? 'Running' : job.status === 'done' ? 'Finished' : 'Failed')}</b>
+      <span class="hint">${fmtSecs(job.elapsed_secs)}</span></div>
+    <div class="steps">${steps}</div>${hint}
+    <dl class="kv"><dt>Prompt</dt><dd>${esc(job.prompt)}</dd><dt>Output</dt><dd>${job.mode === 'reel' ? `Reel ${job.duration}s @ ${job.fps}fps` : 'Image'} · ${esc(job.aspect)}</dd>
+      <dt>Provider</dt><dd>${esc(out?.provider || job.provider)}</dd><dt>Job</dt><dd>${esc(job.job_id)}</dd></dl>
+    ${job.error ? `<p class="err-text">${esc(job.error)}</p>` : ''}
+    ${out ? '<button class="btn primary" id="viewResult" type="button">View result</button>' : ''}`;
+  $('viewResult')?.addEventListener('click', () => openViewer(out));
+}
+
+function renderList(jobs) {
+  const el = $('jobList');
+  el.innerHTML = jobs.length ? jobs.map((j) => `
+    <div class="item"><span class="t">${esc(j.prompt)}</span>
+      <span class="s ${j.status === 'done' ? 'ok' : j.status === 'failed' ? 'bad' : ''}">${esc(j.status)} · ${fmtSecs(j.elapsed_secs)}</span></div>`).join('')
+    : '<p class="empty">Nothing here yet.</p>';
+}
+
+async function pollJobs() {
+  try {
+    const { create_jobs = [] } = await getJson('/jobs');
+    state.jobs = create_jobs;
+    const running = create_jobs.some((j) => j.status === 'running');
+    const latest = create_jobs[0];
+    renderActive(latest);
+    renderList(create_jobs.slice(1));
+    $('qBadge').hidden = !running;
+    const top = $('topStatus');
+    top.className = 'pill' + (running ? ' run' : latest?.status === 'failed' ? ' fail' : '');
+    top.textContent = running ? `Running · ${latest.stage}` : latest?.status === 'failed' ? 'Last job failed' : 'Idle';
+    $('submit').disabled = running;
+    if (state.prevRunning && !running) state.galleryKey = '';
+    state.prevRunning = running;
+  } catch { $('topStatus').textContent = 'API offline'; $('topStatus').className = 'pill fail'; }
+}
+
+// ─── Gallery ─────────────────────────────────────────────
+async function loadGallery() {
+  const { items = [] } = await getJson('/gallery');
+  const key = items.map((i) => i.slug).join('|');
+  if (key === state.galleryKey) return;
+  state.galleryKey = key;
+  $('gallery').innerHTML = items.length ? items.map((it, n) => {
+    const src = it.video_url || it.image_url;
+    const media = it.video_url
+      ? `<video class="media" data-n="${n}" src="${src}#t=0.5" preload="metadata" muted playsinline></video>`
+      : `<img class="media" data-n="${n}" src="${src}" loading="lazy" alt="">`;
+    return `<div class="tile">${media}<div class="meta"><b>${esc(it.prompt)}</b>${esc(it.mode)} · ${esc(it.size)} · ${esc(it.provider || '')}</div>
+      <a href="${src}?download=true" download>Download ${it.video_url ? 'MP4' : 'image'}</a></div>`;
+  }).join('') : '<p class="empty" style="grid-column:1/-1">No outputs yet.</p>';
+  $('gallery').querySelectorAll('.media').forEach((m) => m.addEventListener('click', () => openViewer(items[+m.dataset.n])));
+}
+
+function openViewer(it) {
+  $('viewerBody').innerHTML = it.video_url
+    ? `<video src="${it.video_url}" controls autoplay playsinline loop></video>`
+    : `<img src="${it.image_url}" alt="">`;
+  $('viewer').hidden = false;
+}
+$('viewerClose').addEventListener('click', () => { $('viewerBody').innerHTML = ''; $('viewer').hidden = true; });
+$('openFolder').addEventListener('click', () => fetch(`${API}/open-output`, { method: 'POST' }));
+
+// ─── System ──────────────────────────────────────────────
+const gauge = (label, text, pct) => `<div class="gauge"><div class="h"><span>${label}</span><span>${text}</span></div><div class="bar-bg"><i style="width:${Math.min(100, pct || 0)}%"></i></div></div>`;
+async function loadSystem() {
+  try {
+    const [m, p] = await Promise.all([getJson('/metrics'), getJson('/providers/status')]);
+    const g = m.gpu;
+    $('metrics').innerHTML = '<b>This machine</b>' +
+      gauge('CPU', `${m.cpu_percent.toFixed(0)}%`, m.cpu_percent) +
+      gauge('RAM', `${m.ram_used_gb} / ${m.ram_total_gb} GB`, m.ram_percent) +
+      gauge('Disk', `${m.disk_used_gb} / ${m.disk_total_gb} GB`, m.disk_percent) +
+      (g ? gauge(`GPU ${esc(g.name)}`, `${g.util_percent}%`, g.util_percent) + gauge('VRAM', `${g.vram_used_gb} / ${g.vram_total_gb} GB`, g.vram_used_gb / g.vram_total_gb * 100)
+         : '<p class="hint">No GPU detected — image generation runs on CPU (ComfyUI) or via NVIDIA NIM.</p>');
+    const nim = p.nvidia_nim, a = p.asset_library;
+    $('providers').innerHTML = `<b>Providers</b>
+      <p><span class="dot ${nim.enabled && nim.api_key_present ? 'on' : 'off'}"></span>NVIDIA NIM — ${nim.enabled ? (nim.api_key_present ? 'ready' : 'enabled, no API key') : 'disabled'}${nim.model ? ` · ${esc(nim.model)}` : ''}</p>
+      <p><span class="dot ${p.local_comfyui.enabled ? 'on' : 'off'}"></span>ComfyUI (local) — ${esc(p.local_comfyui.api_url || 'not configured')}</p>
+      <p class="hint">Asset library: ${a.count} images · ${a.cached_hits} cache hits · avg ${Math.round(a.avg_latency_ms / 1000)}s</p>`;
+  } catch { $('metrics').innerHTML = '<p class="empty">API offline.</p>'; }
+}
+
+// ─── Live logs (existing SSE) ────────────────────────────
+function startLogs() {
+  const es = new EventSource(`${API}/logs/stream`);
+  es.onmessage = (e) => {
+    if (e.data === '[ping]') return;
+    const pre = $('logs');
+    pre.textContent += e.data + '\n';
+    pre.scrollTop = pre.scrollHeight;
+  };
+  es.onerror = () => { es.close(); setTimeout(startLogs, 5000); };
+}
+startLogs();
+
+pollJobs();
+setInterval(pollJobs, 2500);
+setInterval(() => { if (state.tab === 'system') loadSystem(); if (state.tab === 'gallery') loadGallery(); }, 5000);
