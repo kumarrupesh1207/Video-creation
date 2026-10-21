@@ -867,7 +867,8 @@ class CreateRequest(BaseModel):
     source: str = Field("prompt", pattern="^(prompt|upload)$")
     image_path: str | None = None     # upload only: a file from /api/upload-image
     restyle: bool = False             # upload only: ComfyUI img2img instead of using the photo as-is
-    denoise: float = Field(0.55, ge=0.35, le=0.75)
+    denoise: float = Field(0.45, ge=0.35, le=0.75)
+    face_lock: bool = True            # restyle only: IP-Adapter face conditioning on the same photo
 
 
 class _Tee:
@@ -919,7 +920,7 @@ def _run_create_job(job_id: str, req: CreateRequest):
             job["events"] = ["Restyling your photo with ComfyUI (CPU, ~5-10 min)"]
             image = LocalComfyUIProvider(cfg).generate_from_image(
                 source_path=Path(req.image_path), prompt=req.prompt + QUALITY_SUFFIX, style="cinematic",
-                negative_prompt=req.negative_prompt, denoise=req.denoise, resolution=_gen_size(rw, rh), job_id=job_id)
+                negative_prompt=req.negative_prompt, denoise=req.denoise, face_lock=req.face_lock, resolution=_gen_size(rw, rh), job_id=job_id)
         else:
             image = ImageSwitchboard(cfg).generate(
                 req.prompt + QUALITY_SUFFIX, "cinematic", _gen_size(rw, rh), job_id,
@@ -932,7 +933,7 @@ def _run_create_job(job_id: str, req: CreateRequest):
         shutil.copyfile(image.output_path, img_copy)
         sidecar = {"status": "ok", "engine_mode": "real", "source": "ui", "topic": req.prompt or "Uploaded photo", "slug": slug,
                    "created_at": datetime.now().isoformat(timespec="seconds"), "mode": req.mode,
-                   "input": ({"source": "upload", "restyle": req.restyle, "denoise": req.denoise}
+                   "input": ({"source": "upload", "restyle": req.restyle, "denoise": req.denoise, "face_lock": req.face_lock}
                              if req.source == "upload" else {"source": "prompt"}),
                    "negative_prompt": req.negative_prompt, "aspect": req.aspect, "caption": req.prompt,
                    "image": {"provider": image.provider, "model": image.model, "seed": image.seed,

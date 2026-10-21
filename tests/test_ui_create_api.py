@@ -87,7 +87,7 @@ def test_upload_job_asis_and_restyle(monkeypatch, restyle):
     Image.effect_noise((512, 768), 60).convert("RGB").save(photo)
     calls = {}
     monkeypatch.setattr(sb.ImageSwitchboard, "generate", lambda *a, **k: calls.setdefault("switchboard", True))
-    monkeypatch.setattr(lc.LocalComfyUIProvider, "generate_from_image", lambda self, source_path, prompt, style, resolution, job_id, negative_prompt=None, denoise=0.55, **k: (calls.update(denoise=denoise, source_path=source_path) or SimpleNamespace(
+    monkeypatch.setattr(lc.LocalComfyUIProvider, "generate_from_image", lambda self, source_path, prompt, style, resolution, job_id, negative_prompt=None, denoise=0.55, face_lock=False, **k: (calls.update(denoise=denoise, face_lock=face_lock, source_path=source_path) or SimpleNamespace(
         output_path=photo, width=512, height=768, provider="local_comfyui", model="m", seed=1)), raising=False)
     req = server.CreateRequest(prompt="restyled" if restyle else "", source="upload", restyle=restyle, denoise=0.6,
                                image_path=str(photo), mode="image")
@@ -98,5 +98,6 @@ def test_upload_job_asis_and_restyle(monkeypatch, restyle):
     assert "switchboard" not in calls
     assert job["outputs"]["provider"] == ("local_comfyui" if restyle else "upload")
     assert (calls.get("denoise") == 0.6) == restyle
+    assert calls.get("face_lock", True) is True
     monkeypatch.undo()
     tmp.cleanup()

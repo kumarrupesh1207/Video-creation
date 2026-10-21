@@ -35,8 +35,9 @@
             <button type="button" data-v="asis" class="on">Use photo as-is</button>
             <button type="button" data-v="restyle">Restyle with prompt (ComfyUI)</button>
           </div>
+          <label id="faceWrap" class="check" hidden><input id="faceLock" type="checkbox" checked> <span>Face lock <em>Keeps the same face (IP-Adapter). Needs the ComfyUI IPAdapter node.</em></span></label>
           <label id="denoiseWrap" hidden>Keep original: <b id="keepLabel">45%</b>
-            <input id="denoise" type="range" min="0.35" max="0.75" step="0.05" value="0.55">
+            <input id="denoise" type="range" min="0.35" max="0.75" step="0.05" value="0.45">
             <span class="hint">More original ← → more change. Restyle runs on CPU: ~5–10 min.</span>
           </label>
           <p class="hint">No sexual content; don’t impersonate real people.</p>

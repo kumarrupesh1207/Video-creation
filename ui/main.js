@@ -32,6 +32,7 @@ function syncForm() {
   const up = state.source === 'upload', restyle = up && state.restyle === 'restyle';
   $('uploadBox').hidden = !up;
   $('denoiseWrap').hidden = !restyle;
+  $('faceWrap').hidden = !restyle;
   $('promptLabel').textContent = !up ? 'Prompt' : restyle ? 'Prompt (describe the new look)' : 'Prompt / motion idea (optional)';
   $('negative').closest('label').hidden = up && !restyle;
   const reel = state.mode === 'reel';
@@ -116,7 +117,7 @@ $('createForm').addEventListener('submit', async (e) => {
     music_path: state.mode === 'reel' ? state.musicPath : null,
   };
   const up = state.source === 'upload', restyle = up && state.restyle === 'restyle';
-  Object.assign(body, { source: state.source, image_path: up ? state.photoPath : null, restyle, denoise: +$('denoise').value });
+  Object.assign(body, { source: state.source, image_path: up ? state.photoPath : null, restyle, denoise: +$('denoise').value, face_lock: $('faceLock').checked });
   if (up && !state.photoPath) { msg.textContent = 'Choose a photo first.'; msg.className = 'hint err'; return; }
   if ((!up || restyle) && !body.prompt) { msg.textContent = 'Write a prompt first.'; msg.className = 'hint err'; return; }
   $('submit').disabled = true;
