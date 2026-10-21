@@ -26,6 +26,64 @@ seed = REQUEST.get("seed") or 1234  # noqa: F821 - REQUEST is injected
 gen = torch.Generator("cuda").manual_seed(int(seed))
 mode = REQUEST["mode"]  # noqa: F821
 
+ESRGAN_URLS = {  # anime model for cel-shaded prompts, general model otherwise (anime model cartoonifies photos)
+    "anime": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth",
+    "photo": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+}
+
+
+def _enhance(src, dst, upscale=True, interpolate=2, long_side=1920):
+    """Smooth (ffmpeg motion interpolation, played as slow-mo) then sharpen (Real-ESRGAN anime x4) a clip."""
+    import shutil
+    import urllib.request
+
+    import imageio.v2 as imageio
+    import imageio_ffmpeg
+    import numpy as np
+
+    ff = imageio_ffmpeg.get_ffmpeg_exe()
+    cur = src
+    if interpolate > 1:
+        mid = os.path.join(OUT, "interp.mp4")
+        vf = (f"minterpolate=fps={24 * interpolate}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,"
+              f"setpts={interpolate}*PTS")
+        subprocess.run([ff, "-y", "-v", "error", "-i", cur, "-vf", vf, "-r", "24", "-c:v", "libx264",
+                        "-crf", "12", "-pix_fmt", "yuv420p", mid], check=True)
+        cur = mid
+        print("interpolated x", interpolate, flush=True)
+    if not upscale:
+        shutil.copyfile(cur, dst)
+        return
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "spandrel"], check=False)
+    from spandrel import ModelLoader
+
+    kind = "anime" if "anime" in str(REQUEST.get("prompt", "")).lower() else "photo"  # noqa: F821
+    weights = f"/tmp/esrgan_{kind}.pth"
+    if not os.path.exists(weights):
+        urllib.request.urlretrieve(ESRGAN_URLS[kind], weights)
+    print("upscaler:", kind, flush=True)
+    model = ModelLoader().load_from_file(weights).cuda().eval().half()
+    reader = imageio.get_reader(cur)
+    writer = imageio.get_writer(dst, fps=24, codec="libx264", quality=None, macro_block_size=2,
+                                ffmpeg_params=["-crf", "14", "-pix_fmt", "yuv420p"])
+    n = 0
+    for frame in reader:
+        t = torch.from_numpy(np.ascontiguousarray(frame)).permute(2, 0, 1).unsqueeze(0).half().div(255).cuda()
+        with torch.no_grad():
+            up = model(t)
+        img = Image.fromarray(up.clamp(0, 1).mul(255).byte().squeeze(0).permute(1, 2, 0).cpu().numpy())
+        scale = long_side / max(img.size)
+        if scale < 1:
+            img = img.resize((round(img.width * scale) // 2 * 2, round(img.height * scale) // 2 * 2), Image.LANCZOS)
+        writer.append_data(np.asarray(img))
+        n += 1
+    writer.close()
+    reader.close()
+    if cur != src:
+        os.remove(cur)  # drop the intermediate so only out.mp4 is published
+    print("upscaled frames:", n, "->", img.size, flush=True)
+
+
 if mode == "t2i":
     model = REQUEST.get("model", "stabilityai/stable-diffusion-xl-base-1.0")  # noqa: F821
     if "FLUX" in model:
@@ -59,7 +117,19 @@ elif mode == "i2v":
     frames = pipe(image=image.resize((w, h)), prompt=REQUEST["prompt"], width=w, height=h,  # noqa: F821
                   num_frames=REQUEST.get("num_frames", 49), num_inference_steps=REQUEST.get("steps", 30),  # noqa: F821
                   guidance_scale=5.0, generator=gen).frames[0]
-    export_to_video(frames, os.path.join(OUT, "out.mp4"), fps=24)
+    raw = os.path.join(OUT, "raw.mp4")
+    export_to_video(frames, raw, fps=24)
+    del pipe, vae, frames
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+    final = os.path.join(OUT, "out.mp4")
+    try:
+        _enhance(raw, final, REQUEST.get("upscale", True), int(REQUEST.get("interpolate", 2)))  # noqa: F821
+        os.remove(raw)
+    except Exception as exc:  # noqa: BLE001 - enhancement is best effort; never lose the raw clip
+        print("enhance failed, keeping raw clip:", repr(exc), flush=True)
+        os.replace(raw, final)
 else:
     raise SystemExit(f"unknown mode {mode}")
 print("done", mode)

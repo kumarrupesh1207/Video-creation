@@ -107,7 +107,7 @@ class KaggleProvider(RemoteI2VProvider):
              remote_job["ref"], str(out)],
             check=True, env=os.environ.copy(), timeout=600,
         )
-        clips = sorted(out.rglob("*.mp4"))
+        clips = sorted(out.rglob("out.mp4")) or sorted(out.rglob("*.mp4"))  # the worker's final clip wins over intermediates
         if not clips:
             raise RuntimeError(f"[{self.provider_name}] Kaggle kernel finished without an .mp4 output.")
         response_path.parent.mkdir(parents=True, exist_ok=True)
