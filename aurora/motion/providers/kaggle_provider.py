@@ -93,8 +93,12 @@ class KaggleProvider(RemoteI2VProvider):
     def _poll_remote_status(self, remote_job, response_json):
         del response_json
         time.sleep(self.poll_sec)  # be gentle with the Kaggle API
-        api, _ = self._api()
-        status = str(api.kernels_status(remote_job["ref"]).status).lower()
+        try:
+            api, _ = self._api()
+            status = str(api.kernels_status(remote_job["ref"]).status).lower()
+        except (ConnectionError, OSError) as exc:  # a dropped connection is not a failed kernel; poll again
+            print(f"[{self.provider_name}] status poll failed ({exc!r}); retrying", flush=True)
+            return {"status": "processing", "raw_status": "poll_error"}
         if "error" in status or "cancel" in status:
             raise RemoteWorkerCrashError(f"[{self.provider_name}] Kaggle kernel ended with status: {status}")
         return {"status": "COMPLETED" if "complete" in status else "processing", "raw_status": status}

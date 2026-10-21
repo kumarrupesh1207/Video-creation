@@ -927,6 +927,7 @@ def _run_create_job(job_id: str, req: CreateRequest):
                 if req.action.strip():
                     cfg.setdefault("motion", {}).setdefault("i2v", {}).setdefault("kaggle", {})["motion_suffix"] = (
                         f"Static camera. {req.action.strip()}. Consistent face and body.")
+                    cfg["motion"]["i2v"]["kaggle"]["loop_mode"] = "forward"  # a reversed run looks like running backwards
                 cfg["_motion_prompt"] = req.prompt
             mp4 = out_dir / f"{slug}.mp4"
             audio = Path(req.music_path) if req.music_path else None

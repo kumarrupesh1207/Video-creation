@@ -96,9 +96,12 @@ def _ai_motion_reel(image_path, output_path, duration_secs, fps, width, height, 
                                capture_output=True, text=True, timeout=60)
         clip_secs = float(probe.stdout.strip() or 0) * keep
         trim = f"trim=end={clip_secs:.3f},setpts=PTS-STARTPTS," if clip_secs > 0.5 else ""
+        # boomerang suits ambient motion (aura, hair); directional actions (running) must only loop forward
+        loop = config.get("motion", {}).get("i2v", {}).get("kaggle", {}).get("loop_mode", "boomerang")
+        tail = ("split[f][r];[r]reverse[rr];[f][rr]concat=n=2:v=1:a=0[v]" if loop == "boomerang" else "null[v]")
         subprocess.run([ffmpeg, "-y", "-i", str(clip), "-filter_complex",
                         f"[0:v]{trim}scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},"
-                        f"setsar=1,fps={fps},split[f][r];[r]reverse[rr];[f][rr]concat=n=2:v=1:a=0[v]",
+                        f"setsar=1,fps={fps},{tail}",
                         "-map", "[v]", "-an", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", str(boom)],
                        capture_output=True, text=True, timeout=300, check=True)
         audio_in, audio_out = audio_args(audio_path)
