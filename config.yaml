@@ -76,6 +76,8 @@ motion:
       height: 320
       num_frames: 33
       steps: 25
+      segments: 2                    # chained clips per job; quality drifts badly by the 3rd (tested 2026-10-21)
+      keep_ratio: 0.75
 
 providers:
   default: "nvidia_nim"
