@@ -41,6 +41,24 @@ except ImportError:
         from comfy_orchestrator import ComfyOrchestrator
 
 
+def upload_image(image_path: Path, api_url: str = "http://127.0.0.1:8188") -> str:
+    """POST an image to ComfyUI's /upload/image. Returns the filename as ComfyUI registered it (use in LoadImage)."""
+    import requests
+
+    image_path = Path(image_path)
+    with open(image_path, "rb") as f:
+        resp = requests.post(
+            f"{api_url}/upload/image",
+            files={"image": (image_path.name, f, "image/png")},
+            data={"overwrite": "true"},
+            timeout=30,
+        )
+    resp.raise_for_status()
+    uploaded_name = resp.json().get("name", image_path.name)
+    print(f"[VideoEngine] Uploaded keyframe -> ComfyUI input: {uploaded_name}")
+    return uploaded_name
+
+
 class VideoEngine:
     """SVD-XT Image-to-Video generator via ComfyUI API."""
 
@@ -138,26 +156,8 @@ class VideoEngine:
     # Internal helpers
     # ──────────────────────────────────────────────────────────────────────────
     def _upload_image(self, image_path: Path) -> str:
-        """
-        POST the keyframe image to ComfyUI's /upload/image endpoint.
-        Returns the filename as ComfyUI registered it (use in LoadImage node).
-        """
-        import requests
-        api_url = self.vid_cfg.get("api_url", "http://127.0.0.1:8188")
-        url = f"{api_url}/upload/image"
-
-        with open(image_path, "rb") as f:
-            resp = requests.post(
-                url,
-                files={"image": (image_path.name, f, "image/png")},
-                data={"overwrite": "true"},
-                timeout=30
-            )
-        resp.raise_for_status()
-        result = resp.json()
-        uploaded_name = result.get("name", image_path.name)
-        print(f"[VideoEngine] Uploaded keyframe → ComfyUI input: {uploaded_name}")
-        return uploaded_name
+        """POST the keyframe to ComfyUI; returns the filename as ComfyUI registered it (for LoadImage)."""
+        return upload_image(image_path, self.vid_cfg.get("api_url", "http://127.0.0.1:8188"))
 
     def _build_svd_overrides(self, image_name: str, motion_bucket: int,
                               fps: int, frames: int,

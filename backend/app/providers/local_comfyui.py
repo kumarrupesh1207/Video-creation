@@ -141,6 +141,103 @@ class LocalComfyUIProvider(ImageProvider):
             },
         )
 
+    def generate_from_image(
+        self,
+        source_path: str | Path,
+        prompt: str,
+        style: str,
+        resolution: list[int],
+        job_id: str,
+        negative_prompt: str | None = None,
+        denoise: float = 0.55,
+        seed: int | None = None,
+        steps: int | None = None,
+        cfg_scale: float | None = None,
+    ) -> ImageResult:
+        """img2img: restyle/edit an uploaded photo. Lower denoise keeps more of the person/composition."""
+        from PIL import Image, ImageOps
+
+        from aurora.monitoring.media_validator import validate_image
+        from src.modules.video_engine import upload_image
+
+        start = time.time()
+        source_path = Path(source_path)
+        if not source_path.is_file():
+            raise FileNotFoundError(f"[LocalComfyUI] Source image not found: {source_path}")
+        cfg = copy.deepcopy(self.config)
+        lc_cfg = cfg.get("providers", {}).get("local_comfyui", {})
+        if not resolution or len(resolution) < 2:
+            resolution = lc_cfg.get("default_resolution", self.DEFAULT_RESOLUTION)
+        width, height = (int(resolution[0]) // 8 * 8, int(resolution[1]) // 8 * 8)
+        denoise = min(1.0, max(0.05, float(denoise)))
+        job_root = Path(cfg.get("paths", {}).get("base_output", "outputs")) / job_id
+        (job_root / "images").mkdir(parents=True, exist_ok=True)
+        (job_root / "videos").mkdir(parents=True, exist_ok=True)
+        cfg.setdefault("paths", {})
+        cfg["paths"]["images_dir"] = str(job_root / "images")
+        cfg["paths"]["videos_dir"] = str(job_root / "videos")
+
+        # Crop/resize to the requested aspect (keeps the centre), then hand to ComfyUI's input folder.
+        with Image.open(source_path) as src:
+            fitted = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGB"), (width, height), Image.LANCZOS)
+        prepared = job_root / "images" / f"source_{width}x{height}.png"
+        fitted.save(prepared)
+        comfy_cfg = cfg.get("models", {}).get("comfyui", {})
+        uploaded = upload_image(prepared, comfy_cfg.get("api_url", "http://127.0.0.1:8188"))
+
+        runtime_negative = negative_prompt or lc_cfg.get("negative_prompt", self.DEFAULT_NEGATIVE)
+        try:
+            runtime_seed = int(seed) if seed is not None else 0
+        except (TypeError, ValueError):
+            runtime_seed = 0
+        if runtime_seed <= 0:
+            runtime_seed = random.randint(1, 2**31 - 1)
+        sampler = {"seed": runtime_seed, "denoise": denoise}
+        for key, value in (
+            ("steps", steps if steps is not None else lc_cfg.get("steps")),
+            ("cfg", cfg_scale if cfg_scale is not None else lc_cfg.get("cfg")),
+            ("sampler_name", lc_cfg.get("sampler_name")),
+            ("scheduler", lc_cfg.get("scheduler")),
+        ):
+            if value is not None:
+                sampler[key] = value
+        img_wf = comfy_cfg.get("img2img_workflow", "src/workflows/img2img.json")
+        overrides = {
+            "3": sampler,
+            "6": {"text": prompt},
+            "7": {"text": runtime_negative},
+            "10": {"filename_prefix": f"vf_{job_id}_img2img"},
+            "12": {"image": uploaded},
+        }
+        orch = ComfyOrchestrator(cfg)
+        outputs = orch.run_workflow(img_wf, overrides)
+        if not outputs:
+            raise RuntimeError("[LocalComfyUI] img2img returned no image outputs.")
+        image_path = Path(outputs[0])
+        report = validate_image(image_path, width, height)
+        if not report.ok:
+            raise RuntimeError(f"[LocalComfyUI] img2img output failed validation: {report.errors}")
+        workflow = json.loads(Path(img_wf).read_text(encoding="utf-8"))
+        return ImageResult(
+            provider="local_comfyui",
+            model=workflow.get("4", {}).get("inputs", {}).get("ckpt_name", "unknown"),
+            style=style,
+            latency_ms=int((time.time() - start) * 1000),
+            output_path=str(image_path),
+            width=width,
+            height=height,
+            seed=runtime_seed,
+            negative_prompt=runtime_negative,
+            normalized_prompt=normalize_prompt(prompt),
+            context={
+                "orchestrator": orch,
+                "mode": "img2img",
+                "denoise": denoise,
+                "source_path": str(source_path),
+                "workflow_overrides": overrides,
+            },
+        )
+
     @staticmethod
     def _write_refine_workflow(workflow: dict, seed_node: str, refine_cfg: dict, job_root: Path) -> tuple[str, str]:
         """Add a hires-fix style pass (latent upscale + low-denoise KSampler) and return (new workflow path, refine KSampler id)."""
