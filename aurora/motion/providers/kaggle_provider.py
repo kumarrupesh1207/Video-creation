@@ -63,8 +63,14 @@ class KaggleProvider(RemoteI2VProvider):
         width, height = (short_side, long_side) if portrait else (long_side, short_side)
         request = {
             "mode": "i2v",
-            "prompt": payload.get("motion_prompt") or "gentle cinematic camera motion",
-            "seed": payload.get("seed"),
+            # Wan follows the motion text literally: "powering up / dynamic action" produced crash-zooms and
+            # blown-out faces, so lock the camera and ask for subtle, in-place motion around the subject.
+            "prompt": (f"{payload.get('motion_prompt') or 'the subject'}. " + cfg.get(
+                "motion_suffix", "Static locked-off camera, the subject stays in place and keeps the same pose and "
+                "face, subtle natural motion: hair and clothes sway gently, light and aura flicker softly.")),
+            "negative": cfg.get("negative_prompt", "camera zoom, zoom in, camera movement, morphing, distorted face, "
+                                "deformed body, stretched limbs, overexposed, blown out highlights, flicker, blurry"),
+            "seed": payload.get("seed") or int(cfg.get("seed", 42)),
             "width": width,
             "height": height,
             "num_frames": int(cfg.get("num_frames", 49)),

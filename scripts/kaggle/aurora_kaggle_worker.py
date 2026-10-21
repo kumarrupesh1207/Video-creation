@@ -116,7 +116,7 @@ elif mode == "i2v":
     w, h = REQUEST.get("width", 832), REQUEST.get("height", 480)  # noqa: F821
     frames = pipe(image=image.resize((w, h)), prompt=REQUEST["prompt"], width=w, height=h,  # noqa: F821
                   num_frames=REQUEST.get("num_frames", 49), num_inference_steps=REQUEST.get("steps", 30),  # noqa: F821
-                  guidance_scale=5.0, generator=gen).frames[0]
+                  negative_prompt=REQUEST.get("negative"), guidance_scale=5.0, generator=gen).frames[0]  # noqa: F821
     raw = os.path.join(OUT, "raw.mp4")
     export_to_video(frames, raw, fps=24)
     del pipe, vae, frames

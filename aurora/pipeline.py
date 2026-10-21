@@ -89,8 +89,15 @@ def _ai_motion_reel(image_path, output_path, duration_secs, fps, width, height, 
             job_id=logger.job_id,
         ).output_path
         boom = Path(output_path).with_suffix(".boom.mp4")
+        # Wan drifts at the end of a clip (faces wash out), so keep only the stable head of it before looping.
+        keep = float(config.get("motion", {}).get("i2v", {}).get("kaggle", {}).get("keep_ratio", 0.75))
+        probe = subprocess.run([str(Path(ffmpeg).with_name("ffprobe" + Path(ffmpeg).suffix)), "-v", "error",
+                                "-show_entries", "format=duration", "-of", "csv=p=0", str(clip)],
+                               capture_output=True, text=True, timeout=60)
+        clip_secs = float(probe.stdout.strip() or 0) * keep
+        trim = f"trim=end={clip_secs:.3f},setpts=PTS-STARTPTS," if clip_secs > 0.5 else ""
         subprocess.run([ffmpeg, "-y", "-i", str(clip), "-filter_complex",
-                        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},"
+                        f"[0:v]{trim}scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},"
                         f"setsar=1,fps={fps},split[f][r];[r]reverse[rr];[f][rr]concat=n=2:v=1:a=0[v]",
                         "-map", "[v]", "-an", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", str(boom)],
                        capture_output=True, text=True, timeout=300, check=True)
