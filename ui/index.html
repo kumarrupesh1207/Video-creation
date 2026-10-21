@@ -17,8 +17,33 @@
     <!-- CREATE -->
     <section id="tab-create" class="tab active">
       <form id="createForm" class="card" autocomplete="off">
-        <label>Prompt
-          <textarea id="prompt" rows="4" maxlength="1000" placeholder="e.g. a man in a navy suit in a city at night" required></textarea>
+        <div class="field">
+          <span class="lbl">Start from</span>
+          <div class="seg" id="sourceSeg" role="radiogroup">
+            <button type="button" data-v="prompt" class="on">Prompt</button>
+            <button type="button" data-v="upload">Upload photo</button>
+          </div>
+        </div>
+
+        <div id="uploadBox" hidden>
+          <label>Photo <span class="opt">(jpg/png/webp, max 15 MB)</span>
+            <input id="photo" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+          </label>
+          <img id="photoPreview" class="preview" alt="" hidden>
+          <p id="photoInfo" class="hint"></p>
+          <div class="seg" id="restyleSeg" role="radiogroup">
+            <button type="button" data-v="asis" class="on">Use photo as-is</button>
+            <button type="button" data-v="restyle">Restyle with prompt (ComfyUI)</button>
+          </div>
+          <label id="denoiseWrap" hidden>Keep original: <b id="keepLabel">45%</b>
+            <input id="denoise" type="range" min="0.35" max="0.75" step="0.05" value="0.55">
+            <span class="hint">More original ← → more change. Restyle runs on CPU: ~5–10 min.</span>
+          </label>
+          <label class="check"><input id="consent" type="checkbox"> <span>I own this photo or have the person’s permission to use it. <em>No sexual content; don’t impersonate real people.</em></span></label>
+        </div>
+
+        <label><span id="promptLabel">Prompt</span>
+          <textarea id="prompt" rows="4" maxlength="1000" placeholder="e.g. a man in a navy suit in a city at night"></textarea>
         </label>
         <label>Negative prompt <span class="opt">(optional)</span>
           <textarea id="negative" rows="2" maxlength="600" placeholder="e.g. blurry, extra fingers, watermark"></textarea>

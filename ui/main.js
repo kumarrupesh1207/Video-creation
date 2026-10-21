@@ -5,7 +5,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const getJson = async (path) => (await fetch(API + path)).json();
 const fmtSecs = (s) => { s = Math.round(s || 0); return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`; };
 
-const state = { mode: 'reel', aspect: '9:16', musicPath: null, tab: 'create', motion: 'camera', jobs: [], prevRunning: false, galleryKey: '' };
+const state = { mode: 'reel', aspect: '9:16', musicPath: null, tab: 'create', motion: 'camera', source: 'prompt', restyle: 'asis', photoPath: null, jobs: [], prevRunning: false, galleryKey: '' };
 
 // ─── Tabs ────────────────────────────────────────────────
 function showTab(name) {
@@ -29,6 +29,11 @@ function bindSeg(id, key, after) {
   });
 }
 function syncForm() {
+  const up = state.source === 'upload', restyle = up && state.restyle === 'restyle';
+  $('uploadBox').hidden = !up;
+  $('denoiseWrap').hidden = !restyle;
+  $('promptLabel').textContent = !up ? 'Prompt' : restyle ? 'Prompt (describe the new look)' : 'Prompt / motion idea (optional)';
+  $('negative').closest('label').hidden = up && !restyle;
   const reel = state.mode === 'reel';
   $('motionWrap').hidden = !reel;
   $('actionWrap').hidden = !(reel && state.motion === 'ai');
@@ -40,10 +45,33 @@ function syncForm() {
 }
 function updateEstimate() {
   const p = $('provider').value;
-  const img = p === 'nvidia_nim' ? '~10 s · uses 1 NIM credit' : p === 'local_comfyui' ? '~5–10 min · free (local CPU)' : '~10 s with NIM (1 credit) or ~5–10 min on local CPU';
+  const up = state.source === 'upload';
+  const img = up ? (state.restyle === 'restyle' ? '~5–10 min · free (local CPU restyle)' : 'your photo, no generation') : p === 'nvidia_nim' ? '~10 s · uses 1 NIM credit' : p === 'local_comfyui' ? '~5–10 min · free (local CPU)' : '~10 s with NIM (1 credit) or ~5–10 min on local CPU';
   $('estimate').textContent = `Image: ${img}` + (state.mode === 'reel' ? (state.motion === 'ai' ? ' · AI motion on Kaggle: ~15–20 min (free GPU, falls back to camera if it fails)' : ' · Reel: ~30 s') : '');
 }
 bindSeg('modeSeg', 'mode', syncForm);
+bindSeg('sourceSeg', 'source', syncForm);
+bindSeg('restyleSeg', 'restyle', syncForm);
+$('denoise').addEventListener('input', () => { $('keepLabel').textContent = `${Math.round((0.75 - $('denoise').value) / 0.4 * 100)}%`; });
+$('keepLabel').textContent = `${Math.round((0.75 - $('denoise').value) / 0.4 * 100)}%`;
+$('photo').addEventListener('change', async () => {
+  const f = $('photo').files[0];
+  state.photoPath = null;
+  $('photoPreview').hidden = true;
+  if (!f) { $('photoInfo').textContent = ''; return; }
+  $('photoPreview').src = URL.createObjectURL(f);
+  $('photoPreview').hidden = false;
+  $('photoInfo').textContent = `Uploading ${f.name}…`;
+  try {
+    const res = await (await fetch(`${API}/upload-image?name=${encodeURIComponent(f.name)}`, { method: 'POST', body: f })).json();
+    if (res.status !== 'success') throw new Error(res.message);
+    state.photoPath = res.path;
+    $('photoInfo').textContent = `${f.name} · ${res.width}×${res.height} ready`;
+  } catch (err) {
+    $('photoInfo').textContent = `Upload failed: ${err.message}`;
+    $('photo').value = ''; $('photoPreview').hidden = true;
+  }
+});
 bindSeg('motionSeg', 'motion', syncForm);
 bindSeg('aspectSeg', 'aspect', syncForm);
 syncForm();
@@ -87,7 +115,11 @@ $('createForm').addEventListener('submit', async (e) => {
     motion: state.motion, action: $('action').value.trim(),
     music_path: state.mode === 'reel' ? state.musicPath : null,
   };
-  if (!body.prompt) { msg.textContent = 'Write a prompt first.'; msg.className = 'hint err'; return; }
+  const up = state.source === 'upload', restyle = up && state.restyle === 'restyle';
+  Object.assign(body, { source: state.source, image_path: up ? state.photoPath : null, restyle, denoise: +$('denoise').value, consent: up && $('consent').checked });
+  if (up && !state.photoPath) { msg.textContent = 'Choose a photo first.'; msg.className = 'hint err'; return; }
+  if (up && !body.consent) { msg.textContent = 'Please confirm you own the photo or have permission.'; msg.className = 'hint err'; return; }
+  if ((!up || restyle) && !body.prompt) { msg.textContent = 'Write a prompt first.'; msg.className = 'hint err'; return; }
   $('submit').disabled = true;
   try {
     const res = await (await fetch(`${API}/create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();

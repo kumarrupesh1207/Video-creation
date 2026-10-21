@@ -59,3 +59,46 @@ def test_ai_motion_job_falls_back_and_reports(monkeypatch):
     assert any("used camera motion" in e for e in job["events"])
     monkeypatch.undo()
     tmp.cleanup()
+
+
+def test_upload_requires_consent_and_uploads_path():
+    with pytest.raises(server.HTTPException) as e:
+        server.create_single(server.CreateRequest(prompt="", source="upload", image_path="x.png"))
+    assert e.value.status_code == 422 and "permission" in e.value.detail
+    with pytest.raises(server.HTTPException):
+        server.create_single(server.CreateRequest(prompt="", source="upload", consent=True, image_path="C:/Windows/win.ini"))
+    with pytest.raises(ValidationError):
+        server.CreateRequest(prompt="x", source="upload", denoise=0.9)
+
+
+@pytest.mark.parametrize("restyle", [False, True])
+def test_upload_job_asis_and_restyle(monkeypatch, restyle):
+    import tempfile
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from PIL import Image
+
+    import backend.app.providers.local_comfyui as lc
+    import backend.app.services.image_switchboard as sb
+
+    tmp = tempfile.TemporaryDirectory()
+    root = Path(tmp.name)
+    monkeypatch.chdir(root)
+    photo = root / "photo.png"
+    Image.effect_noise((512, 768), 60).convert("RGB").save(photo)
+    calls = {}
+    monkeypatch.setattr(sb.ImageSwitchboard, "generate", lambda *a, **k: calls.setdefault("switchboard", True))
+    monkeypatch.setattr(lc.LocalComfyUIProvider, "generate_from_image", lambda self, **k: (calls.update(k) or SimpleNamespace(
+        output_path=photo, width=512, height=768, provider="local_comfyui", model="m", seed=1)), raising=False)
+    req = server.CreateRequest(prompt="restyled" if restyle else "", source="upload", restyle=restyle, denoise=0.6,
+                               consent=True, image_path=str(photo), mode="image")
+    server._create_jobs["u1"] = {"status": "running", "stage": "queued"}
+    server._run_create_job("u1", req)
+    job = server._create_jobs["u1"]
+    assert job["status"] == "done", job.get("error")
+    assert "switchboard" not in calls
+    assert job["outputs"]["provider"] == ("local_comfyui" if restyle else "upload")
+    assert (calls.get("denoise") == 0.6) == restyle
+    monkeypatch.undo()
+    tmp.cleanup()

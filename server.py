@@ -12,6 +12,7 @@ import json
 import shutil
 import yaml
 import contextlib
+from types import SimpleNamespace
 import re
 import sys
 import uuid
@@ -863,6 +864,11 @@ class CreateRequest(BaseModel):
     music_path: str | None = None
     motion: str = Field("camera", pattern="^(camera|ai)$")
     action: str = Field("", max_length=300)
+    source: str = Field("prompt", pattern="^(prompt|upload)$")
+    image_path: str | None = None     # upload only: a file from /api/upload-image
+    restyle: bool = False             # upload only: ComfyUI img2img instead of using the photo as-is
+    denoise: float = Field(0.55, ge=0.35, le=0.75)
+    consent: bool = False             # upload only: user owns the photo / has permission
 
 
 class _Tee:
@@ -901,20 +907,34 @@ def _run_create_job(job_id: str, req: CreateRequest):
         rw, rh = _ASPECTS.get(req.aspect) or (max(256, req.width // 2 * 2), max(256, req.height // 2 * 2))
         out_dir = _output_root() / "final" / date.today().isoformat()
         out_dir.mkdir(parents=True, exist_ok=True)
-        slug = f"{slugify(req.prompt)[:-7].rstrip('-')}-{datetime.now():%H%M%S}"
+        slug = f"{(slugify(req.prompt)[:-7].rstrip('-') if req.prompt.strip() else 'photo')}-{datetime.now():%H%M%S}"
         job.update(stage="image", slug=slug)
         t_img = time.perf_counter()
-        image = ImageSwitchboard(cfg).generate(
-            req.prompt + QUALITY_SUFFIX, "cinematic", _gen_size(rw, rh), job_id,
-            negative_prompt=req.negative_prompt, force_new_image=True)
+        if req.source == "upload" and not req.restyle:
+            from PIL import Image
+            with Image.open(req.image_path) as im:
+                image = SimpleNamespace(output_path=Path(req.image_path), width=im.width, height=im.height,
+                                        provider="upload", model=None, seed=None)
+        elif req.source == "upload":
+            from backend.app.providers.local_comfyui import LocalComfyUIProvider
+            job["events"] = ["Restyling your photo with ComfyUI (CPU, ~5-10 min)"]
+            image = LocalComfyUIProvider(cfg).generate_from_image(
+                image_path=Path(req.image_path), prompt=req.prompt + QUALITY_SUFFIX,
+                negative_prompt=req.negative_prompt, denoise=req.denoise, resolution=_gen_size(rw, rh), job_id=job_id)
+        else:
+            image = ImageSwitchboard(cfg).generate(
+                req.prompt + QUALITY_SUFFIX, "cinematic", _gen_size(rw, rh), job_id,
+                negative_prompt=req.negative_prompt, force_new_image=True)
         t_img = time.perf_counter() - t_img
         report = validate_image(image.output_path, image.width, image.height)
         if not report.ok:
             raise RuntimeError(f"image failed validation: {report.errors}")
         img_copy = out_dir / f"{slug}{Path(image.output_path).suffix}"
         shutil.copyfile(image.output_path, img_copy)
-        sidecar = {"status": "ok", "engine_mode": "real", "source": "ui", "topic": req.prompt, "slug": slug,
+        sidecar = {"status": "ok", "engine_mode": "real", "source": "ui", "topic": req.prompt or "Uploaded photo", "slug": slug,
                    "created_at": datetime.now().isoformat(timespec="seconds"), "mode": req.mode,
+                   "input": ({"source": "upload", "restyle": req.restyle, "denoise": req.denoise, "consent": True}
+                             if req.source == "upload" else {"source": "prompt"}),
                    "negative_prompt": req.negative_prompt, "aspect": req.aspect, "caption": req.prompt,
                    "image": {"provider": image.provider, "model": image.model, "seed": image.seed,
                              "path": str(img_copy), "width": image.width, "height": image.height},
@@ -923,12 +943,13 @@ def _run_create_job(job_id: str, req: CreateRequest):
             ai = req.motion == "ai"
             job["stage"] = "ai_motion" if ai else "reel"
             job["events"] = ["AI motion running on Kaggle (free GPU, ~15-20 min)"] if ai else []
+            cfg_prompt = req.prompt or "the subject"
             if ai:
                 if req.action.strip():
                     cfg.setdefault("motion", {}).setdefault("i2v", {}).setdefault("kaggle", {})["motion_suffix"] = (
                         f"Static camera. {req.action.strip()}. Consistent face and body.")
                     cfg["motion"]["i2v"]["kaggle"]["loop_mode"] = "forward"  # a reversed run looks like running backwards
-                cfg["_motion_prompt"] = req.prompt
+                cfg["_motion_prompt"] = cfg_prompt
             mp4 = out_dir / f"{slug}.mp4"
             audio = Path(req.music_path) if req.music_path else None
             t_reel = time.perf_counter()
@@ -963,7 +984,15 @@ def _run_create_job(job_id: str, req: CreateRequest):
 
 @app.post("/api/create")
 def create_single(req: CreateRequest):
-    if not req.prompt.strip():
+    if req.source == "upload":
+        if not req.consent:
+            raise HTTPException(status_code=422, detail="Confirm you own this photo or have the person's permission.")
+        up = (_output_root() / "uploads").resolve()
+        if not req.image_path or up not in Path(req.image_path).resolve().parents or not Path(req.image_path).is_file():
+            raise HTTPException(status_code=422, detail="image_path must be a file uploaded via /api/upload-image.")
+        if req.restyle and not req.prompt.strip():
+            raise HTTPException(status_code=422, detail="Restyle needs a prompt.")
+    elif not req.prompt.strip():
         return {"status": "error", "message": "Prompt is empty."}
     if req.music_path:
         uploads = (_output_root() / "uploads").resolve()
@@ -974,8 +1003,9 @@ def create_single(req: CreateRequest):
             return {"status": "error", "message": "A job is already running."}
         job_id = f"create_{datetime.now():%Y%m%d_%H%M%S}"
         _create_jobs[job_id] = {
-            "job_id": job_id, "status": "running", "stage": "queued", "prompt": req.prompt,
-            "mode": req.mode, "aspect": req.aspect, "provider": req.provider, "duration": req.duration,
+            "job_id": job_id, "status": "running", "stage": "queued", "prompt": req.prompt or "Uploaded photo",
+            "mode": req.mode, "aspect": req.aspect,
+            "provider": ("upload" if req.source == "upload" and not req.restyle else req.provider), "duration": req.duration,
             "fps": req.fps, "motion": req.motion, "started_at": datetime.now().isoformat(timespec="seconds"),
             "_t0": time.time(),
         }
@@ -999,6 +1029,35 @@ async def upload_music(request: Request, name: str = "music.mp3"):
     dest = dest_dir / f"{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}_{safe}{ext}"
     dest.write_bytes(body)
     return {"status": "success", "path": str(dest), "name": name, "size": len(body)}
+
+
+_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+@app.post("/api/upload-image")
+async def upload_image(request: Request, name: str = "photo.jpg"):
+    ext = Path(name).suffix.lower()
+    if ext not in _IMAGE_EXT:
+        return {"status": "error", "message": f"Unsupported image type {ext or '(none)'}. Use jpg, png or webp."}
+    if int(request.headers.get("content-length") or 0) > 15 * 1024 * 1024:
+        return {"status": "error", "message": "Image empty or larger than 15 MB."}
+    body = await request.body()
+    if not body or len(body) > 15 * 1024 * 1024:
+        return {"status": "error", "message": "Image empty or larger than 15 MB."}
+    dest_dir = _output_root() / "uploads"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", Path(name).stem)[:40]
+    dest = dest_dir / f"{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}_{safe}{ext}"
+    dest.write_bytes(body)
+    from aurora.monitoring.media_validator import validate_image
+    rep = validate_image(dest)
+    problem = "; ".join(rep.errors) if not rep.ok else (
+        "Image must be at least 256 px on each side." if min(rep.width or 0, rep.height or 0) < 256 else
+        "Image is larger than 8000 px." if max(rep.width or 0, rep.height or 0) > 8000 else "")
+    if problem:
+        dest.unlink(missing_ok=True)
+        return {"status": "error", "message": problem}
+    return {"status": "success", "path": str(dest), "name": name, "size": len(body), "width": rep.width, "height": rep.height}
 
 
 def _rel_final(path: str | None) -> str | None:
