@@ -919,7 +919,7 @@ def _run_create_job(job_id: str, req: CreateRequest):
             from backend.app.providers.local_comfyui import LocalComfyUIProvider
             job["events"] = ["Restyling your photo with ComfyUI (CPU, ~5-10 min)"]
             image = LocalComfyUIProvider(cfg).generate_from_image(
-                image_path=Path(req.image_path), prompt=req.prompt + QUALITY_SUFFIX,
+                source_path=Path(req.image_path), prompt=req.prompt + QUALITY_SUFFIX, style="cinematic",
                 negative_prompt=req.negative_prompt, denoise=req.denoise, resolution=_gen_size(rw, rh), job_id=job_id)
         else:
             image = ImageSwitchboard(cfg).generate(
