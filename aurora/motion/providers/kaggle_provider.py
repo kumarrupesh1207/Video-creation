@@ -75,6 +75,8 @@ class KaggleProvider(RemoteI2VProvider):
             "height": height,
             "num_frames": int(cfg.get("num_frames", 49)),
             "steps": int(cfg.get("steps", 30)),
+            "segments": int(cfg.get("segments", 1)),
+            "keep_ratio": float(cfg.get("keep_ratio", 0.75)),
             "model": cfg.get("model", "Wan-AI/Wan2.2-TI2V-5B-Diffusers"),
             "image_b64": base64.b64encode(Path(payload["source_image"]).read_bytes()).decode("ascii"),
         }

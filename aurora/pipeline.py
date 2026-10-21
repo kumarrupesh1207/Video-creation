@@ -90,7 +90,9 @@ def _ai_motion_reel(image_path, output_path, duration_secs, fps, width, height, 
         ).output_path
         boom = Path(output_path).with_suffix(".boom.mp4")
         # Wan drifts at the end of a clip (faces wash out), so keep only the stable head of it before looping.
-        keep = float(config.get("motion", {}).get("i2v", {}).get("kaggle", {}).get("keep_ratio", 0.75))
+        kcfg = config.get("motion", {}).get("i2v", {}).get("kaggle", {})
+        # the worker already trims every segment when it chains, so only trim single-segment clips here
+        keep = 1.0 if int(kcfg.get("segments", 1)) > 1 else float(kcfg.get("keep_ratio", 0.75))
         probe = subprocess.run([str(Path(ffmpeg).with_name("ffprobe" + Path(ffmpeg).suffix)), "-v", "error",
                                 "-show_entries", "format=duration", "-of", "csv=p=0", str(clip)],
                                capture_output=True, text=True, timeout=60)
