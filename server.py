@@ -11,7 +11,9 @@ import time
 import json
 import shutil
 import yaml
+import contextlib
 import re
+import sys
 import uuid
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -859,6 +861,21 @@ class CreateRequest(BaseModel):
     fps: int = Field(24, ge=12, le=60)
     provider: str = Field("auto", pattern="^(auto|local_comfyui|nvidia_nim)$")
     music_path: str | None = None
+    motion: str = Field("camera", pattern="^(camera|ai)$")
+    action: str = Field("", max_length=300)
+
+
+class _Tee:
+    """Copies stdout while a reel renders so pipeline warnings (AI-motion fallback) can reach the job."""
+    def __init__(self, real):
+        self.real, self.text = real, ""
+
+    def write(self, data):
+        self.text += data
+        return self.real.write(data)
+
+    def flush(self):
+        self.real.flush()
 
 
 def _gen_size(w: int, h: int) -> list[int]:
@@ -903,11 +920,25 @@ def _run_create_job(job_id: str, req: CreateRequest):
                              "path": str(img_copy), "width": image.width, "height": image.height},
                    "reel": None, "timings_secs": {"image": round(t_img, 1)}}
         if req.mode == "reel":
-            job["stage"] = "reel"
+            ai = req.motion == "ai"
+            job["stage"] = "ai_motion" if ai else "reel"
+            job["events"] = ["AI motion running on Kaggle (free GPU, ~15-20 min)"] if ai else []
+            if ai:
+                if req.action.strip():
+                    cfg.setdefault("motion", {}).setdefault("i2v", {}).setdefault("kaggle", {})["motion_suffix"] = (
+                        f"Static camera. {req.action.strip()}. Consistent face and body.")
+                cfg["_motion_prompt"] = req.prompt
             mp4 = out_dir / f"{slug}.mp4"
             audio = Path(req.music_path) if req.music_path else None
             t_reel = time.perf_counter()
-            render_reel(Path(image.output_path), mp4, req.duration, req.fps, rw, rh, audio)
+            tee = _Tee(sys.stdout)
+            with contextlib.redirect_stdout(tee):
+                render_reel(Path(image.output_path), mp4, req.duration, req.fps, rw, rh, audio,
+                            **({"motion": "ai", "config": cfg} if ai else {}))
+            fell_back = ai and "AI motion failed" in tee.text
+            if fell_back:
+                reason = tee.text.split("falling back to camera motion:", 1)[-1].strip().splitlines()[0][:200]
+                job["events"].append(f"AI motion failed, used camera motion instead: {reason}")
             vr = validate_video(mp4, rw, rh, req.fps, req.duration, require_audio=True, deep=True,
                                 input_path=image.output_path)
             if not vr.ok:
@@ -915,6 +946,9 @@ def _run_create_job(job_id: str, req: CreateRequest):
             sidecar["reel"] = {"path": str(mp4), "width": vr.width, "height": vr.height, "fps": vr.fps,
                                "duration_secs": vr.duration_secs, "has_audio": vr.has_audio, "sha256": vr.sha256}
             sidecar["audio"] = "music" if audio else "silent"
+            sidecar["motion"] = "camera_fallback" if fell_back else req.motion
+            if ai:
+                sidecar["action"] = req.action
             sidecar["timings_secs"]["reel"] = round(time.perf_counter() - t_reel, 1)
         sidecar["timings_secs"]["total"] = round(time.perf_counter() - t0, 1)
         (out_dir / f"{slug}.json").write_text(json.dumps(sidecar, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -941,7 +975,7 @@ def create_single(req: CreateRequest):
         _create_jobs[job_id] = {
             "job_id": job_id, "status": "running", "stage": "queued", "prompt": req.prompt,
             "mode": req.mode, "aspect": req.aspect, "provider": req.provider, "duration": req.duration,
-            "fps": req.fps, "started_at": datetime.now().isoformat(timespec="seconds"),
+            "fps": req.fps, "motion": req.motion, "started_at": datetime.now().isoformat(timespec="seconds"),
             "_t0": time.time(),
         }
     threading.Thread(target=_run_create_job, args=(job_id, req), daemon=True).start()

@@ -32,6 +32,17 @@
           </div>
         </div>
 
+        <div class="field" id="motionWrap">
+          <span class="lbl">Motion</span>
+          <div class="seg" id="motionSeg" role="radiogroup">
+            <button type="button" data-v="camera" class="on">Camera (local, ~30 s)</button>
+            <button type="button" data-v="ai">AI motion (Kaggle free GPU, ~15–20 min)</button>
+          </div>
+          <label id="actionWrap" hidden>Action <span class="opt">(optional)</span>
+            <input id="action" maxlength="300" placeholder="e.g. he runs toward the train">
+          </label>
+        </div>
+
         <div class="field">
           <span class="lbl">Aspect ratio</span>
           <div class="seg" id="aspectSeg" role="radiogroup">

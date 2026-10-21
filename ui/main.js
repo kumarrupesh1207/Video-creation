@@ -5,7 +5,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const getJson = async (path) => (await fetch(API + path)).json();
 const fmtSecs = (s) => { s = Math.round(s || 0); return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`; };
 
-const state = { mode: 'reel', aspect: '9:16', musicPath: null, tab: 'create', jobs: [], prevRunning: false, galleryKey: '' };
+const state = { mode: 'reel', aspect: '9:16', musicPath: null, tab: 'create', motion: 'camera', jobs: [], prevRunning: false, galleryKey: '' };
 
 // ─── Tabs ────────────────────────────────────────────────
 function showTab(name) {
@@ -30,6 +30,8 @@ function bindSeg(id, key, after) {
 }
 function syncForm() {
   const reel = state.mode === 'reel';
+  $('motionWrap').hidden = !reel;
+  $('actionWrap').hidden = !(reel && state.motion === 'ai');
   $('reelOpts').hidden = !reel;
   $('musicWrap').hidden = !reel;
   $('customSize').hidden = state.aspect !== 'custom';
@@ -39,9 +41,10 @@ function syncForm() {
 function updateEstimate() {
   const p = $('provider').value;
   const img = p === 'nvidia_nim' ? '~10 s · uses 1 NIM credit' : p === 'local_comfyui' ? '~5–10 min · free (local CPU)' : '~10 s with NIM (1 credit) or ~5–10 min on local CPU';
-  $('estimate').textContent = `Image: ${img}` + (state.mode === 'reel' ? ' · Reel: ~30 s' : '');
+  $('estimate').textContent = `Image: ${img}` + (state.mode === 'reel' ? (state.motion === 'ai' ? ' · AI motion on Kaggle: ~15–20 min (free GPU, falls back to camera if it fails)' : ' · Reel: ~30 s') : '');
 }
 bindSeg('modeSeg', 'mode', syncForm);
+bindSeg('motionSeg', 'motion', syncForm);
 bindSeg('aspectSeg', 'aspect', syncForm);
 syncForm();
 
@@ -81,6 +84,7 @@ $('createForm').addEventListener('submit', async (e) => {
     width: +$('cw').value, height: +$('ch').value,
     duration: +$('duration').value, fps: +$('fps').value,
     provider: $('provider').value,
+    motion: state.motion, action: $('action').value.trim(),
     music_path: state.mode === 'reel' ? state.musicPath : null,
   };
   if (!body.prompt) { msg.textContent = 'Write a prompt first.'; msg.className = 'hint err'; return; }
@@ -99,12 +103,12 @@ $('createForm').addEventListener('submit', async (e) => {
 });
 
 // ─── Queue ───────────────────────────────────────────────
-const STAGES = [['image', 'Image'], ['reel', 'Reel'], ['done', 'Done']];
+const STAGES = [['image', 'Image'], ['reel', 'Reel'], ['ai_motion', 'AI motion'], ['done', 'Done']];
 function renderActive(job) {
   const box = $('activeJob');
   if (!job) { box.innerHTML = '<p class="empty">No job yet. Start one from Create.</p>'; return; }
   const idx = STAGES.findIndex(([k]) => k === job.stage);
-  const steps = STAGES.filter(([k]) => k !== 'reel' || job.mode === 'reel').map(([k, label]) => {
+  const steps = STAGES.filter(([k]) => k === 'done' || k === 'image' || (job.mode === 'reel' && (job.motion === 'ai' ? k === 'ai_motion' : k === 'reel'))).map(([k, label]) => {
     const i = STAGES.findIndex(([x]) => x === k);
     const cls = job.status === 'done' || i < idx ? 'done' : (i === idx && job.status === 'running' ? 'cur' : '');
     return `<div class="${cls}">${label}</div>`;
@@ -118,6 +122,7 @@ function renderActive(job) {
     <div class="steps">${steps}</div>${hint}
     <dl class="kv"><dt>Prompt</dt><dd>${esc(job.prompt)}</dd><dt>Output</dt><dd>${job.mode === 'reel' ? `Reel ${job.duration}s @ ${job.fps}fps` : 'Image'} · ${esc(job.aspect)}</dd>
       <dt>Provider</dt><dd>${esc(out?.provider || job.provider)}</dd><dt>Job</dt><dd>${esc(job.job_id)}</dd></dl>
+    ${(job.events || []).map((e) => `<p class="hint${/failed/.test(e) ? ' err' : ''}">${esc(e)}</p>`).join('')}
     ${job.error ? `<p class="err-text">${esc(job.error)}</p>` : ''}
     ${out ? '<button class="btn primary" id="viewResult" type="button">View result</button>' : ''}`;
   $('viewResult')?.addEventListener('click', () => openViewer(out));
