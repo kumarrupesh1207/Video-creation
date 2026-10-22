@@ -28,10 +28,104 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o for o in os.getenv("AURORA_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ─── Auth (single user; password from .env AURORA_PASSWORD; unset = localhost-only, no login) ──
+SESSION_DAYS = 7
+_AUTH_EXEMPT = {"/api/login", "/api/logout", "/api/health", "/api/auth"}
+_login_hits: dict[str, list[float]] = {}
+
+
+def _password() -> str:
+    return os.getenv("AURORA_PASSWORD", "").strip()
+
+
+def _secret() -> bytes:
+    """AURORA_SECRET from env/.env; generated and appended to .env on first use."""
+    sec = os.getenv("AURORA_SECRET", "").strip()
+    if not sec:
+        import secrets
+        sec = secrets.token_hex(32)
+        os.environ["AURORA_SECRET"] = sec
+        try:
+            with open(Path(__file__).resolve().parent / ".env", "a", encoding="utf-8") as fh:
+                fh.write(f"\nAURORA_SECRET={sec}\n")
+        except OSError:
+            pass
+    return sec.encode()
+
+
+def _sign(exp: int) -> str:
+    import hashlib
+    import hmac
+    return f"{exp}.{hmac.new(_secret(), str(exp).encode(), hashlib.sha256).hexdigest()}"
+
+
+def _valid_token(token: str | None) -> bool:
+    import hmac
+    try:
+        exp = int((token or "").split(".", 1)[0])
+    except ValueError:
+        return False
+    return exp > time.time() and hmac.compare_digest(token, _sign(exp))
+
+
+@app.middleware("http")
+async def _require_login(request: Request, call_next):
+    path = request.url.path
+    if _password() and path.startswith("/api") and path not in _AUTH_EXEMPT and request.method != "OPTIONS":
+        if not _valid_token(request.cookies.get("aurora_session")):
+            return JSONResponse(status_code=401, content={"status": "error", "message": "Login required."})
+    return await call_next(request)
+
+
+class LoginRequest(BaseModel):
+    password: str = Field("", max_length=200)
+
+
+def _client_ip(request: Request) -> str:
+    host = request.client.host if request.client else "?"
+    fwd = request.headers.get("x-forwarded-for", "")
+    return fwd.split(",")[0].strip() if fwd and host in ("127.0.0.1", "::1") else host
+
+
+@app.post("/api/login")
+def login(req: LoginRequest, request: Request):
+    import hmac
+    if not _password():
+        return {"status": "success", "auth_required": False}
+    ip, now = _client_ip(request), time.time()
+    hits = [t for t in _login_hits.get(ip, []) if now - t < 60]
+    if len(hits) >= 5:
+        return JSONResponse(status_code=429, content={"status": "error", "message": "Too many attempts. Wait a minute."})
+    _login_hits[ip] = hits + [now]
+    if not hmac.compare_digest(req.password.encode(), _password().encode()):
+        return JSONResponse(status_code=401, content={"status": "error", "message": "Wrong password."})
+    resp = JSONResponse({"status": "success"})
+    resp.set_cookie("aurora_session", _sign(int(now) + SESSION_DAYS * 86400), max_age=SESSION_DAYS * 86400,
+                    httponly=True, samesite="strict", path="/")
+    return resp
+
+
+@app.post("/api/logout")
+def logout():
+    resp = JSONResponse({"status": "success"})
+    resp.delete_cookie("aurora_session", path="/")
+    return resp
+
+
+@app.get("/api/health")
+def health():
+    return {"ok": True}
+
+
+@app.get("/api/auth")
+def auth_state(request: Request):
+    return {"auth_required": bool(_password()), "authenticated": (not _password()) or _valid_token(request.cookies.get("aurora_session"))}
 
 # ─── Global State ────────────────────────────────────────────
 _active_process: subprocess.Popen = None
@@ -903,6 +997,7 @@ class CreateRequest(BaseModel):
     music: str = Field("auto", pattern="^(auto|none)$")
     voiceover: bool = False
     voiceover_text: str = Field("", max_length=500)
+    captions: bool = True
     voice_engine: str = Field("auto", pattern="^(auto|edge|xtts|piper)$")
     gender: str = Field("female", pattern="^(female|male)$")
     speaker_wav: str | None = None    # uploaded voice sample (xtts cloning)
@@ -1009,8 +1104,11 @@ def _run_create_job(job_id: str, req: CreateRequest):
             _set_stage(job, "ai_motion" if ai else "reel")
             tee = _Tee(sys.stdout)
             with contextlib.redirect_stdout(tee):
-                render_reel(Path(image.output_path), mp4, req.duration, req.fps, rw, rh, audio,
-                            **({"motion": "ai", "config": cfg} if ai else {}))
+                import inspect
+                extra = {"motion": "ai", "config": cfg} if ai else {}
+                if "captions" in inspect.signature(render_reel).parameters:   # burn-in lands with the backend change
+                    extra.update(captions=req.captions, caption_text=req.voiceover_text.strip() or req.prompt)
+                render_reel(Path(image.output_path), mp4, req.duration, req.fps, rw, rh, audio, **extra)
             fell_back = ai and "AI motion failed" in tee.text
             if fell_back:
                 reason = tee.text.split("falling back to camera motion:", 1)[-1].strip().splitlines()[0][:200]
@@ -1206,4 +1304,10 @@ def _gpu_info():
 if __name__ == "__main__":
     import uvicorn
     print("Starting AI Video Factory Job Manager API on http://127.0.0.1:8000")
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="warning")
+    host = os.getenv("AURORA_HOST", "127.0.0.1")
+    if host not in ("127.0.0.1", "localhost", "::1") and not _password():
+        print("[aurora] WARNING: AURORA_PASSWORD is not set; refusing to bind", host, "- using 127.0.0.1 only.", flush=True)
+        host = "127.0.0.1"
+    elif not _password():
+        print("[aurora] No AURORA_PASSWORD set: localhost-only, no login. Set it in .env before any LAN/phone access.", flush=True)
+    uvicorn.run(app, host=host, port=8000, log_level="warning")

@@ -1,5 +1,14 @@
 // Aurora Studio — Create / Queue / Gallery / System. Same-origin /api (Vite proxies to :8000).
 const API = '/api';
+
+// Any 401 from the API (expired/missing session) sends the user to the login screen.
+const _fetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+  const res = await _fetch(...args);
+  if (res.status === 401 && String(args[0]).startsWith(API) && !String(args[0]).startsWith(`${API}/login`)) showLogin();
+  return res;
+};
+function showLogin() { document.getElementById('login').hidden = false; }
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const getJson = async (path) => (await fetch(API + path)).json();
@@ -130,7 +139,7 @@ $('createForm').addEventListener('submit', async (e) => {
     provider: $('provider').value,
     motion: state.motion, action: $('action').value.trim(),
     music_path: state.mode === 'reel' && state.music === 'upload' ? state.musicPath : null,
-    music: state.music === 'none' ? 'none' : 'auto',
+    music: state.music === 'none' ? 'none' : 'auto', captions: $('captions').checked,
     voiceover: state.mode === 'reel' && $('voiceover').checked, voiceover_text: $('voText').value.trim(),
     voice_engine: $('voEngine').value, gender: state.gender, speaker_wav: state.speakerWav,
   };
@@ -325,3 +334,25 @@ startLogs();
 pollJobs();
 setInterval(pollJobs, 2500);
 setInterval(() => { if (state.tab === 'system') loadSystem(); if (state.tab === 'gallery') loadGallery(); }, 5000);
+
+// ─── Login / logout ──────────────────────────────────────
+$('pwToggle').addEventListener('click', () => {
+  const show = $('loginPw').type === 'password';
+  $('loginPw').type = show ? 'text' : 'password';
+  $('pwToggle').textContent = show ? 'Hide' : 'Show';
+});
+$('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('loginMsg').textContent = '';
+  try {
+    const res = await fetch(`${API}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('loginPw').value }) });
+    const data = await res.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Login failed');
+    location.reload();
+  } catch (err) { $('loginMsg').textContent = err.message; $('loginPw').select(); }
+});
+$('logout').addEventListener('click', async () => { await fetch(`${API}/logout`, { method: 'POST' }); location.reload(); });
+getJson('/auth').then((a) => {
+  $('logout').hidden = !a.auth_required;
+  if (a.auth_required && !a.authenticated) showLogin();
+}).catch(() => {});

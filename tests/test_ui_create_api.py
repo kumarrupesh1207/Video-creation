@@ -135,3 +135,43 @@ def test_jobs_persist_and_running_becomes_interrupted(monkeypatch):
     assert saved["status"] == "interrupted"
     monkeypatch.undo()
     tmp.cleanup()
+
+
+def _req(path="/api/jobs", cookie=None, ip="9.9.9.9", method="GET"):
+    from types import SimpleNamespace
+    return SimpleNamespace(url=SimpleNamespace(path=path), method=method, cookies={"aurora_session": cookie} if cookie else {},
+                           client=SimpleNamespace(host=ip), headers={})
+
+
+def test_login_flow_token_and_rate_limit(monkeypatch):
+    import asyncio
+    import time
+
+    monkeypatch.setenv("AURORA_PASSWORD", "s3cret")
+    monkeypatch.setenv("AURORA_SECRET", "x" * 64)
+    server._login_hits.clear()
+
+    async def nxt(_):
+        return "passed"
+
+    # no cookie -> 401 on /api/*, exempt paths pass
+    assert asyncio.run(server._require_login(_req(), nxt)).status_code == 401
+    assert asyncio.run(server._require_login(_req("/api/health"), nxt)) == "passed"
+    # wrong password -> 401 and no cookie; right password -> signed HttpOnly SameSite=Strict cookie
+    assert server.login(server.LoginRequest(password="nope"), _req()).status_code == 401
+    ok = server.login(server.LoginRequest(password="s3cret"), _req())
+    cookie = ok.headers["set-cookie"]
+    assert "HttpOnly" in cookie and "samesite=strict" in cookie.lower()
+    token = cookie.split("aurora_session=")[1].split(";")[0]
+    assert asyncio.run(server._require_login(_req(cookie=token), nxt)) == "passed"
+    # tampered / expired tokens are rejected
+    assert not server._valid_token(token[:-1] + ("0" if token[-1] != "0" else "1"))
+    assert not server._valid_token(server._sign(int(time.time()) - 5))
+    # 5 attempts/min/IP -> 429 on the next one
+    server._login_hits.clear()
+    codes = [server.login(server.LoginRequest(password="bad"), _req(ip="5.5.5.5")).status_code for _ in range(6)]
+    assert codes == [401] * 5 + [429]
+    # no password configured -> everything open (localhost mode)
+    monkeypatch.delenv("AURORA_PASSWORD")
+    assert asyncio.run(server._require_login(_req(), nxt)) == "passed"
+    assert server.auth_state(_req()) == {"auth_required": False, "authenticated": True}

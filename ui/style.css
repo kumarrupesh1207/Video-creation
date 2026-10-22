@@ -116,3 +116,10 @@ details summary { cursor: pointer; min-height: 32px; }
 @keyframes sp { to { transform: rotate(360deg); } }
 .steps .bad { color: var(--bad); border-color: var(--bad); }
 .toast { position: fixed; left: 12px; right: 12px; bottom: 72px; z-index: 9; display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 14px; background: var(--card); border: 1px solid var(--ok); border-radius: 12px; }
+
+.login { position: fixed; inset: 0; z-index: 20; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.login .card { width: 100%; max-width: 380px; }
+.pw { display: flex; gap: 8px; align-items: center; }
+.pw input { flex: 1; min-width: 0; }
+.pw .btn { min-width: 72px; margin-top: 6px; }
+#logout { width: 100%; }

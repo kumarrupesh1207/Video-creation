@@ -8,6 +8,17 @@
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
+  <div id="login" class="login" hidden>
+    <form id="loginForm" class="card" autocomplete="on">
+      <h2>Aurora Studio</h2>
+      <label>Password
+        <span class="pw"><input id="loginPw" type="password" autocomplete="current-password" required>
+        <button id="pwToggle" class="btn ghost small" type="button" aria-label="Show password">Show</button></span>
+      </label>
+      <p id="loginMsg" class="hint err" role="alert"></p>
+      <button class="btn primary" type="submit">Log in</button>
+    </form>
+  </div>
   <header class="topbar">
     <div class="brand"><span class="logo"></span><b>Aurora</b><small>Studio</small></div>
     <div id="topStatus" class="pill">Idle</div>
@@ -122,6 +133,8 @@
           </div>
         </div>
 
+        <label class="check"><input id="captions" type="checkbox" checked> <span>Captions <em>Burn the voiceover text or prompt into the reel</em></span></label>
+
         <label>Image provider
           <select id="provider">
             <option value="auto">Auto (config order)</option>
@@ -157,6 +170,7 @@
     <section id="tab-system" class="tab">
       <div class="card" id="metrics"></div>
       <div class="card" id="providers"></div>
+      <button id="logout" class="btn" type="button" hidden>Log out</button>
     </section>
   </main>
 
