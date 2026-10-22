@@ -32,17 +32,23 @@ if ($Supervise) {
     New-Item -ItemType Directory -Force $Logs | Out-Null
     $log = Join-Path $Logs "$Supervise.log"
     $delay = 2
+    $waiting = $false
     while ($true) {
-        if (Test-Port $s.Port) { Start-Sleep 10; continue }   # someone else owns the port
+        if (Test-Port $s.Port) {   # someone else owns the port: never kill it, take over when it frees
+            if (-not $waiting) { "[$(Get-Date -Format s)] $Supervise :$($s.Port) in use by another process; watching" | Add-Content $log; $waiting = $true }
+            Start-Sleep 5; continue
+        }
+        $waiting = $false
         $t0 = Get-Date
         "[$(Get-Date -Format s)] starting $Supervise" | Add-Content $log
         $p = Start-Process -FilePath $s.Exe -ArgumentList $s.Args -WorkingDirectory $Root -NoNewWindow -PassThru `
              -RedirectStandardOutput "$log.out" -RedirectStandardError "$log.err"
+        $null = $p.Handle          # cache handle so ExitCode is readable after exit
         $p.WaitForExit()
         foreach ($f in "$log.out", "$log.err") { if (Test-Path $f) { Get-Content $f | Add-Content $log; Remove-Item $f -ErrorAction SilentlyContinue } }
         $up = ((Get-Date) - $t0).TotalSeconds
         if ($up -gt 60) { $delay = 2 } else { $delay = [Math]::Min($delay * 2, 30) }
-        "[$(Get-Date -Format s)] $Supervise exited (code $($p.ExitCode)) after $([int]$up)s; restart in ${delay}s" | Add-Content $log
+        "[$(Get-Date -Format s)] $Supervise exited (code $($p.ExitCode)) after $([int]$up)s; restarting in ${delay}s" | Add-Content $log
         Start-Sleep $delay
     }
 }
@@ -74,12 +80,19 @@ if ($Stop) {
 
 # ---- start ---------------------------------------------------------------------------------
 New-Item -ItemType Directory -Force $Logs | Out-Null
+function Test-Supervisor([string]$name) {
+    [bool](Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" |
+        Where-Object { $_.CommandLine -match "start_aurora\.ps1.*-Supervise $name(\s|$)" })
+}
 foreach ($name in $Order) {
     $s = $Services[$name]
-    if (Test-Port $s.Port) { Write-Host "$name already listening on :$($s.Port) - skipped"; continue }
+    if (Test-Supervisor $name) { Write-Host "$name supervisor already running - skipped"; continue }
+    # Always supervise, even when the port is already taken: the supervisor only starts the service
+    # once the port is free, and never kills a running instance.
     Start-Process powershell -WindowStyle Minimized -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass",
         "-File", "`"$PSCommandPath`"", "-Supervise", $name
-    Write-Host "starting $name (:$($s.Port))"
+    if (Test-Port $s.Port) { Write-Host "supervising $name (:$($s.Port) already in use; will take over if it drops)" }
+    else { Write-Host "starting $name (:$($s.Port))" }
 }
 
 $deadline = (Get-Date).AddSeconds(180)

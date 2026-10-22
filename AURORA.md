@@ -112,7 +112,7 @@ GPU modules NEVER run locally. They run via Kaggle API or Vast.ai.
 ---
 
 ## HOW TO START (local servers)
-- Double-click `start_aurora.bat`: starts ComfyUI :8188, aurora-api :8000, aurora-ui :5173 (each in its own minimized, auto-restarting window; ports already in use are skipped), then opens http://localhost:5173.
+- Double-click `start_aurora.bat`: starts ComfyUI :8188, aurora-api :8000, aurora-ui :5173 (each in its own minimized, auto-restarting window; an already-running service is left alone but still supervised, and restarted if it later goes down), then opens http://localhost:5173.
 - Logs: `logs\comfyui.log`, `logs\api.log`, `logs\ui.log`. Commands mirror `.claude/launch.json`.
 - `stop_aurora.bat` stops only these three; ComfyUI is left running (with a warning) while its queue has running/pending jobs.
 - Implementation: `scripts/start_aurora.ps1`.
