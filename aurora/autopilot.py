@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 import types
 from unittest import mock
 from datetime import datetime, timedelta, timezone
@@ -64,16 +65,31 @@ def _from_research(channel: dict, n: int, research) -> list[dict]:
     return out
 
 
-def get_ideas(channel: dict, n: int, research=None) -> list[dict]:
-    """Research first (Gemini/local LLM); topics.txt when research gives nothing or is unavailable."""
-    try:
-        if research is None:
-            from aurora import research
-        ideas = _from_research(channel, n, research)
-    except Exception as e:  # noqa: BLE001 - no key, network, import error
-        print(f"[autopilot] {channel['name']}: research unavailable ({e}); using topics.txt", file=sys.stderr)
-        ideas = []
-    return ideas or stub_ideas(channel, n)
+def get_ideas(channel: dict, n: int, research=None, sleep=time.sleep, retries: int = 3) -> list[dict]:
+    """On-niche research ideas only (Gemini 503s are retried with backoff). Never an off-niche topic: when research
+    fails we log loudly and return [] (skip), unless the channel explicitly opts in with `topics_file:`."""
+    from aurora import load_env
+
+    load_env()
+    err = "no ideas"
+    for attempt in range(retries):
+        try:
+            if research is None:
+                from aurora import research
+            ideas = _from_research(channel, n, research)
+            if ideas:
+                return ideas
+            err = "research returned only its niche-text fallback (Gemini/local LLM failed)"
+        except Exception as e:  # noqa: BLE001 - no key, network, import error
+            err = f"{type(e).__name__}: {e}"
+        if attempt < retries - 1:
+            sleep(30 * (attempt + 1))
+    print(f"[autopilot] !!! {channel['name']}: RESEARCH FAILED after {retries} tries ({err}); "
+          f"skipping this channel run, nothing rendered", file=sys.stderr)
+    if channel.get("topics_file"):
+        print(f"[autopilot] {channel['name']}: using opt-in topics_file {channel['topics_file']}", file=sys.stderr)
+        return stub_ideas(channel, n, ROOT / channel["topics_file"])
+    return []
 
 
 # ---- render ----------------------------------------------------------
@@ -154,6 +170,11 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
     service_factory = service_factory or yt.build_service
     uploader = uploader or yt.upload_short
     result = {"published": [], "failed": [], "deferred": []}
+    if not dry_run and not queue.s.get("enabled", False):  # global kill-switch: autopilot.publish.enabled (default false)
+        print("[autopilot] publishing is DISABLED (autopilot.publish.enabled is false); nothing uploaded. "
+              "Use --dry-run to preview.", file=sys.stderr)
+        result["disabled"] = True
+        return result
     if dry_run:  # log what WOULD be sent; no auth, no upload, queue untouched
         from aurora.publish import youtube as yt
 

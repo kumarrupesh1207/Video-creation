@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 QUEUE_PATH = ROOT / "outputs" / "publish_queue.json"
 IST = timezone(timedelta(hours=5, minutes=30), "IST")
-DEFAULTS = {"approval": "veto", "veto_hours": 6.0, "slots": ["19:00"], "timezone": "Asia/Kolkata", "max_attempts": 3}
+DEFAULTS = {"enabled": False, "approval": "veto", "veto_hours": 6.0, "slots": ["19:00"], "timezone": "Asia/Kolkata", "max_attempts": 3}
 ACTIVE = {"pending_approval", "scheduled", "publishing", "published"}  # statuses that block re-enqueueing a sha
 _lock = threading.RLock()
 

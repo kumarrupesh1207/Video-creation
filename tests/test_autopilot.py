@@ -9,7 +9,7 @@ from aurora.publish import youtube as yt
 from aurora.publish.queue import PublishQueue
 
 NOW = datetime(2026, 10, 22, 6, 0, tzinfo=timezone.utc)  # 11:30 IST
-CFG = {"autopilot": {"publish": {"veto_hours": 6, "slots": ["19:00"]},
+CFG = {"autopilot": {"publish": {"enabled": True, "veto_hours": 6, "slots": ["19:00"]},
                      "channels": [{"name": "facts", "niche": "science", "reels_per_day": 2}, {"name": "hindi", "niche": "x"}]}}
 
 
@@ -127,15 +127,18 @@ def test_upload_short_quota_error(vid):
 
 
 def test_run_render_enqueues_per_channel_with_stub_research(q, workspace_tmp_path):
-    def research(niche, lang, n, channel=None):
-        return [{"topic": f"{channel}-{i}", "title": f"Title {i}", "hashtags": ["#x"]} for i in range(n)]
+    def research(niche, lang, plat, n):
+        return {"source": "gemini", "ideas": [{"title": f"Title {i}", "hook": "h", "description": "d", "hashtags": ["#x"],
+                                               "scenes": [{"image_prompt": f"img {niche} {i}", "motion_prompt": "m", "voiceover": "v"}]}
+                                              for i in range(n)]}
 
-    mod = type("R", (), {"generate_ideas": staticmethod(research)})
+    mod = type("R", (), {"research_ideas": staticmethod(research)})
 
     def renderer(cfg, ch, idea):
-        p = workspace_tmp_path / f"{idea['topic']}.mp4"
-        p.write_bytes(idea["topic"].encode())
-        return {"status": "ok", "reel": {"path": str(p), "sha256": idea["topic"]}}
+        key = f"{ch['name']}-{idea['topic']}"
+        p = workspace_tmp_path / f"{key}.mp4"
+        p.write_bytes(key.encode())
+        return {"status": "ok", "reel": {"path": str(p), "sha256": key}}
 
     out = autopilot.run_render(CFG, q, research=mod, renderer=renderer)
     assert sorted(i["channel"] for i in out) == ["facts", "facts", "hindi"]  # reels_per_day 2 / default 1
@@ -160,7 +163,7 @@ def test_research_mapping_and_fallback_to_topics(workspace_tmp_path):
     i = autopilot.get_ideas(ch, 1, good)[0]
     assert i["image_prompt"] == "a planet" and i["voiceover"] == "Wow line one line two" and i["ai_disclosure"] is False
     fb = type("R", (), {"research_ideas": staticmethod(lambda *a: {"source": "topic_fallback", "ideas": [{}]})})
-    assert all(not x.get("image_prompt") for x in autopilot.get_ideas(ch, 1, fb))  # topics.txt stub (or empty)
+    assert autopilot.get_ideas(ch, 1, fb, sleep=lambda s: None) == []  # no off-niche topics.txt fallback
 
 
 def test_publish_due_dry_run_sends_nothing(q, vid):
@@ -227,3 +230,24 @@ def test_presign_is_deterministic_and_expiring():
     u = hosting.presign("GET", "https://acc.r2.cloudflarestorage.com", "b", "aurora/x.mp4", "AK", "SK", now=now, expires=600)
     assert u == hosting.presign("GET", "https://acc.r2.cloudflarestorage.com", "b", "aurora/x.mp4", "AK", "SK", now=now, expires=600)
     assert "X-Amz-Expires=600" in u and "X-Amz-Signature=" in u and u.startswith("https://acc.r2.cloudflarestorage.com/b/aurora/x.mp4?")
+
+
+def test_kill_switch_blocks_publish_unless_enabled(workspace_tmp_path, vid):
+    q2 = PublishQueue(workspace_tmp_path / "k.json", {"autopilot": {"publish": {}}})  # default: disabled
+    it = q2.enqueue("facts", vid, {"title": "T"}, now=NOW)
+    up, sf = MagicMock(), MagicMock()
+    r = autopilot.publish_due(q2, now=NOW + timedelta(days=1), service_factory=sf, uploader=up)
+    assert r.get("disabled") and not r["published"]
+    up.assert_not_called(); sf.assert_not_called()
+    assert q2.get(it["id"])["status"] == "scheduled"
+    assert autopilot.publish_due(q2, now=NOW + timedelta(days=1), dry_run=True)["would_publish"] == [it["id"]]
+
+
+def test_research_failure_skips_instead_of_off_niche_topic():
+    ch = {"name": "c", "niche": "anime", "language": "en", "platforms": ["youtube"]}
+    fb = type("R", (), {"research_ideas": staticmethod(lambda *a: {"source": "topic_fallback", "ideas": [{}], "note": "503"})})
+    slept = []
+    assert autopilot.get_ideas(ch, 1, fb, sleep=slept.append) == [] and len(slept) == 2  # retried, then skipped
+    calls = iter([{"source": "topic_fallback", "ideas": [{}]}, {"source": "gemini", "ideas": [{"title": "Ok", "hook": "h", "scenes": []}]}])
+    flaky = type("R", (), {"research_ideas": staticmethod(lambda *a: next(calls))})
+    assert autopilot.get_ideas(ch, 1, flaky, sleep=lambda s: None)[0]["title"] == "Ok"
