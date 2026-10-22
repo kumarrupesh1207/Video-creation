@@ -1289,6 +1289,66 @@ def get_output_file(rel_path: str, download: bool = False):
     return FileResponse(target, filename=target.name if download else None)
 
 
+# ─── Publish queue (aurora.publish; auth-protected by the same middleware) ──
+def _publish_item(it: dict) -> dict:
+    rel = _rel_final(it.get("path"))
+    return {**it, "video_url": f"/api/files/{rel}" if rel else None}
+
+
+@app.get("/api/publish/queue")
+def publish_queue(channel: str | None = None):
+    from aurora.publish.queue import PublishQueue
+    items = PublishQueue().list(channel or None)
+    return {"items": [_publish_item(i) for i in sorted(items, key=lambda i: i.get("publish_at") or "")]}
+
+
+def _publish_action(fn_name: str, item_id: str, *args):
+    from aurora.publish.queue import PublishQueue
+    try:
+        return {"status": "success", "item": _publish_item(getattr(PublishQueue(), fn_name)(item_id, *args))}
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "Not allowed in the current state.")
+
+
+@app.post("/api/publish/{item_id}/veto")
+def publish_veto(item_id: str):
+    return _publish_action("veto", item_id)
+
+
+@app.post("/api/publish/{item_id}/approve")
+def publish_approve(item_id: str):
+    return _publish_action("approve", item_id)
+
+
+class RescheduleRequest(BaseModel):
+    publish_at: str = Field(..., max_length=40)
+
+
+@app.post("/api/publish/{item_id}/reschedule")
+def publish_reschedule(item_id: str, req: RescheduleRequest):
+    try:
+        when = datetime.fromisoformat(req.publish_at.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="publish_at must be an ISO date-time.")
+    if when.tzinfo is None:
+        raise HTTPException(status_code=400, detail="publish_at needs a timezone offset (e.g. +05:30 or Z).")
+    return _publish_action("reschedule", item_id, when)
+
+
+@app.get("/api/publish/health")
+def publish_health():
+    from aurora.publish.queue import PublishQueue
+    from aurora.publish.youtube import token_path
+    channels: dict[str, dict] = {}
+    for it in PublishQueue().list():
+        c = channels.setdefault(it["channel"], {"scheduled": 0, "failed": 0})
+        if it["status"] in c:
+            c[it["status"]] += 1
+    for name, c in channels.items():
+        c["token"] = token_path(name).exists()
+    return {"channels": channels}
+
+
 def _gpu_info():
     exe = shutil.which("nvidia-smi")
     if not exe:

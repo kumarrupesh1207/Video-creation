@@ -23,6 +23,7 @@ function showTab(name) {
   document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
   if (name === 'gallery') loadGallery();
   if (name === 'system') loadSystem();
+  if (name === 'queue') loadPublish();
   window.scrollTo(0, 0);
 }
 document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -356,3 +357,70 @@ getJson('/auth').then((a) => {
   $('logout').hidden = !a.auth_required;
   if (a.auth_required && !a.authenticated) showLogin();
 }).catch(() => {});
+
+// ─── Publish queue (YouTube autopilot) ───────────────────
+const IST = { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true };
+const istText = (iso) => new Date(iso).toLocaleString('en-IN', IST) + ' IST';
+const countdown = (iso) => {
+  const s = Math.round((new Date(iso) - Date.now()) / 1000);
+  if (Number.isNaN(s)) return '';
+  if (s <= 0) return 'due now';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return `in ${h ? `${h}h ` : ''}${m}m ${h ? '' : `${String(s % 60).padStart(2, '0')}s`}`.trim();
+};
+const pubOpen = new Set();   // item ids with the reschedule row open
+let pubItems = [];
+
+function pubCard(it) {
+  const st = it.stats || {};
+  const acts = [];
+  if (it.status === 'scheduled') acts.push(`<button class="btn stop" data-act="veto" data-id="${esc(it.id)}" type="button">Stop</button>`);
+  if (it.status === 'pending_approval') acts.push(`<button class="btn ok" data-act="approve" data-id="${esc(it.id)}" type="button">Approve</button><button class="btn" data-act="veto" data-id="${esc(it.id)}" type="button">Stop</button>`);
+  if (it.status === 'vetoed') acts.push(`<button class="btn ok" data-act="approve" data-id="${esc(it.id)}" type="button">Restore</button>`);
+  if (['scheduled', 'vetoed', 'failed', 'pending_approval'].includes(it.status)) acts.push(`<button class="btn ghost" data-act="resched" data-id="${esc(it.id)}" type="button">Reschedule</button>`);
+  const resched = pubOpen.has(it.id) ? `<div class="row"><input type="datetime-local" id="rs-${esc(it.id)}"><button class="btn small" data-act="rsset" data-id="${esc(it.id)}" type="button">Set (IST)</button></div>` : '';
+  return `<div class="pub" id="pub-${esc(it.id)}">
+    <span class="tag ${esc(it.status)}">${esc(it.status.replace('_', ' '))} · ${esc(it.channel)}</span>
+    ${it.video_url ? `<video src="${it.video_url}#t=0.5" preload="metadata" controls playsinline></video>` : ''}
+    <h3>${esc(it.title || '(untitled)')}</h3>
+    <div class="when">${it.status === 'published' ? `Published · ${it.video_id ? `<a href="https://youtu.be/${esc(it.video_id)}" target="_blank" rel="noopener" style="color:var(--primary-h)">watch</a>` : ''}`
+      : `Publishes <b>${esc(istText(it.publish_at))}</b> <span class="cd" data-at="${esc(it.publish_at)}">${esc(countdown(it.publish_at))}</span>`}</div>
+    ${it.status === 'published' ? `<div class="when">${st.views ?? '–'} views · ${st.likes ?? '–'} likes</div>` : ''}
+    ${it.error ? `<div class="banner">${esc(it.error)}</div>` : ''}
+    <div class="acts">${acts.join('')}</div>${resched}</div>`;
+}
+
+async function loadPublish() {
+  try {
+    const [q, h] = await Promise.all([getJson('/publish/queue'), getJson('/publish/health')]);
+    pubItems = q.items || [];
+    const chans = Object.entries(h.channels || {});
+    $('publish').hidden = !pubItems.length && !chans.length;
+    $('pubBanner').innerHTML = chans.filter(([, c]) => !c.token).map(([n]) => `<div class="banner">Channel “${esc(n)}” is not connected to YouTube (no token). Publishing there will fail until you authorise it.</div>`).join('');
+    if (document.activeElement?.closest?.('#pubList input')) return;   // don't wipe a half-typed date
+    $('pubList').innerHTML = pubItems.map(pubCard).join('') || '<p class="empty">Nothing queued.</p>';
+  } catch { /* publish module unavailable: keep the section hidden */ }
+}
+
+$('pubList').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-act]');
+  if (!b) return;
+  const { act, id } = b.dataset;
+  if (act === 'resched') { pubOpen.has(id) ? pubOpen.delete(id) : pubOpen.add(id); return loadPublish(); }
+  let path = `/publish/${encodeURIComponent(id)}/${act}`, body = null;
+  if (act === 'rsset') {
+    const v = $(`rs-${id}`)?.value;
+    if (!v) return;
+    path = `/publish/${encodeURIComponent(id)}/reschedule`;
+    body = JSON.stringify({ publish_at: `${v}:00+05:30` });
+    pubOpen.delete(id);
+  }
+  b.disabled = true;
+  const res = await fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); toast(d.detail || 'Action failed.'); }
+  loadPublish();
+});
+
+loadPublish();
+setInterval(() => { if (state.tab === 'queue') loadPublish(); }, 10000);
+setInterval(() => document.querySelectorAll('.cd').forEach((el) => { el.textContent = countdown(el.dataset.at); }), 1000);

@@ -175,3 +175,29 @@ def test_login_flow_token_and_rate_limit(monkeypatch):
     monkeypatch.delenv("AURORA_PASSWORD")
     assert asyncio.run(server._require_login(_req(), nxt)) == "passed"
     assert server.auth_state(_req()) == {"auth_required": False, "authenticated": True}
+
+
+def test_publish_endpoints_veto_restore_reschedule(monkeypatch):
+    import functools
+    import tempfile
+    from pathlib import Path
+
+    import aurora.publish.queue as pq
+
+    tmp = tempfile.TemporaryDirectory()
+    monkeypatch.setattr(pq, "PublishQueue", functools.partial(pq.PublishQueue, path=Path(tmp.name) / "q.json"))
+    clip = Path(tmp.name) / "clip.mp4"
+    clip.write_bytes(b"not really a video")
+    item = pq.PublishQueue().enqueue("test", clip, {"title": "T"})
+    assert [i["id"] for i in server.publish_queue()["items"]] == [item["id"]]
+    assert server.publish_veto(item["id"])["item"]["status"] == "vetoed"
+    assert server.publish_approve(item["id"])["item"]["status"] == "scheduled"
+    assert server.publish_reschedule(item["id"], server.RescheduleRequest(publish_at="2030-01-01T10:00:00+05:30"))["status"] == "success"
+    with pytest.raises(server.HTTPException) as e:
+        server.publish_reschedule(item["id"], server.RescheduleRequest(publish_at="2030-01-01T10:00:00"))
+    assert e.value.status_code == 400
+    with pytest.raises(server.HTTPException) as e:
+        server.publish_approve(item["id"])  # already scheduled
+    assert e.value.status_code == 400
+    assert server.publish_health()["channels"]["test"]["token"] in (True, False)
+    tmp.cleanup()
