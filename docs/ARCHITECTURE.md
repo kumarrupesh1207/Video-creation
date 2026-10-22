@@ -92,7 +92,7 @@ flowchart TB
             JOBS["/api/jobs, /api/assets, SSE /api/events"]
             RUN["aurora/pipeline.py run_job()"]
             SW["aurora/motion/switchboard.py<br/>capability + cost routing"]
-            VAL["validate (ffprobe + hash) NEW: aurora/media/validate.py"]
+            VAL["validate (ffprobe + hash) aurora/monitoring/media_validator.py"]
         end
         FF["T0: ffmpeg_kenburns / media_assembler"]
         MAN[(assets/images/manifest.json<br/>outputs/&lt;job_id&gt;/logs/job.json)]
@@ -147,7 +147,7 @@ sequenceDiagram
 | `aurora/motion/providers/runpod_provider.py` **NEW** (~60 lines) | Subclass of `RemoteI2VProvider` (Runpod `/run` + `/status`). |
 | `aurora/motion/providers/nvidia_nim.py`, `local_comfyui.py` | `git mv` from `backend/app/providers/`. |
 | `aurora/media/assemble.py` | `git mv src/modules/media_assembler.py`. |
-| `aurora/media/validate.py` **NEW** (~80 lines) | No equivalent exists. |
+| `aurora/monitoring/media_validator.py` | Exists (backend-impl, Phase 0); extend with sha256 + input-duplicate checks. |
 | `aurora/gpu_pods.py` **NEW** (~80 lines) | Pod start/stop/idle-shutdown (not needed for Runpod Serverless). |
 | `scripts/remote_gpu_worker.py` | Same file; add `--http` mode (FastAPI) beside the folder loop, then drop the folder loop. |
 | `scripts/gpu_provision.sh` | Same file; add Wan 2.2 repos (GPU_BACKENDS §7b). |
@@ -268,7 +268,7 @@ Rules:
 - Reuse is a per-job choice (REQUIREMENTS §6 drops Rule 2).
 - Delete `manifest.composite_asset_key`; switch `image_switchboard.py` to `CacheGate`.
 
-### 4.2 Output validation gate (**NEW** `aurora/media/validate.py`)
+### 4.2 Output validation gate (reuse `aurora/monitoring/media_validator.py`)
 
 Called by `pipeline.run_job` before `register_asset`. Fail → `VALIDATION_FAILED` (one retry), never success.
 
@@ -341,7 +341,7 @@ Small steps; each keeps `python -m pytest tests -q` green. Old code moves to `le
 | 0 | Snapshot: commit current work on a branch, tag `v1-hibernated`, back up the manifest (user decision) | git | Tag exists |
 | 1 | Config truth: extend `config.yaml` (remove fake 12 GB box, fixed 9:16/5 s; add `providers.*.capabilities`); load `.env`; extend `.env.example` | `config.yaml`, `.env.example`, `AURORA.md` | Config matches reality |
 | 2 | Contract: add `Capability`, `GenParams`, `capabilities()` and the unified `generate()` to `aurora/motion/base.py`; merge the two FFmpeg providers into `ffmpeg_kenburns.py` (any size/fps/duration) | `base.py`, `ffmpeg_kenburns.py`, `ffmpeg_static.py` | Ken Burns at 16:9 / 1:1 / 9:16, any length |
-| 3 | Validation + cache key: **NEW** `aurora/media/validate.py`; extend `CacheGate.generate_asset_key`; remove `composite_asset_key` | `cache_gate.py`, `manifest.py`, `image_switchboard.py` | Mock MP4 rejected; key tests pass |
+| 3 | Validation + cache key: wire `aurora/monitoring/media_validator.py` into the pipeline; extend `CacheGate.generate_asset_key`; remove `composite_asset_key` | `cache_gate.py`, `manifest.py`, `image_switchboard.py` | Mock MP4 rejected; key tests pass |
 | 4 | Runner: extend `aurora/pipeline.py` with `run_job` (planner, segment prompts used, retries, resume); `git mv src/modules/media_assembler.py aurora/media/assemble.py` | `pipeline.py` | 60 s ledger runs with T0 + mock T1 in tests |
 | 5 | Router: replace `_select_provider_key` with capability/cost ordering, opt-in still fallback, budget check | `switchboard.py` | Routing tests (move root `test_*.py` into `tests/`) |
 | 6 | API: in `server.py`, swap subprocess spawning for `run_job` background tasks; add auth, `/api/events`, `/api/jobs/estimate`, `/api/budget`; serve `ui/dist`; bind 127.0.0.1 | `server.py`, `scripts/launch.py` | Job via API without `main.py`; login required |
@@ -444,7 +444,7 @@ Steps 6–7 and step 9 can run in parallel after step 5.
   - `switchboard.py` keyword ki jagah capability + cost se route karega.
   - `remote_i2v_base.py` ke existing hooks se HTTP (Runpod Serverless first).
   - `ui/` ek PWA banega.
-- **Naye files sirf teen:** `validate.py`, `runpod_provider.py`, `gpu_pods.py`.
+- **Naye files sirf do:** `runpod_provider.py`, `gpu_pods.py` (validator already `aurora/monitoring/media_validator.py` mein hai).
 - **Phone se:** Tailscale + password login.
 - **Cost aur safety:** har output ka ffprobe + hash check, monthly budget cap, idle GPU auto-band.
 - **Migration:** 13 chhote steps. Purana code pehle `legacy/` mein, phir delete.
