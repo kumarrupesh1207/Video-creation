@@ -60,3 +60,7 @@ UI "Queue" tab: card per item with video preview (`path`), title, countdown to `
 - AI label: Meta has no reliable API flag yet for the "AI info" label; put "AI-generated" in caption and enable auto-label on the account.
 - Fit: add `aurora/publish/meta.py` with the same `upload(...)` shape and a `platform` field per queue item (queue already stores channel; add `platform`). Reuse the same veto/slot logic.
 - Alternative with less code: Metricool API/MCP (paid plan) schedules IG/FB/TikTok/YouTube from one call and handles tokens and hosting. Recommended once a channel earns or reaches ~1k followers; start with direct YouTube (free).
+
+## Research wiring and dry run
+- `render` calls `aurora.research.research_ideas` (Gemini free tier, needs `GEMINI_API_KEY`). Scene 1's image prompt makes the image; hook + all scene voiceovers become the voiceover/captions; title/description/hashtags/AI-flag go to the queue item. With no key (or research returning only the niche-text fallback) it uses `topics.txt` and autorun's own prompt step (which waits ~2 min if Ollama is down).
+- `python -m aurora.autopilot publish-due --dry-run [--at ISO_UTC]` logs exactly what would be uploaded (title, tags, privacy, containsSyntheticMedia) with no auth, no upload, and the queue untouched.

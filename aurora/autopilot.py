@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 import types
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -40,13 +41,39 @@ def stub_ideas(channel: dict, n: int, topics_file: Path = ROOT / "topics.txt") -
     return [{"topic": t, "title": t[:95], "description": t, "hashtags": [], "ai_disclosure": True} for t in lines[:n]]
 
 
+LANGS = {"en": "English", "hi": "Hindi", "hinglish": "Hinglish"}
+
+
+def _from_research(channel: dict, n: int, research) -> list[dict]:
+    """Map aurora.research.research_ideas() output to autopilot ideas; [] if it only produced the niche-text fallback."""
+    lang = LANGS.get(str(channel.get("language", "en")).lower(), channel.get("language", "English"))
+    platform = "YouTube Shorts" if "youtube" in channel.get("platforms", ["youtube"]) else "Instagram Reels"
+    res = research.research_ideas(channel.get("niche", ""), lang, platform, n)
+    if res.get("source") == "topic_fallback":
+        return []
+    out = []
+    for i in res.get("ideas", [])[:n]:
+        sc = i.get("scenes") or []
+        out.append({
+            "topic": i["title"], "title": i["title"], "description": i.get("description", ""),
+            "hashtags": i.get("hashtags", []), "ai_disclosure": i.get("ai_disclosure", True),
+            "image_prompt": sc[0]["image_prompt"] if sc else None, "motion_prompt": sc[0]["motion_prompt"] if sc else None,
+            "hook": i.get("hook"), "scenes": sc,
+            "voiceover": " ".join([i.get("hook", "")] + [x["voiceover"] for x in sc]).strip() or None,
+        })
+    return out
+
+
 def get_ideas(channel: dict, n: int, research=None) -> list[dict]:
-    if research is None:
-        try:
-            from aurora import research as research  # noqa: PLC0414 - optional module
-        except ImportError:
-            return stub_ideas(channel, n)
-    return list(research.generate_ideas(channel.get("niche", ""), channel.get("language", "en"), n, channel=channel["name"]))[:n]
+    """Research first (Gemini/local LLM); topics.txt when research gives nothing or is unavailable."""
+    try:
+        if research is None:
+            from aurora import research
+        ideas = _from_research(channel, n, research)
+    except Exception as e:  # noqa: BLE001 - no key, network, import error
+        print(f"[autopilot] {channel['name']}: research unavailable ({e}); using topics.txt", file=sys.stderr)
+        ideas = []
+    return ideas or stub_ideas(channel, n)
 
 
 # ---- render ----------------------------------------------------------
@@ -59,7 +86,12 @@ def render_idea(cfg: dict, switchboard, channel: dict, idea: dict) -> dict:
         captions=True, motion=channel.get("motion", "camera"), no_llm=False, voice=channel.get("voice"),
         voice_engine=None, voice_gender=None, speaker_wav=None, voiceover_text=idea.get("voiceover"))
     out_dir = ROOT / "outputs" / "final" / channel["name"] / datetime.now().date().isoformat()
-    return autorun.process_topic(cfg, switchboard, idea["topic"], a, out_dir)
+    if not idea.get("image_prompt"):  # topics.txt stub: let autorun's own LLM step write the prompt
+        return autorun.process_topic(cfg, switchboard, idea["topic"], a, out_dir)
+    text = {"image_prompt": idea["image_prompt"] + autorun.QUALITY_SUFFIX, "caption": idea.get("hook") or idea["title"],
+            "source": "research"}
+    with mock.patch.object(autorun, "write_prompt_and_caption", lambda _cfg, _topic: text):
+        return autorun.process_topic(cfg, switchboard, idea["topic"], a, out_dir)
 
 
 def run_render(cfg: dict, queue: PublishQueue, only: str | None = None, limit: int = 0,
@@ -103,13 +135,24 @@ def run_render(cfg: dict, queue: PublishQueue, only: str | None = None, limit: i
 
 # ---- publish ---------------------------------------------------------
 def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | None = None, service_factory=None,
-                uploader=None) -> dict:
+                uploader=None, dry_run: bool = False) -> dict:
     """Upload every due, non-vetoed item. Stops a channel on quota; failures retry up to max_attempts."""
     from aurora.publish import youtube as yt
 
     service_factory = service_factory or yt.build_service
     uploader = uploader or yt.upload_short
     result = {"published": [], "failed": [], "deferred": []}
+    if dry_run:  # log what WOULD be sent; no auth, no upload, queue untouched
+        from aurora.publish import youtube as yt
+
+        result["would_publish"] = []
+        for it in queue.due(now, only):
+            body = yt.build_body(it, it.get("privacy", "public"))
+            print(f"[autopilot] DRY-RUN {it['channel']}: would upload {it['path']} ({it['sha256'][:12]}) "
+                  f"title={body['snippet']['title']!r} tags={body['snippet']['tags']} "
+                  f"privacy={body['status']['privacyStatus']} containsSyntheticMedia={body['status']['containsSyntheticMedia']}")
+            result["would_publish"].append(it["id"])
+        return result
     services: dict[str, object] = {}
     blocked: set[str] = set()
     for it in queue.due(now, only):
@@ -175,6 +218,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("id", nargs="?")
     ap.add_argument("--channel")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--dry-run", action="store_true", help="publish-due: log what would be uploaded, send nothing")
+    ap.add_argument("--at", help="publish-due: evaluate as of this ISO time (UTC), e.g. to preview a future run")
     ap.add_argument("--config", type=Path, default=ROOT / "config.yaml")
     a = ap.parse_args(argv)
     cfg = yaml.safe_load(a.config.read_text(encoding="utf-8")) or {}
@@ -185,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
         lower_priority()
         run_render(cfg, q, a.channel, a.limit)
     elif a.cmd == "publish-due":
-        print(publish_due(q, a.channel))
+        print(publish_due(q, a.channel, now=datetime.fromisoformat(a.at).astimezone(timezone.utc) if a.at else None, dry_run=a.dry_run))
     elif a.cmd == "analytics":
         print(f"[autopilot] stats updated for {collect_analytics(q)} videos")
     elif a.cmd == "status":

@@ -148,3 +148,25 @@ def test_analytics_stores_stats(q, vid):
     n = autopilot.collect_analytics(q, service_factory=lambda c: object(),
                                     stats_fn=lambda s, ids: {"V1": {"viewCount": 5, "likeCount": 1, "commentCount": 0}})
     assert n == 1 and q.get(it["id"])["stats"]["viewCount"] == 5
+
+
+def test_research_mapping_and_fallback_to_topics(workspace_tmp_path):
+    ch = {"name": "c", "niche": "space", "language": "hi", "platforms": ["youtube"]}
+    sc = [{"image_prompt": "a planet", "motion_prompt": "push in", "voiceover": "line one"},
+          {"image_prompt": "b", "motion_prompt": "m", "voiceover": "line two"}]
+    good = type("R", (), {"research_ideas": staticmethod(lambda niche, lang, plat, n: {
+        "source": "gemini", "ideas": [{"title": "Cool", "hook": "Wow", "description": "d", "hashtags": ["#s"],
+                                       "scenes": sc, "ai_disclosure": False}]})})
+    i = autopilot.get_ideas(ch, 1, good)[0]
+    assert i["image_prompt"] == "a planet" and i["voiceover"] == "Wow line one line two" and i["ai_disclosure"] is False
+    fb = type("R", (), {"research_ideas": staticmethod(lambda *a: {"source": "topic_fallback", "ideas": [{}]})})
+    assert all(not x.get("image_prompt") for x in autopilot.get_ideas(ch, 1, fb))  # topics.txt stub (or empty)
+
+
+def test_publish_due_dry_run_sends_nothing(q, vid):
+    it = q.enqueue("facts", vid, {"title": "T"}, now=NOW)
+    up, sf = MagicMock(), MagicMock()
+    r = autopilot.publish_due(q, now=NOW + timedelta(days=1), service_factory=sf, uploader=up, dry_run=True)
+    assert r["would_publish"] == [it["id"]]
+    up.assert_not_called(); sf.assert_not_called()
+    assert q.get(it["id"])["status"] == "scheduled"
