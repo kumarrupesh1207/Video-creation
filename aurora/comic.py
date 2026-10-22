@@ -245,7 +245,9 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode):
                 images.append(Path(r.output_path))
                 timings.append(round(_t.time() - t0, 1))
             return images, timings, "ComfyUI character reference + IP-Adapter (consistent look)", "comfy_ipadapter"
-        except Exception as exc:  # noqa: BLE001 - fall back to NIM
+        except Exception as exc:  # noqa: BLE001 - fall back to NIM (unless the caller demanded ComfyUI)
+            if image_mode == "comfy":
+                raise
             note = f"ComfyUI failed ({str(exc)[:80]}); "
             images, timings = [], []
     elif image_mode == "comfy":

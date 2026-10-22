@@ -142,3 +142,33 @@ def test_final_encode_is_phone_sized(workspace_tmp_path, monkeypatch):
     out = workspace_tmp_path / "c.mp4"
     info = comic.render_comic(shutil.which("ffmpeg"), c, imgs, out, workspace_tmp_path / "w", music=False)
     assert out.stat().st_size * 8 / info["seconds"] <= 10_000_000  # about 10 Mbps overall at most
+
+
+def test_ipadapter_and_img2img_workflows_get_the_long_cpu_timeout(monkeypatch):
+    from src.modules.comfy_orchestrator import ComfyOrchestrator
+
+    seen = []
+    orch = ComfyOrchestrator.__new__(ComfyOrchestrator)
+    monkeypatch.setattr(ComfyOrchestrator, "_execute", lambda self, wf, ov, timeout: seen.append(timeout) or [])
+    for name in ("image_gen.json", "image_gen_ipadapter.json", "img2img.json", "img2img_facelock.json"):
+        orch.run_workflow(f"src/workflows/{name}", {})
+    orch.run_workflow("src/workflows/svd_video.json", {})
+    assert seen == [3600, 3600, 3600, 3600, 900]
+
+
+def test_explicit_comfy_mode_does_not_fall_back_to_nim(workspace_tmp_path, monkeypatch):
+    from backend.app.providers import local_comfyui as lc
+
+    spec = research.research_comic("c", "a swordsman", panels=5, cfg={}, series_dir=workspace_tmp_path)["comic"]
+
+    class Boom:
+        def __init__(self, cfg):
+            pass
+
+        def generate_with_params(self, *a, **k):
+            raise RuntimeError("timed out")
+
+    monkeypatch.setattr(lc, "LocalComfyUIProvider", Boom)
+    monkeypatch.setattr(comic, "_comfy_up", lambda cfg: True)
+    with pytest.raises(RuntimeError, match="timed out"):
+        comic._panel_images({}, SimpleNamespace(generate=lambda *a, **k: pytest.fail("NIM must not be called")), spec, 1, "j", (576, 1024), "comfy")

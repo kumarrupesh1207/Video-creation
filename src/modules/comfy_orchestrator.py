@@ -66,7 +66,7 @@ class ComfyOrchestrator:
                      Default 900s (15 min) — covers CPU-mode SD 1.5 generation.
                      For GPU: typically 30-120s per image.
         """
-        if Path(workflow_path).name == "image_gen.json":
+        if Path(workflow_path).name.startswith(("image_gen", "img2img")):  # CPU image workflows (incl. IP-Adapter variants)
             timeout = max(timeout, 3600)
         return self._execute(workflow_path, overrides, timeout)
 
