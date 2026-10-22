@@ -865,6 +865,9 @@ class CreateRequest(BaseModel):
     music: str = Field("auto", pattern="^(auto|none)$")
     voiceover: bool = False
     voiceover_text: str = Field("", max_length=500)
+    voice_engine: str = Field("auto", pattern="^(auto|edge|xtts|piper)$")
+    gender: str = Field("female", pattern="^(female|male)$")
+    speaker_wav: str | None = None    # uploaded voice sample (xtts cloning)
     motion: str = Field("camera", pattern="^(camera|ai)$")
     action: str = Field("", max_length=300)
     source: str = Field("prompt", pattern="^(prompt|upload)$")
@@ -959,7 +962,9 @@ def _run_create_job(job_id: str, req: CreateRequest):
             audio, audio_note = resolve_audio(
                 FFmpegKenBurns().ffmpeg, req.duration, _output_root() / "audio", slug,
                 music=req.music_path or (req.music if req.music == "auto" else None), prompt=req.prompt,
-                voiceover_text=(req.voiceover_text.strip() or req.prompt) if req.voiceover else None)
+                voiceover_text=(req.voiceover_text.strip() or req.prompt) if req.voiceover else None,
+                voice_options={"voice_engine": req.voice_engine, "gender": req.gender,
+                               **({"speaker_wav": req.speaker_wav} if req.speaker_wav else {})})
             job.setdefault("events", []).append(f"Audio: {audio_note}")
             t_reel = time.perf_counter()
             tee = _Tee(sys.stdout)
@@ -993,6 +998,10 @@ def _run_create_job(job_id: str, req: CreateRequest):
 
 @app.post("/api/create")
 def create_single(req: CreateRequest):
+    if req.speaker_wav:
+        up = (_output_root() / "uploads").resolve()
+        if up not in Path(req.speaker_wav).resolve().parents or not Path(req.speaker_wav).is_file():
+            raise HTTPException(status_code=422, detail="speaker_wav must be a file uploaded via /api/upload-music.")
     if req.source == "upload":
         up = (_output_root() / "uploads").resolve()
         if not req.image_path or up not in Path(req.image_path).resolve().parents or not Path(req.image_path).is_file():

@@ -100,7 +100,25 @@
             <span id="musicName">No file chosen — reel will be silent</span>
           </span>
           <label class="check"><input id="voiceover" type="checkbox"> <span>Voiceover <em>Offline voice (English/Hindi), adds ~15 s</em></span></label>
-          <textarea id="voText" rows="2" maxlength="500" placeholder="Voiceover text (blank = use the prompt)" hidden></textarea>
+          <div id="voBox" hidden>
+            <textarea id="voText" rows="2" maxlength="500" placeholder="Voiceover text (blank = use the prompt)"></textarea>
+            <label>Voice
+              <select id="voEngine">
+                <option value="auto">Auto</option>
+                <option value="edge">Natural (online)</option>
+                <option value="xtts">Offline clone (needs my voice sample)</option>
+                <option value="piper">Basic (offline)</option>
+              </select>
+            </label>
+            <div class="seg" id="genderSeg" role="radiogroup">
+              <button type="button" data-v="female" class="on">Female</button>
+              <button type="button" data-v="male">Male</button>
+            </div>
+            <label>My voice sample <span class="opt">(optional · wav/mp3, ~10 s)</span>
+              <input id="voSample" type="file" accept=".wav,.mp3,.m4a,audio/*">
+            </label>
+            <p id="voInfo" class="hint"></p>
+          </div>
         </div>
 
         <label>Image provider

@@ -5,7 +5,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const getJson = async (path) => (await fetch(API + path)).json();
 const fmtSecs = (s) => { s = Math.round(s || 0); return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`; };
 
-const state = { mode: 'reel', aspect: '9:16', musicPath: null, tab: 'create', motion: 'camera', music: 'auto', source: 'prompt', restyle: 'asis', photoPath: null, jobs: [], prevRunning: false, galleryKey: '' };
+const state = { mode: 'reel', aspect: '9:16', musicPath: null, tab: 'create', motion: 'camera', music: 'auto', gender: 'female', speakerWav: null, source: 'prompt', restyle: 'asis', photoPath: null, jobs: [], prevRunning: false, galleryKey: '' };
 
 // ─── Tabs ────────────────────────────────────────────────
 function showTab(name) {
@@ -74,7 +74,20 @@ $('photo').addEventListener('change', async () => {
   }
 });
 bindSeg('musicSeg', 'music', () => { $('musicFile').hidden = state.music !== 'upload'; });
-$('voiceover').addEventListener('change', () => { $('voText').hidden = !$('voiceover').checked; });
+$('voiceover').addEventListener('change', () => { $('voBox').hidden = !$('voiceover').checked; });
+bindSeg('genderSeg', 'gender');
+$('voSample').addEventListener('change', async () => {
+  const f = $('voSample').files[0];
+  state.speakerWav = null;
+  if (!f) { $('voInfo').textContent = ''; return; }
+  $('voInfo').textContent = `Uploading ${f.name}…`;
+  try {
+    const res = await (await fetch(`${API}/upload-music?name=${encodeURIComponent(f.name)}`, { method: 'POST', body: f })).json();
+    if (res.status !== 'success') throw new Error(res.message);
+    state.speakerWav = res.path;
+    $('voInfo').textContent = `${f.name} ready (used by "Offline clone")`;
+  } catch (err) { $('voInfo').textContent = `Upload failed: ${err.message}`; $('voSample').value = ''; }
+});
 bindSeg('motionSeg', 'motion', syncForm);
 bindSeg('aspectSeg', 'aspect', syncForm);
 syncForm();
@@ -119,6 +132,7 @@ $('createForm').addEventListener('submit', async (e) => {
     music_path: state.mode === 'reel' && state.music === 'upload' ? state.musicPath : null,
     music: state.music === 'none' ? 'none' : 'auto',
     voiceover: state.mode === 'reel' && $('voiceover').checked, voiceover_text: $('voText').value.trim(),
+    voice_engine: $('voEngine').value, gender: state.gender, speaker_wav: state.speakerWav,
   };
   const up = state.source === 'upload', restyle = up && state.restyle === 'restyle';
   Object.assign(body, { source: state.source, image_path: up ? state.photoPath : null, restyle, denoise: +$('denoise').value, face_lock: $('faceLock').checked });
