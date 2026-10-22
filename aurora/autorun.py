@@ -100,7 +100,9 @@ def process_topic(cfg: dict, switchboard, topic: str, args: argparse.Namespace, 
     audio, audio_note = resolve_audio(
         FFmpegKenBurns().ffmpeg, args.duration, ROOT / "outputs" / "audio", slug, music=args.music,
         prompt=f"{topic} {text['image_prompt']}",
-        voiceover_text=(args.voiceover_text or text["caption"]) if args.voiceover else None,
+        voiceover_text=(getattr(args, "voiceover_text", None) or text["caption"]) if args.voiceover else None,
+        voice_options={k: v for k, v in {"voice_engine": getattr(args, "voice_engine", None), "gender": getattr(args, "voice_gender", None),
+                                         "voice": getattr(args, "voice", None), "speaker_wav": getattr(args, "speaker_wav", None)}.items() if v},
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -159,6 +161,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, default=ROOT / "outputs" / "final")
     ap.add_argument("--music", default="auto", help="auto (pick from assets/music by mood; silent if empty) | <file> | none")
     ap.add_argument("--voiceover", action="store_true", help="offline Piper voiceover (English/Hindi) of the caption, ducked over the music")
+    ap.add_argument("--voice-engine", default=None, choices=["auto", "edge", "xtts", "piper"], help="default: config audio.voice_engine")
+    ap.add_argument("--voice-gender", default=None, choices=["female", "male"])
+    ap.add_argument("--voice", default=None, help="edge voice name override")
+    ap.add_argument("--speaker-wav", default=None, help="XTTS voice-cloning sample (wav)")
     ap.add_argument("--voiceover-text", default=None, help="text to speak instead of the caption")
     ap.add_argument("--providers", default=None, help="comma list overriding image fallback_order, e.g. local_comfyui")
     ap.add_argument("--style", default="cinematic")

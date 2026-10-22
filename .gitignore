@@ -24,3 +24,5 @@ assets/music/**/*.wav
 assets/music/**/*.m4a
 assets/music/**/*.ogg
 assets/music/**/*.flac
+assets/voices/*.wav
+assets/voices/*.mp3

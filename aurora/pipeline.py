@@ -332,6 +332,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--height", type=int, default=1920)
     parser.add_argument("--audio", type=Path, default=None, help="optional audio file (silent track if omitted)")
     parser.add_argument("--music", default=None, help="auto|<file>|none: processed music (loop/trim, fades, loudnorm)")
+    parser.add_argument("--voice-engine", default=None, choices=["auto", "edge", "xtts", "piper"])
     parser.add_argument("--voiceover-text", default=None, help="speak this text (Piper) over the music")
     parser.add_argument("--prompt-ledger", type=Path, default=None)
     args = parser.parse_args(argv)
@@ -345,7 +346,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             audio, note = resolve_audio(FFmpegKenBurns().ffmpeg, args.duration_secs, Path("outputs") / "audio",
                                         args.output_path.stem, music=args.music, prompt=args.image_path.stem,
-                                        voiceover_text=args.voiceover_text)
+                                        voiceover_text=args.voiceover_text,
+                                        voice_options={"voice_engine": args.voice_engine} if args.voice_engine else None)
             print(f"[audio] {note}")
         output_path = run(
             args.image_path, args.output_path, args.duration_secs,

@@ -50,9 +50,38 @@ def test_music_is_looped_trimmed_and_muxed(workspace_tmp_path):
     assert "mean_volume: -inf" not in vol  # real, non-silent audio
 
 
-def test_voiceover_skips_gracefully_without_model(workspace_tmp_path, monkeypatch):
+def test_detect_lang():
+    from aurora.audio import detect_lang
+
+    assert detect_lang("नमस्ते दोस्तों") == "hi"
+    assert detect_lang("aaj ka din bahut accha hai") == "hi"
+    assert detect_lang("good morning everyone") == "en"
+
+
+def test_voice_engine_fallback_chain(workspace_tmp_path, monkeypatch):
     from aurora import audio
 
-    monkeypatch.setattr(audio, "PIPER_DIR", workspace_tmp_path)
-    wav, note = audio.synthesize_voiceover("hello", workspace_tmp_path / "v.wav")
-    assert wav is None and "skipped" in note
+    calls = []
+
+    def boom(name):
+        def fn(text, out, lang, o):
+            calls.append(name)
+            raise RuntimeError("down")
+        return fn
+
+    def ok(text, out, lang, o):
+        calls.append("piper")
+        out.write_bytes(b"RIFF")
+        return out, "piper test"
+
+    monkeypatch.setattr(audio, "audio_settings", lambda: {})
+    monkeypatch.setattr(audio, "_tts_edge", boom("edge"))
+    monkeypatch.setattr(audio, "_tts_xtts", boom("xtts"))
+    monkeypatch.setattr(audio, "_tts_piper", ok)
+    path, note = audio.synthesize_voiceover("hello", workspace_tmp_path / "v.wav")
+    assert calls == ["edge", "xtts", "piper"] and path and "fallback" in note and "edge:" in note
+    calls.clear()
+    audio.synthesize_voiceover("hello", workspace_tmp_path / "v2.wav", options={"voice_engine": "xtts"})
+    assert calls[0] == "xtts"
+    monkeypatch.setattr(audio, "_tts_piper", boom("piper"))
+    assert audio.synthesize_voiceover("hello", workspace_tmp_path / "v3.wav")[0] is None

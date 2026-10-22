@@ -30,6 +30,14 @@ paths:
 assets:
   reuse_existing_asset: true
 
+audio:                             # voiceover engines: see assets/voices/README.md
+  voice_engine: "auto"             # auto = edge -> xtts -> piper | edge | xtts | piper
+  voice_gender: "female"           # female | male
+  voice: ""                        # optional edge voice override, e.g. "hi-IN-MadhurNeural"
+  speaker_wav: ""                  # optional XTTS cloning sample, e.g. "assets/voices/me.wav"
+  rate: "+0%"                      # edge speaking rate, e.g. "-10%"
+  pitch: "+0Hz"
+
 motion:
   liveportrait:
     enabled: true

@@ -77,23 +77,87 @@ def mix_audio(ffmpeg: str, out: Path, duration: float, music: Path | None = None
     return out
 
 
-def synthesize_voiceover(text: str, out_wav: Path, lang: str | None = None) -> tuple[Path | None, str]:
-    """Offline CPU TTS with Piper (English + Hindi). Returns (wav or None, note). Never raises."""
-    lang = lang or ("hi" if re.search(r"[ऀ-ॿ]", text) else "en")
+HINGLISH = set("hai hain nahi nahin kya aur ke ka ki ko mein main tum hum aap yeh ye woh tha thi se par bahut accha acha zindagi dil pyaar".split())
+EDGE_VOICES = {("hi", "female"): "hi-IN-SwaraNeural", ("hi", "male"): "hi-IN-MadhurNeural",
+               ("en", "female"): "en-IN-NeerjaNeural", ("en", "male"): "en-IN-PrabhatNeural"}
+XTTS_SPEAKERS = {"female": "Claribel Dervla", "male": "Damien Black"}
+XTTS_PY = ROOT / ".venv-tts" / "Scripts" / "python.exe"
+XTTS_SCRIPT = ROOT / "scripts" / "xtts_say.py"
+ENGINE_ORDER = ["edge", "xtts", "piper"]
+
+
+def detect_lang(text: str) -> str:
+    """hi for Devanagari or romanised Hindi (Hinglish), else en."""
+    if re.search(r"[ऀ-ॿ]", text):
+        return "hi"
+    return "hi" if len(set(re.findall(r"[a-z]+", text.lower())) & HINGLISH) >= 2 else "en"
+
+
+def audio_settings() -> dict:
+    """config.yaml `audio:` block (voice_engine auto|edge|xtts|piper, voice_gender, voice, speaker_wav, rate, pitch)."""
+    try:
+        import yaml
+
+        return dict((yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8")) or {}).get("audio", {}))
+    except Exception:  # noqa: BLE001 - config is optional
+        return {}
+
+
+def _tts_edge(text, out, lang, o):
+    import asyncio
+
+    import edge_tts
+
+    voice = o.get("voice") or EDGE_VOICES[(lang, o.get("gender", "female"))]
+    mp3 = Path(out).with_suffix(".mp3")
+    asyncio.run(edge_tts.Communicate(text, voice, rate=o.get("rate", "+0%"), pitch=o.get("pitch", "+0Hz")).save(str(mp3)))
+    if not mp3.exists() or mp3.stat().st_size == 0:
+        raise RuntimeError("edge-tts returned no audio")
+    return mp3, f"edge {voice}"
+
+
+def _tts_xtts(text, out, lang, o):
+    if not XTTS_PY.exists():
+        raise RuntimeError("XTTS venv missing (run scripts/setup_tts.ps1)")
+    wav = o.get("speaker_wav") or "-"
+    cmd = [str(XTTS_PY), str(XTTS_SCRIPT), text, lang, str(out), str(wav), XTTS_SPEAKERS[o.get("gender", "female")]]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900, encoding="utf-8", errors="replace")
+    if proc.returncode != 0 or not Path(out).exists():
+        raise RuntimeError("xtts failed: " + (proc.stderr.strip().splitlines() or ["?"])[-1])
+    return Path(out), "xtts" + (" cloned voice" if o.get("speaker_wav") else "")
+
+
+def _tts_piper(text, out, lang, o):
     voice_file = PIPER_DIR / f"{PIPER_VOICES[lang]}.onnx"
     if not voice_file.exists():
-        return None, f"voiceover skipped: missing voice model {voice_file.name} (models/piper/)"
-    try:
-        from piper import PiperVoice
+        raise RuntimeError(f"missing voice model {voice_file.name} (models/piper/)")
+    from piper import PiperVoice
 
-        voice = PiperVoice.load(str(voice_file))
-        out_wav = Path(out_wav)
-        out_wav.parent.mkdir(parents=True, exist_ok=True)
-        with wave.open(str(out_wav), "wb") as wf:
-            voice.synthesize_wav(text, wf)
-        return out_wav, f"voiceover ({PIPER_VOICES[lang]})"
-    except Exception as exc:  # noqa: BLE001 - TTS must never break a render
-        return None, f"voiceover skipped: {exc}"
+    with wave.open(str(out), "wb") as wf:
+        PiperVoice.load(str(voice_file)).synthesize_wav(text, wf)
+    return Path(out), f"piper {PIPER_VOICES[lang]}"
+
+
+def synthesize_voiceover(text: str, out_wav: Path, lang: str | None = None, options: dict | None = None) -> tuple[Path | None, str]:
+    """Voiceover with fallbacks: edge (natural, online) -> xtts (offline, cloning) -> piper (basic). Never raises."""
+    o = {**audio_settings(), **(options or {})}
+    lang = lang or o.get("language") or detect_lang(text)
+    o["gender"] = o.get("gender") or o.get("voice_gender") or "female"
+    choice = str(o.get("voice_engine", "auto")).lower()
+    order = ENGINE_ORDER if choice in ("auto", "") else [choice] + [e for e in ENGINE_ORDER if e != choice]
+    out_wav = Path(out_wav)
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    failed = []
+    for engine in order:
+        fn = {"edge": _tts_edge, "xtts": _tts_xtts, "piper": _tts_piper}.get(engine)
+        if fn is None:
+            continue
+        try:
+            path, label = fn(text, out_wav, lang, o)
+            return path, f"voiceover ({label}, {lang})" + (f" [fallback: {'; '.join(failed)}]" if failed else "")
+        except Exception as exc:  # noqa: BLE001 - TTS must never break a render
+            failed.append(f"{engine}: {str(exc)[:80]}")
+    return None, "voiceover skipped: " + "; ".join(failed)
 
 
 def resolve_audio(
@@ -105,6 +169,7 @@ def resolve_audio(
     prompt: str = "",
     voiceover_text: str | None = None,
     music_dir: Path = MUSIC_DIR,
+    voice_options: dict | None = None,
 ) -> tuple[Path | None, str]:
     """music: 'auto' (library pick by mood), 'none'/None (no music), or a file path. Returns (audio, note)."""
     track, mood = None, ""
@@ -114,7 +179,7 @@ def resolve_audio(
         track = Path(music)
         if not track.is_file():
             raise FileNotFoundError(f"music file not found: {track}")
-    voice, vnote = (synthesize_voiceover(voiceover_text, Path(work_dir) / f"{slug}_voice.wav")
+    voice, vnote = (synthesize_voiceover(voiceover_text, Path(work_dir) / f"{slug}_voice.wav", options=voice_options)
                     if voiceover_text else (None, ""))
     if not track and not voice:
         return None, vnote or "silent"
