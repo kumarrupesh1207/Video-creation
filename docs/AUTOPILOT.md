@@ -71,7 +71,7 @@ Free option: **Cloudflare R2** (10 GB free, no egress fees). Alternative without
 4. Tools -> **Graph API Explorer**: select your app, add permissions `instagram_basic`, `instagram_content_publish`, `pages_show_list`, `pages_read_engagement`, then Generate Access Token and pick your Page + Instagram account.
 5. Make it long-lived (60 days): Tools -> Access Token Debugger -> "Extend Access Token" (or call `GET /oauth/access_token?grant_type=fb_exchange_token&client_id=APP_ID&client_secret=APP_SECRET&fb_exchange_token=SHORT_TOKEN`). Diary reminder: renew every ~50 days (a Page token derived from a long-lived user token does not expire; prefer that: `GET /me/accounts` and use the Page's `access_token`).
 6. Find your IG user id: `GET /me/accounts?fields=instagram_business_account` -> `instagram_business_account.id`.
-7. Save `C:\Rupesh\App\Video creation\outputs	okens\instagram_<channel>.json` as `{"ig_user_id": "1784...", "access_token": "EAAG..."}`.
+7. Save `C:\Rupesh\App\Video creation\outputs\tokens\instagram_<channel>.json` as `{"ig_user_id": "1784...", "access_token": "EAAG..."}`.
 8. Cloudflare R2: dash.cloudflare.com -> R2 -> create bucket (e.g. `aurora-tmp`, keep **private**), add a lifecycle rule "delete objects after 1 day" as a backstop; R2 -> Manage API tokens -> Object Read & Write for that bucket. Put in `.env`:
    `HOST_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com`, `HOST_BUCKET=aurora-tmp`, `HOST_ACCESS_KEY=...`, `HOST_SECRET_KEY=...`
 9. Test safely: `python -m aurora.autopilot render --limit 1`, then `python -m aurora.autopilot publish-due --dry-run --at <future ISO>` shows the exact caption it would post.
