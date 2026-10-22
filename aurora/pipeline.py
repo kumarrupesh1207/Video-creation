@@ -138,7 +138,7 @@ def _google_motion_reel(image_path, output_path, duration_secs, fps, width, heig
             audio_in, maps = [], ["-map", "0:v", "-map", "0:a"]
             audio_out = ["-af", "apad", "-c:a", "aac", "-b:a", "128k", "-shortest"]
         subprocess.run([ffmpeg, "-y", "-i", str(clip), *audio_in, *maps, "-vf", vf, "-t", str(duration_secs), "-r", str(fps),
-                        "-c:v", "libx264", "-crf", "18", "-preset", "medium", "-movflags", "+faststart", *audio_out,
+                        "-c:v", "libx264", "-crf", "18", "-maxrate", "8M", "-bufsize", "16M", "-preset", "medium", "-movflags", "+faststart", *audio_out,
                         str(output_path)], capture_output=True, text=True, timeout=600, check=True)
         logger.info("google_motion_complete", provider="google_video", cost_usd=res.context.get("cost_usd"))
         return Path(output_path)
@@ -177,7 +177,7 @@ def _ai_motion_reel(image_path, output_path, duration_secs, fps, width, height, 
                        capture_output=True, text=True, timeout=300, check=True)
         audio_in, audio_out = audio_args(audio_path)
         subprocess.run([ffmpeg, "-y", "-stream_loop", "-1", "-i", str(boom), *audio_in, "-t", str(duration_secs),
-                        "-r", str(fps), "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
+                        "-r", str(fps), "-c:v", "libx264", "-crf", "18", "-maxrate", "8M", "-bufsize", "16M", "-pix_fmt", "yuv420p",
                         "-movflags", "+faststart", *audio_out, str(output_path)],
                        capture_output=True, text=True, timeout=300, check=True)
         boom.unlink(missing_ok=True)

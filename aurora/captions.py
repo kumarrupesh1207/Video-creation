@@ -71,7 +71,7 @@ def burn_captions(ffmpeg: str, video: Path, text: str, duration: float, width: i
     tmp = video.with_suffix(".cap.mp4")
     vf = f"ass=filename='{_esc(str(ass.resolve()))}':fontsdir='{_esc(FONTS_DIR)}'"
     proc = subprocess.run(
-        [ffmpeg, "-y", "-i", str(video), "-vf", vf, "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        [ffmpeg, "-y", "-i", str(video), "-vf", vf, "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-maxrate", "8M", "-bufsize", "16M", 
          "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(tmp)],
         capture_output=True, text=True, timeout=600,
     )

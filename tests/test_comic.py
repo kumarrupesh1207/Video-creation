@@ -69,8 +69,8 @@ def test_render_comic_durations_and_validation(workspace_tmp_path, monkeypatch):
     out = workspace_tmp_path / "comic.mp4"
     info = comic.render_comic(shutil.which("ffmpeg"), c, imgs, out, workspace_tmp_path / "w", music=False)
     n_clips = 5 + 2  # cover + panels + end card
-    expected = comic.COVER_S + 5 * (1.5 + comic.PAD) + comic.END_S - comic.XF * (n_clips - 1)
-    assert abs(info["seconds"] - expected) < 0.05  # each panel = voice + 0.4 s
+    expected = comic.COVER_S + 5 * max(1.5 + comic.PAD, comic.PANEL_MIN_S) + comic.END_S - comic.XF * (n_clips - 1)
+    assert abs(info["seconds"] - expected) < 0.05  # each panel = max(voice + 0.4 s, minimum hold)
     rep = validate_video(out, 1080, 1920, fps=24, duration_secs=expected, require_audio=True, deep=True)
     assert rep.ok, rep.errors
 
@@ -97,16 +97,18 @@ def test_panel_images_use_comfy_reference_then_fall_back_to_nim(workspace_tmp_pa
         def __init__(self, cfg):
             pass
 
-        def generate_with_params(self, prompt, style, res, job, seed=None, steps=None):
+        def generate_with_params(self, prompt, style, res, job, negative_prompt=None, seed=None, steps=None):
             calls.append(("ref", seed, steps))
             return SimpleNamespace(output_path=str(workspace_tmp_path / "ref.png"))
 
-        def generate_with_reference(self, ref, prompt, style, res, job, seed=None, steps=None):
+        def generate_with_reference(self, ref, prompt, style, res, job, negative_prompt=None, seed=None, steps=None):
+            assert "speech bubble" in negative_prompt
             calls.append(("panel", ref, seed))
             return SimpleNamespace(output_path=str(workspace_tmp_path / f"{job}.png"))
 
     class Board:
-        def generate(self, prompt, style, res, job, seed=None):
+        def generate(self, prompt, style, res, job, negative_prompt="", seed=None):
+            assert "speech bubble" in negative_prompt
             calls.append(("nim", seed))
             return SimpleNamespace(output_path=str(workspace_tmp_path / f"{job}.png"))
 
@@ -120,3 +122,23 @@ def test_panel_images_use_comfy_reference_then_fall_back_to_nim(workspace_tmp_pa
     monkeypatch.setattr(comic, "_comfy_up", lambda cfg: False)
     imgs, timings, note, mode = comic._panel_images({}, Board(), spec, 77, "j", (576, 1024), "auto")
     assert mode == "nim_fallback" and "consistency may drop" in note and [c[0] for c in calls] == ["nim"] * 5
+
+
+@needs_ffmpeg
+def test_final_encode_is_phone_sized(workspace_tmp_path, monkeypatch):
+    c = research.research_comic("ch", "a swordsman", panels=5, cfg={}, series_dir=workspace_tmp_path / "s")["comic"]
+    imgs = []
+    for i in range(5):
+        p = workspace_tmp_path / f"i{i}.png"
+        Image.effect_noise((576, 1024), 90).convert("RGB").save(p)  # noisy frames = worst case for bitrate
+        imgs.append(p)
+
+    def fake_tts(text, out, lang=None, options=None):
+        wav = Path(out).with_suffix(".wav")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=f=300:d=1.5", str(wav)], check=True)
+        return wav, "fake"
+
+    monkeypatch.setattr(comic, "synthesize_voiceover", fake_tts)
+    out = workspace_tmp_path / "c.mp4"
+    info = comic.render_comic(shutil.which("ffmpeg"), c, imgs, out, workspace_tmp_path / "w", music=False)
+    assert out.stat().st_size * 8 / info["seconds"] <= 10_000_000  # about 10 Mbps overall at most

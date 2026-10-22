@@ -170,7 +170,7 @@ def panel_prompt(panel: dict, sheet: list[dict]) -> str:
     names = {n.lower() for n in panel.get("characters", [])}
     chars = [c for c in sheet if not names or c["name"].lower() in names] or sheet[:1]
     return (f"{COMIC_STYLE}, " + ", ".join(f"{c['name']}: {c['description']}" for c in chars)
-            + f", {panel.get('shot', 'medium')} shot, {panel['image_prompt']}, vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no speech bubbles")
+            + f", {panel.get('shot', 'medium')} shot, {panel['image_prompt']}, vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles")
 
 
 COMIC_PROMPT = (

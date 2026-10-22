@@ -24,6 +24,8 @@ from aurora.monitoring.media_validator import _ffprobe, validate_video
 ROOT = Path(__file__).resolve().parents[1]
 W, H, FPS, XF, PAD = 1080, 1920, 24, 0.4, 0.4
 COVER_S, END_S = 2.4, 3.0
+PANEL_MIN_S = 4.4  # hold at least this long per panel (voice is never slowed; the rest is a pause)
+NO_TEXT_NEG = "text, letters, words, speech bubble, caption, watermark, signature, logo, subtitles"
 TRANSITIONS = ["slideleft", "wipeleft", "circleopen", "slideright", "wiperight", "smoothleft"]
 MOTIONS = ["zoom_in", "pan_left", "zoom_out", "pan_right"]
 FONT_DIR = Path("C:/Windows/Fonts")
@@ -153,7 +155,7 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
         vfile, note = synthesize_voiceover(p["narration"], work / f"voice_{i}.wav",
                                            options={"voice_engine": "edge", "voice": voice, "language": "hi" if language.lower().startswith("hi") else "en"})
         notes.append(note)
-        secs = (_duration(vfile) if vfile else 3.0) + PAD
+        secs = max((_duration(vfile) if vfile else 3.0) + PAD, PANEL_MIN_S)
         motion = "punch" if p.get("action") else MOTIONS[i % len(MOTIONS)]
         ov = make_overlay(work / f"ov_{i}.png", narration=p["narration"], bubble=p.get("bubble", ""))
         clips.append((render_clip(ffmpeg, img, ov, secs, motion, work / f"clip_{i}.mp4"), secs))
@@ -200,7 +202,7 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
     else:
         cmd += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
     cmd += ["-filter_complex", ";".join(fchain), "-map", last, "-map", f"{len(clips)}:a", "-t", f"{total:.2f}", "-r", str(FPS),
-            "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-af", "apad", "-c:a", "aac", "-b:a", "160k",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-maxrate", "8M", "-bufsize", "16M", "-pix_fmt", "yuv420p", "-af", "apad", "-c:a", "aac", "-b:a", "160k",
             "-movflags", "+faststart", "-shortest", str(out_mp4)]
     _run(cmd, timeout=1800)
     return {"seconds": round(total, 2), "voice_notes": notes, "music": bool(music_wav)}
@@ -223,6 +225,8 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode):
 
     sheet, panels = comic["character_sheet"], comic["panels"]
     images, timings, note = [], [], ""
+    base_neg = cfg.get("providers", {}).get("local_comfyui", {}).get("negative_prompt", "lowres, bad anatomy, bad hands, extra fingers, deformed")
+    neg = f"{base_neg}, {NO_TEXT_NEG}"  # the image model must not draw its own bubbles/gibberish text
     if image_mode in ("auto", "comfy") and _comfy_up(cfg):
         try:
             from backend.app.providers.local_comfyui import LocalComfyUIProvider
@@ -232,12 +236,12 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode):
             t0 = _t.time()
             ref_prompt = (f"{research.COMIC_STYLE}, {sheet[0]['name']}: {sheet[0]['description']}, full body, standing, "
                           "simple plain background, character reference, vibrant colors, clean lineart")
-            ref = prov.generate_with_params(ref_prompt, "anime", res, f"{job}_ref", seed=seed, steps=steps)
+            ref = prov.generate_with_params(ref_prompt, "anime", res, f"{job}_ref", negative_prompt=neg, seed=seed, steps=steps)
             timings.append(round(_t.time() - t0, 1))
             for i, p in enumerate(panels):
                 t0 = _t.time()
                 r = prov.generate_with_reference(ref.output_path, research.panel_prompt(p, sheet), "anime", res, f"{job}_p{i}",
-                                                 seed=seed, steps=steps)
+                                                 negative_prompt=neg, seed=seed, steps=steps)
                 images.append(Path(r.output_path))
                 timings.append(round(_t.time() - t0, 1))
             return images, timings, "ComfyUI character reference + IP-Adapter (consistent look)", "comfy_ipadapter"
@@ -248,7 +252,7 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode):
         raise RuntimeError("image_mode=comfy but ComfyUI is not reachable")
     for i, p in enumerate(panels):
         t0 = _t.time()
-        r = switchboard.generate(research.panel_prompt(p, sheet), "anime", list(nim_res), f"{job}_p{i}", seed=seed)
+        r = switchboard.generate(research.panel_prompt(p, sheet), "anime", list(nim_res), f"{job}_p{i}", negative_prompt=neg, seed=seed)
         images.append(Path(r.output_path))
         timings.append(round(_t.time() - t0, 1))
     return images, timings, note + "NIM fallback: character consistency may drop between panels", "nim_fallback"
