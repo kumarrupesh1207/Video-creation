@@ -88,12 +88,20 @@
           <label>FPS <input id="fps" type="number" min="12" max="60" value="24" inputmode="numeric"></label>
         </div>
 
-        <label id="musicWrap">Music <span class="opt">(optional · mp3/wav/m4a)</span>
-          <span class="file">
+        <div class="field" id="musicWrap">
+          <span class="lbl">Music</span>
+          <div class="seg" id="musicSeg" role="radiogroup">
+            <button type="button" data-v="auto" class="on">Auto</button>
+            <button type="button" data-v="upload">Upload</button>
+            <button type="button" data-v="none">None</button>
+          </div>
+          <span class="file" id="musicFile" hidden>
             <input id="music" type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,audio/*">
             <span id="musicName">No file chosen — reel will be silent</span>
           </span>
-        </label>
+          <label class="check"><input id="voiceover" type="checkbox"> <span>Voiceover <em>Offline voice (English/Hindi), adds ~15 s</em></span></label>
+          <textarea id="voText" rows="2" maxlength="500" placeholder="Voiceover text (blank = use the prompt)" hidden></textarea>
+        </div>
 
         <label>Image provider
           <select id="provider">

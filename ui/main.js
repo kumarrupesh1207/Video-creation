@@ -5,7 +5,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const getJson = async (path) => (await fetch(API + path)).json();
 const fmtSecs = (s) => { s = Math.round(s || 0); return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`; };
 
-const state = { mode: 'reel', aspect: '9:16', musicPath: null, tab: 'create', motion: 'camera', source: 'prompt', restyle: 'asis', photoPath: null, jobs: [], prevRunning: false, galleryKey: '' };
+const state = { mode: 'reel', aspect: '9:16', musicPath: null, tab: 'create', motion: 'camera', music: 'auto', source: 'prompt', restyle: 'asis', photoPath: null, jobs: [], prevRunning: false, galleryKey: '' };
 
 // ─── Tabs ────────────────────────────────────────────────
 function showTab(name) {
@@ -73,6 +73,8 @@ $('photo').addEventListener('change', async () => {
     $('photo').value = ''; $('photoPreview').hidden = true;
   }
 });
+bindSeg('musicSeg', 'music', () => { $('musicFile').hidden = state.music !== 'upload'; });
+$('voiceover').addEventListener('change', () => { $('voText').hidden = !$('voiceover').checked; });
 bindSeg('motionSeg', 'motion', syncForm);
 bindSeg('aspectSeg', 'aspect', syncForm);
 syncForm();
@@ -114,7 +116,9 @@ $('createForm').addEventListener('submit', async (e) => {
     duration: +$('duration').value, fps: +$('fps').value,
     provider: $('provider').value,
     motion: state.motion, action: $('action').value.trim(),
-    music_path: state.mode === 'reel' ? state.musicPath : null,
+    music_path: state.mode === 'reel' && state.music === 'upload' ? state.musicPath : null,
+    music: state.music === 'none' ? 'none' : 'auto',
+    voiceover: state.mode === 'reel' && $('voiceover').checked, voiceover_text: $('voText').value.trim(),
   };
   const up = state.source === 'upload', restyle = up && state.restyle === 'restyle';
   Object.assign(body, { source: state.source, image_path: up ? state.photoPath : null, restyle, denoise: +$('denoise').value, face_lock: $('faceLock').checked });

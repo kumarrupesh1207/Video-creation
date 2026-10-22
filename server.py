@@ -861,7 +861,10 @@ class CreateRequest(BaseModel):
     duration: float = Field(15.0, ge=3, le=60)
     fps: int = Field(24, ge=12, le=60)
     provider: str = Field("auto", pattern="^(auto|local_comfyui|nvidia_nim)$")
-    music_path: str | None = None
+    music_path: str | None = None    # an uploaded file (overrides music)
+    music: str = Field("auto", pattern="^(auto|none)$")
+    voiceover: bool = False
+    voiceover_text: str = Field("", max_length=500)
     motion: str = Field("camera", pattern="^(camera|ai)$")
     action: str = Field("", max_length=300)
     source: str = Field("prompt", pattern="^(prompt|upload)$")
@@ -951,7 +954,13 @@ def _run_create_job(job_id: str, req: CreateRequest):
                     cfg["motion"]["i2v"]["kaggle"]["loop_mode"] = "forward"  # a reversed run looks like running backwards
                 cfg["_motion_prompt"] = cfg_prompt
             mp4 = out_dir / f"{slug}.mp4"
-            audio = Path(req.music_path) if req.music_path else None
+            from aurora.audio import resolve_audio
+            from aurora.motion.providers.ffmpeg_kenburns import FFmpegKenBurns
+            audio, audio_note = resolve_audio(
+                FFmpegKenBurns().ffmpeg, req.duration, _output_root() / "audio", slug,
+                music=req.music_path or (req.music if req.music == "auto" else None), prompt=req.prompt,
+                voiceover_text=(req.voiceover_text.strip() or req.prompt) if req.voiceover else None)
+            job.setdefault("events", []).append(f"Audio: {audio_note}")
             t_reel = time.perf_counter()
             tee = _Tee(sys.stdout)
             with contextlib.redirect_stdout(tee):
@@ -967,7 +976,7 @@ def _run_create_job(job_id: str, req: CreateRequest):
                 raise RuntimeError(f"reel failed validation: {vr.errors}")
             sidecar["reel"] = {"path": str(mp4), "width": vr.width, "height": vr.height, "fps": vr.fps,
                                "duration_secs": vr.duration_secs, "has_audio": vr.has_audio, "sha256": vr.sha256}
-            sidecar["audio"] = "music" if audio else "silent"
+            sidecar["audio"] = audio_note
             sidecar["motion"] = "camera_fallback" if fell_back else req.motion
             if ai:
                 sidecar["action"] = req.action
