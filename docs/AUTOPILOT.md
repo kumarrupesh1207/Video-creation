@@ -35,8 +35,8 @@ Each channel has its own token (`outputs/tokens/youtube_<name>.json`, git-ignore
 1. Go to console.cloud.google.com, create a project (e.g. "Aurora").
 2. APIs & Services -> Library -> enable **YouTube Data API v3**.
 3. APIs & Services -> OAuth consent screen: User type External, fill app name + your email, and under **Test users** add your own Gmail (the one that owns the YouTube channel). Keep it in "Testing" mode. (Tokens of Testing apps expire after 7 days; click "Publish app" to remove that limit; it stays private to you.)
-4. Credentials -> Create credentials -> **OAuth client ID** -> type **Desktop app** -> Download JSON, save as e.g. `C:\Rupesh\App\Video creation\secrets\client_secret.json` (keep it out of git).
-5. In `.env` add: `YOUTUBE_CLIENT_SECRET=C:\Rupesh\App\Video creation\secrets\client_secret.json`
+4. Credentials -> Create credentials -> **OAuth client ID** -> type **Desktop app** -> Download JSON, save as e.g. `C:\Rupesh\App\Video creation\outputs	okens\client_secret.json` (outputs/ is git-ignored).
+5. In `.env` add: `YOUTUBE_CLIENT_SECRET=C:\Rupesh\App\Video creation\outputs	okens\client_secret.json`
 6. For each channel run: `python -m aurora.publish.youtube auth --channel facts`. A browser opens; sign in, pick that channel's account, Allow. Done; the token is saved and refreshes itself.
 7. Unverified apps show "Google hasn't verified this app": click Advanced -> Go to app. Normal for your own project.
 8. Videos uploaded by a not-yet-audited API project may be forced **private** by YouTube. If that happens, apply for the YouTube API Services audit (form linked from the API docs) — one-time.
