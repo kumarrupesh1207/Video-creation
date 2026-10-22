@@ -54,12 +54,31 @@ Import `PublishQueue` from `aurora.publish.queue` (thread-safe, file-backed).
 | `GET /api/publish/health` | per-channel: token file exists (`youtube.token_path(ch).exists()`), count scheduled/failed |
 UI "Queue" tab: card per item with video preview (`path`), title, countdown to `publish_at` (show IST), big **Stop** button while `scheduled`, **Restore** when `vetoed`, red banner for `failed`/missing token, and views/likes once published. Auth-protected like the other endpoints. Push notification to the phone when an item is queued is optional (item's `created_at`).
 
-## Instagram / Facebook (design only, no code yet)
-- Meta Graph API: needs an Instagram **Business/Creator** account linked to a Facebook Page, a Meta developer app (use dev mode with yourself as tester; no app review needed for your own accounts) and a long-lived token (60 days, refreshable).
-- Reels publish = 2 calls: `POST /{ig-user-id}/media` with `media_type=REELS` + `video_url` (must be a **public HTTPS URL**, so the file needs temporary hosting: Cloudflare R2/S3 presigned URL or the tunnel Aurora already uses), poll the container `status_code` until FINISHED, then `POST /{ig-user-id}/media_publish`. Facebook Reels: `/{page-id}/video_reels` start/upload/finish.
-- AI label: Meta has no reliable API flag yet for the "AI info" label; put "AI-generated" in caption and enable auto-label on the account.
-- Fit: add `aurora/publish/meta.py` with the same `upload(...)` shape and a `platform` field per queue item (queue already stores channel; add `platform`). Reuse the same veto/slot logic.
-- Alternative with less code: Metricool API/MCP (paid plan) schedules IG/FB/TikTok/YouTube from one call and handles tokens and hosting. Recommended once a channel earns or reaches ~1k followers; start with direct YouTube (free).
+## Instagram Reels (code ready, never posted live in tests)
+Add `instagram` to a channel's `platforms:`; `render` then queues one item per platform (own slot + veto, same file, dedupe per platform).
+Code: `aurora/publish/instagram.py` (Graph API v21.0: create REELS container -> poll `status_code=FINISHED` -> `media_publish`),
+`aurora/publish/hosting.py` (temporary public HTTPS URL), dispatch in `autopilot.publish_due`. Rate-limit errors (about 25 Reels/day) defer 12 h;
+missing account/hosting config keeps the item scheduled and retries hourly. Meta has no API flag for the "AI info" label, so the caption gets an
+"AI-generated content" line; also switch on Instagram's auto-label in the app.
+
+Why hosting: Meta downloads the video itself from a public HTTPS URL. Aurora uploads the file to a private bucket, gives Meta a presigned URL that expires in 1 h, then deletes the object.
+Free option: **Cloudflare R2** (10 GB free, no egress fees). Alternative without hosting code: **Metricool** API (paid plan) which handles hosting + tokens for IG/FB/TikTok/YouTube; say so and an adapter replaces `instagram.py`.
+
+### One-time setup (Instagram) — user steps
+1. Convert the Instagram account to **Professional (Business or Creator)**: Instagram app -> Settings -> Account type and tools.
+2. Create a **Facebook Page** and link it: Instagram -> Edit profile -> Page (or Page settings -> Linked accounts).
+3. Go to developers.facebook.com -> My Apps -> Create app (type **Business**). Add the product **Instagram Graph API** (Facebook Login for Business). Keep the app in **Development** mode; you are admin, so no App Review is needed for your own accounts.
+4. Tools -> **Graph API Explorer**: select your app, add permissions `instagram_basic`, `instagram_content_publish`, `pages_show_list`, `pages_read_engagement`, then Generate Access Token and pick your Page + Instagram account.
+5. Make it long-lived (60 days): Tools -> Access Token Debugger -> "Extend Access Token" (or call `GET /oauth/access_token?grant_type=fb_exchange_token&client_id=APP_ID&client_secret=APP_SECRET&fb_exchange_token=SHORT_TOKEN`). Diary reminder: renew every ~50 days (a Page token derived from a long-lived user token does not expire; prefer that: `GET /me/accounts` and use the Page's `access_token`).
+6. Find your IG user id: `GET /me/accounts?fields=instagram_business_account` -> `instagram_business_account.id`.
+7. Save `C:\Rupesh\App\Video creation\outputs	okens\instagram_<channel>.json` as `{"ig_user_id": "1784...", "access_token": "EAAG..."}`.
+8. Cloudflare R2: dash.cloudflare.com -> R2 -> create bucket (e.g. `aurora-tmp`, keep **private**), add a lifecycle rule "delete objects after 1 day" as a backstop; R2 -> Manage API tokens -> Object Read & Write for that bucket. Put in `.env`:
+   `HOST_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com`, `HOST_BUCKET=aurora-tmp`, `HOST_ACCESS_KEY=...`, `HOST_SECRET_KEY=...`
+9. Test safely: `python -m aurora.autopilot render --limit 1`, then `python -m aurora.autopilot publish-due --dry-run --at <future ISO>` shows the exact caption it would post.
+Facebook Reels (`/{page-id}/video_reels`) is not built; same hosting + queue would apply.
+
+## Series / comic titles
+If an idea carries `series`, `part`, `hook`, `series_hashtags` (comic format), the title becomes "<Series> – Part N: <hook>", series hashtags + the AI-generated line go in the description, and the platform AI flag stays on.
 
 ## Research wiring and dry run
 - `render` calls `aurora.research.research_ideas` (Gemini free tier, needs `GEMINI_API_KEY`). Scene 1's image prompt makes the image; hook + all scene voiceovers become the voiceover/captions; title/description/hashtags/AI-flag go to the queue item. With no key (or research returning only the niche-text fallback) it uses `topics.txt` and autorun's own prompt step (which waits ~2 min if Ollama is down).

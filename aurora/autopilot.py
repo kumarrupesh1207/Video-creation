@@ -123,19 +123,31 @@ def run_render(cfg: dict, queue: PublishQueue, only: str | None = None, limit: i
             except Exception as e:  # noqa: BLE001
                 print(f"[autopilot] {ch['name']}: '{idea.get('topic')}' failed: {e}", file=sys.stderr)
                 continue
-            meta = {"title": idea.get("title") or idea["topic"], "description": idea.get("description", ""),
-                    "tags": idea.get("hashtags", []), "ai_disclosure": idea.get("ai_disclosure", True),
-                    "sha256": sidecar["reel"]["sha256"]}
-            item = queue.enqueue(ch["name"], sidecar["reel"]["path"], meta)
-            if item:
-                queued.append(item)
-                print(f"[autopilot] {ch['name']}: queued {item['id']} ({item['status']}, publish_at {item['publish_at']})")
+            meta = compose_meta(idea, sidecar["reel"]["sha256"])
+            for platform in ch["platforms"]:
+                item = queue.enqueue(ch["name"], sidecar["reel"]["path"], meta, platform=platform)
+                if item:
+                    queued.append(item)
+                    print(f"[autopilot] {ch['name']}/{platform}: queued {item['id']} ({item['status']}, publish_at {item['publish_at']})")
     return queued
+
+
+def compose_meta(idea: dict, sha256: str) -> dict:
+    """Queue metadata. Series ideas (comic format) get "<Series> – Part N" + hook as title; series hashtags and the
+    AI-disclosure line go into the description (the platform flag is set separately at upload)."""
+    series, part = idea.get("series"), idea.get("part")
+    base = idea.get("title") or idea["topic"]
+    title = f"{series} – Part {part}" + (f": {idea['hook']}" if idea.get("hook") else "") if series and part else base
+    tags = list(dict.fromkeys(list(idea.get("series_hashtags", [])) + list(idea.get("hashtags", []))))
+    ai = idea.get("ai_disclosure", True)
+    desc = "\n\n".join(x for x in (idea.get("description", ""), " ".join(t if t.startswith("#") else f"#{t}" for t in tags),
+                                    "AI-generated content." if ai else "") if x)
+    return {"title": title[:100], "description": desc, "tags": tags, "ai_disclosure": ai, "sha256": sha256}
 
 
 # ---- publish ---------------------------------------------------------
 def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | None = None, service_factory=None,
-                uploader=None, dry_run: bool = False) -> dict:
+                uploader=None, dry_run: bool = False, ig_publisher=None) -> dict:
     """Upload every due, non-vetoed item. Stops a channel on quota; failures retry up to max_attempts."""
     from aurora.publish import youtube as yt
 
@@ -147,6 +159,12 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
 
         result["would_publish"] = []
         for it in queue.due(now, only):
+            if it.get("platform", "youtube") == "instagram":
+                from aurora.publish import instagram as ig
+
+                print(f"[autopilot] DRY-RUN {it['channel']}/instagram: would host + publish {it['path']} caption={ig.build_caption(it)!r}")
+                result["would_publish"].append(it["id"])
+                continue
             body = yt.build_body(it, it.get("privacy", "public"))
             print(f"[autopilot] DRY-RUN {it['channel']}: would upload {it['path']} ({it['sha256'][:12]}) "
                   f"title={body['snippet']['title']!r} tags={body['snippet']['tags']} "
@@ -157,6 +175,9 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
     blocked: set[str] = set()
     for it in queue.due(now, only):
         ch = it["channel"]
+        if it.get("platform", "youtube") == "instagram":
+            _publish_instagram(queue, it, result, ig_publisher)
+            continue
         if ch in blocked:
             continue
         if not Path(it["path"]).exists():
@@ -186,25 +207,61 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
     return result
 
 
-def collect_analytics(queue: PublishQueue, service_factory=None, stats_fn=None) -> int:
+def _publish_instagram(queue: PublishQueue, it: dict, result: dict, ig_publisher=None) -> None:
+    from aurora.publish import hosting, instagram as ig
+
+    if not Path(it["path"]).exists():
+        queue.mark_failed(it["id"], "video file missing", retry_in=None)
+        result["failed"].append(it["id"])
+        return
+    queue.mark_publishing(it["id"])
+    try:
+        if ig_publisher:
+            media_id = ig_publisher(it)
+        else:
+            account = ig.load_account(it["channel"])
+            with hosting.temporary_public_url(it["path"]) as url:
+                media_id = ig.publish_reel(account, url, it)
+        queue.mark_published(it["id"], media_id)
+        result["published"].append(it["id"])
+        print(f"[autopilot] {it['channel']}/instagram: published {media_id}")
+    except ig.RateLimited as e:
+        queue.defer(it["id"], QUOTA_BACKOFF, f"rate limit: {e}")
+        result["deferred"].append(it["id"])
+    except (hosting.HostingNotConfigured, ig.InstagramError) as e:  # config problem: keep scheduled, don't burn attempts
+        queue.defer(it["id"], timedelta(hours=1), str(e))
+        result["deferred"].append(it["id"])
+    except Exception as e:  # noqa: BLE001
+        queue.mark_failed(it["id"], f"{type(e).__name__}: {e}")
+        result["failed"].append(it["id"])
+
+
+def collect_analytics(queue: PublishQueue, service_factory=None, stats_fn=None, ig_stats_fn=None) -> int:
     from aurora.publish import youtube as yt
 
     service_factory = service_factory or yt.build_service
     stats_fn = stats_fn or yt.fetch_stats
     n = 0
     for ch in sorted({i["channel"] for i in queue.list(status="published")}):
-        items = [i for i in queue.list(ch, "published") if i.get("video_id")]
-        if not items:
-            continue
-        try:
-            stats = stats_fn(service_factory(ch), [i["video_id"] for i in items])
-        except Exception as e:  # noqa: BLE001
-            print(f"[autopilot] {ch}: analytics failed: {e}", file=sys.stderr)
-            continue
-        for i in items:
-            if i["video_id"] in stats:
-                queue.set_stats(i["id"], {**stats[i["video_id"]], "at": datetime.now(timezone.utc).isoformat()})
-                n += 1
+        for platform in ("youtube", "instagram"):
+            items = [i for i in queue.list(ch, "published") if i.get("video_id") and i.get("platform", "youtube") == platform]
+            if not items:
+                continue
+            ids = [i["video_id"] for i in items]
+            try:
+                if platform == "youtube":
+                    stats = stats_fn(service_factory(ch), ids)
+                else:
+                    from aurora.publish import instagram as ig
+
+                    stats = (ig_stats_fn or ig.fetch_stats)(ig.load_account(ch), ids)
+            except Exception as e:  # noqa: BLE001
+                print(f"[autopilot] {ch}/{platform}: analytics failed: {e}", file=sys.stderr)
+                continue
+            for i in items:
+                if i["video_id"] in stats:
+                    queue.set_stats(i["id"], {**stats[i["video_id"]], "at": datetime.now(timezone.utc).isoformat()})
+                    n += 1
     return n
 
 

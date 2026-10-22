@@ -170,3 +170,60 @@ def test_publish_due_dry_run_sends_nothing(q, vid):
     assert r["would_publish"] == [it["id"]]
     up.assert_not_called(); sf.assert_not_called()
     assert q.get(it["id"])["status"] == "scheduled"
+
+
+def test_compose_meta_series_title_hashtags_disclosure():
+    m = autopilot.compose_meta({"topic": "t", "title": "x", "series": "Space Cats", "part": 3, "hook": "They escaped!",
+                                "series_hashtags": ["#SpaceCats"], "hashtags": ["#shorts"], "description": "d"}, "sha")
+    assert m["title"] == "Space Cats – Part 3: They escaped!" and m["tags"] == ["#SpaceCats", "#shorts"]
+    assert "#SpaceCats" in m["description"] and "AI-generated" in m["description"]
+    assert autopilot.compose_meta({"topic": "t"}, "s")["title"] == "t"
+
+
+def test_platforms_are_queued_separately_and_instagram_publishes(q, vid, monkeypatch):
+    from aurora.publish import instagram as ig
+
+    monkeypatch.setattr(ig, "load_account", lambda ch: {})
+    y = q.enqueue("facts", vid, {"title": "T"}, now=NOW, platform="youtube")
+    i = q.enqueue("facts", vid, {"title": "T"}, now=NOW, platform="instagram")
+    assert y and i and q.enqueue("facts", vid, {"title": "T"}, now=NOW, platform="instagram") is None
+    assert y["publish_at"] == i["publish_at"]  # slots are per platform
+    pub = MagicMock(return_value="IG99")
+    r = autopilot.publish_due(q, now=NOW + timedelta(days=1), service_factory=lambda c: object(),
+                              uploader=MagicMock(return_value="YT1"), ig_publisher=pub)
+    assert sorted(r["published"]) == sorted([y["id"], i["id"]]) and q.get(i["id"])["video_id"] == "IG99"
+    n = autopilot.collect_analytics(q, service_factory=lambda c: object(),
+                                    stats_fn=lambda s, ids: {"YT1": {"viewCount": 1}},
+                                    ig_stats_fn=lambda a, ids: {"IG99": {"likeCount": 2}})
+    assert n == 2
+
+
+def test_instagram_flow_and_errors():
+    from aurora.publish import instagram as ig
+
+    calls = []
+
+    def resp(js, code=200):
+        r = MagicMock(); r.json.return_value = js; r.content = b"x"; r.status_code = code; r.text = str(js)
+        return r
+
+    http = MagicMock()
+    http.post.side_effect = lambda url, **k: (calls.append(url), resp({"id": "C1"} if url.endswith("/media") else {"id": "M1"}))[1]
+    http.get.side_effect = [resp({"status_code": "IN_PROGRESS"}), resp({"status_code": "FINISHED"})]
+    acct = {"ig_user_id": "U", "access_token": "T"}
+    assert ig.publish_reel(acct, "https://x/v.mp4", {"title": "T", "tags": ["a"]}, http=http, sleep=lambda s: None) == "M1"
+    assert http.post.call_args_list[0].kwargs["data"]["media_type"] == "REELS"
+    assert "AI-generated" in http.post.call_args_list[0].kwargs["data"]["caption"]
+    http.post.side_effect = None
+    http.post.return_value = resp({"error": {"code": 4, "message": "limit"}}, 400)
+    with pytest.raises(ig.RateLimited):
+        ig.publish_reel(acct, "u", {"title": "T"}, http=http)
+
+
+def test_presign_is_deterministic_and_expiring():
+    from aurora.publish import hosting
+
+    now = datetime(2026, 10, 22, 6, 0, tzinfo=timezone.utc)
+    u = hosting.presign("GET", "https://acc.r2.cloudflarestorage.com", "b", "aurora/x.mp4", "AK", "SK", now=now, expires=600)
+    assert u == hosting.presign("GET", "https://acc.r2.cloudflarestorage.com", "b", "aurora/x.mp4", "AK", "SK", now=now, expires=600)
+    assert "X-Amz-Expires=600" in u and "X-Amz-Signature=" in u and u.startswith("https://acc.r2.cloudflarestorage.com/b/aurora/x.mp4?")

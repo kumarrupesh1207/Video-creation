@@ -99,20 +99,23 @@ class PublishQueue:
                     return cand
         return earliest
 
-    def enqueue(self, channel: str, video_path: str | Path, meta: dict, now: datetime | None = None) -> dict | None:
-        """Add a finished reel. Returns None if the same file (sha256) is already queued/published for this channel."""
+    def enqueue(self, channel: str, video_path: str | Path, meta: dict, now: datetime | None = None,
+                platform: str = "youtube") -> dict | None:
+        """Add a finished reel for one platform. Returns None if the same file (sha256) is already queued/published there."""
         path = Path(video_path)
         sha = meta.get("sha256") or sha256_file(path)
         now = now or _now()
         with _lock:
             items = self._load()
-            if any(i["sha256"] == sha and i["channel"] == channel and i["status"] in ACTIVE for i in items):
+            if any(i["sha256"] == sha and i["channel"] == channel and i.get("platform", "youtube") == platform
+                   and i["status"] in ACTIVE for i in items):
                 return None
             taken = [datetime.fromisoformat(i["publish_at"]) for i in items
-                     if i["channel"] == channel and i["status"] in ("scheduled", "pending_approval", "publishing")]
+                     if i["channel"] == channel and i.get("platform", "youtube") == platform
+                     and i["status"] in ("scheduled", "pending_approval", "publishing")]
             mode = self.s["approval"]
             item = {
-                "id": uuid.uuid4().hex[:12], "channel": channel, "path": str(path), "sha256": sha,
+                "id": uuid.uuid4().hex[:12], "channel": channel, "platform": platform, "path": str(path), "sha256": sha,
                 "title": (meta.get("title") or path.stem)[:100], "description": meta.get("description", ""),
                 "tags": list(meta.get("tags", [])), "ai_disclosure": bool(meta.get("ai_disclosure", True)),
                 "privacy": meta.get("privacy", "public"), "approval": mode,
@@ -136,7 +139,8 @@ class PublishQueue:
         it = self.get(item_id)
         if not it or it["status"] not in ("pending_approval", "vetoed"):
             raise ValueError("nothing to approve")
-        taken = [datetime.fromisoformat(i["publish_at"]) for i in self.list(it["channel"]) if i["status"] == "scheduled"]
+        taken = [datetime.fromisoformat(i["publish_at"]) for i in self.list(it["channel"])
+                 if i["status"] == "scheduled" and i.get("platform", "youtube") == it.get("platform", "youtube")]
         return self._update(item_id, status="scheduled", error=None,
                             publish_at=self.next_slot(it["channel"], taken=taken).isoformat())
 
