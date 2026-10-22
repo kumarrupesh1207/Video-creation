@@ -19,7 +19,7 @@ from pathlib import Path
 import yaml
 
 from aurora import ensure_utf8_console, load_env
-from aurora.audio import resolve_audio
+from aurora.audio import resolve_audio, voice_duration
 from aurora.monitoring.media_validator import validate_image, validate_video
 from aurora.pipeline import run as render_reel
 
@@ -108,7 +108,11 @@ def process_topic(cfg: dict, switchboard, topic: str, args: argparse.Namespace, 
     out_dir.mkdir(parents=True, exist_ok=True)
     mp4 = out_dir / f"{slug}.mp4"
     t0 = time.perf_counter()
+    voice_text = (getattr(args, "voiceover_text", None) or text["caption"]) if args.voiceover else None
+    vdur = voice_duration(ROOT / "outputs" / "audio", slug) if voice_text else None
     render_reel(Path(image.output_path), mp4, args.duration, args.fps, 1080, 1920, audio,
+                caption_text=(voice_text or text["caption"]) if getattr(args, "captions", False) else None,
+                caption_seconds=vdur,
                 motion=("ai" if args.motion == "ai" else "camera"), config={**cfg, "_motion_prompt": text["caption"]})
     t_reel = time.perf_counter() - t0
     video_report = validate_video(mp4, 1080, 1920, args.fps, args.duration, require_audio=True,
@@ -128,7 +132,7 @@ def process_topic(cfg: dict, switchboard, topic: str, args: argparse.Namespace, 
         "reel": {"path": str(mp4), "width": video_report.width, "height": video_report.height, "fps": video_report.fps,
                  "duration_secs": video_report.duration_secs, "has_audio": video_report.has_audio,
                  "md5": video_report.md5, "sha256": video_report.sha256},
-        "audio": audio_note, "motion": args.motion,
+        "audio": audio_note, "motion": args.motion, "captions": bool(getattr(args, "captions", False)),
         "timings_secs": {"llm": round(t_llm, 1), "image": round(t_img, 1), "reel": round(t_reel, 1),
                          "total": round(time.perf_counter() - started, 1)},
     }
@@ -161,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, default=ROOT / "outputs" / "final")
     ap.add_argument("--music", default="auto", help="auto (pick from assets/music by mood; silent if empty) | <file> | none")
     ap.add_argument("--voiceover", action="store_true", help="offline Piper voiceover (English/Hindi) of the caption, ducked over the music")
+    ap.add_argument("--captions", action=argparse.BooleanOptionalAction, default=True, help="burn captions (voiceover text, else caption)")
     ap.add_argument("--voice-engine", default=None, choices=["auto", "edge", "xtts", "piper"], help="default: config audio.voice_engine")
     ap.add_argument("--voice-gender", default=None, choices=["female", "male"])
     ap.add_argument("--voice", default=None, help="edge voice name override")

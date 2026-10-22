@@ -48,6 +48,54 @@ def pick_music(prompt: str, library: Path = MUSIC_DIR) -> tuple[Path | None, str
     return pick, best or "any"
 
 
+MUSIC_CACHE = ROOT / "outputs" / "music_cache"
+MOOD_PROMPTS = {
+    "epic": "epic cinematic orchestral music, powerful drums, dramatic strings",
+    "calm": "soft ambient piano and warm pads, calm and peaceful",
+    "happy": "upbeat happy acoustic pop instrumental, bright and cheerful",
+    "emotional": "emotional cinematic piano and strings, warm and heartfelt",
+    "devotional": "serene indian devotional instrumental, flute, tabla and tanpura",
+}
+DEFAULT_MUSIC_PROMPT = "soft cinematic background music, gentle piano, warm and uplifting"
+_musicgen = {}
+
+
+def music_prompt(text: str) -> str:
+    """MusicGen prompt from the reel text via the same mood keywords as the library picker."""
+    words = set(re.findall(r"[a-z]+", text.lower()))
+    scores = {m: len(words & set(kw.split())) for m, kw in MOODS.items()}
+    best = max(scores, key=scores.get)
+    return MOOD_PROMPTS[best] if scores[best] > 0 else DEFAULT_MUSIC_PROMPT
+
+
+def generate_music(text: str, seconds: float, out_wav: Path, cache_dir: Path = MUSIC_CACHE) -> Path:
+    """AI background music (MusicGen small, CPU). Cached by prompt+length so repeat moods are instant."""
+    prompt = music_prompt(text)
+    seconds = min(max(float(seconds), 4.0), 30.0)
+    cached = Path(cache_dir) / f"{hashlib.sha1(f'{prompt}|{round(seconds)}'.encode()).hexdigest()[:16]}.wav"
+    if not cached.exists():
+        import numpy as np
+        import torch
+        from scipy.io import wavfile
+        from transformers import AutoProcessor, MusicgenForConditionalGeneration
+
+        if "model" not in _musicgen:
+            _musicgen["proc"] = AutoProcessor.from_pretrained("facebook/musicgen-small")
+            _musicgen["model"] = MusicgenForConditionalGeneration.from_pretrained("facebook/musicgen-small").eval()
+        model = _musicgen["model"]
+        torch.set_num_threads(max(1, (torch.get_num_threads() or 4) - 2))  # keep the PC usable
+        inputs = _musicgen["proc"](text=[prompt], padding=True, return_tensors="pt")
+        with torch.no_grad():
+            audio = model.generate(**inputs, do_sample=True, guidance_scale=3.0, max_new_tokens=int(seconds * 50))
+        wav = audio[0, 0].cpu().numpy().astype(np.float32)
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        wavfile.write(str(cached), model.config.audio_encoder.sampling_rate, wav)
+    out_wav = Path(out_wav)
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    out_wav.write_bytes(cached.read_bytes())
+    return out_wav
+
+
 def _run(cmd: list[str]) -> None:
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if proc.returncode != 0:
@@ -172,9 +220,14 @@ def resolve_audio(
     voice_options: dict | None = None,
 ) -> tuple[Path | None, str]:
     """music: 'auto' (library pick by mood), 'none'/None (no music), or a file path. Returns (audio, note)."""
-    track, mood = None, ""
+    track, mood, ai_note = None, "", ""
     if music and str(music).lower() == "auto":
         track, mood = pick_music(prompt, music_dir)
+        if track is None and audio_settings().get("ai_music", True):  # library empty -> MusicGen (cached by mood)
+            try:
+                track, mood = generate_music(prompt, duration, Path(work_dir) / f"{slug}_aimusic.wav"), "ai-musicgen"
+            except Exception as exc:  # noqa: BLE001 - never break a render for music
+                ai_note = f"ai music skipped: {str(exc)[:80]}"
     elif music and str(music).lower() != "none":
         track = Path(music)
         if not track.is_file():
@@ -182,7 +235,19 @@ def resolve_audio(
     voice, vnote = (synthesize_voiceover(voiceover_text, Path(work_dir) / f"{slug}_voice.wav", options=voice_options)
                     if voiceover_text else (None, ""))
     if not track and not voice:
-        return None, vnote or "silent"
+        return None, vnote or ai_note or "silent"
     mixed = mix_audio(ffmpeg, Path(work_dir) / f"{slug}_audio.wav", duration, track, voice)
     parts = ([f"music:{track.name}" + (f" ({mood})" if mood else "")] if track else []) + ([vnote] if voice else [])
     return mixed, " + ".join(parts) + (f" | {vnote}" if vnote and not voice else "")
+
+
+def voice_duration(work_dir: Path, slug: str, ffprobe: str = "ffprobe") -> float | None:
+    """Length of the generated voiceover file for this slug, if any (used to time captions)."""
+    for f in Path(work_dir).glob(f"{slug}_voice.*"):
+        proc = subprocess.run([ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(f)],
+                              capture_output=True, text=True, timeout=30)
+        try:
+            return float(proc.stdout.strip())
+        except ValueError:
+            return None
+    return None

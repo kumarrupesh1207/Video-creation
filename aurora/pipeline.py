@@ -28,6 +28,33 @@ def run(
     audio_path: Path | None = None,
     motion: str = "camera",
     config: dict | None = None,
+    caption_text: str | None = None,
+    caption_seconds: float | None = None,
+) -> Path:
+    """Render and validate a reel; if caption_text is given, burn captions in (spread over caption_seconds,
+    e.g. the voiceover length, else the whole reel) and re-validate."""
+    out = _run_reel(image_path, output_path, duration_secs, fps, width, height, audio_path, motion, config)
+    if caption_text and caption_text.strip():
+        from aurora.captions import burn_captions
+        from aurora.motion.providers.ffmpeg_kenburns import FFmpegKenBurns
+
+        burn_captions(FFmpegKenBurns().ffmpeg, out, caption_text, duration_secs, width, height, caption_seconds)
+        report = validate_video(out, width, height, fps=fps, duration_secs=duration_secs, require_audio=True)
+        if not report.ok:
+            raise RuntimeError(f"Captioned reel failed validation: {'; '.join(report.errors)}")
+    return out
+
+
+def _run_reel(
+    image_path: Path,
+    output_path: Path,
+    duration_secs: float = 25.0,
+    fps: int = 24,
+    width: int = 1080,
+    height: int = 1920,
+    audio_path: Path | None = None,
+    motion: str = "camera",
+    config: dict | None = None,
 ) -> Path:
     """Run the Sprint 1 static cinematic pipeline."""
     logger = StructuredLogger(component="pipeline")

@@ -28,7 +28,10 @@ def test_pick_music_by_mood_and_fallbacks(workspace_tmp_path):
     assert set(list_tracks(lib)) == {"epic", "calm", "devotional"}
 
 
-def test_empty_library_or_none_stays_silent(workspace_tmp_path):
+def test_empty_library_or_none_stays_silent(workspace_tmp_path, monkeypatch):
+    from aurora import audio
+
+    monkeypatch.setattr(audio, "audio_settings", lambda: {"ai_music": False})
     assert resolve_audio("ffmpeg", 3, workspace_tmp_path, "s", music="auto", prompt="x", music_dir=workspace_tmp_path / "none")[0] is None
     assert resolve_audio("ffmpeg", 3, workspace_tmp_path, "s", music="none")[0] is None
     assert resolve_audio("ffmpeg", 3, workspace_tmp_path, "s", music=None)[1] == "silent"
@@ -85,3 +88,38 @@ def test_voice_engine_fallback_chain(workspace_tmp_path, monkeypatch):
     assert calls[0] == "xtts"
     monkeypatch.setattr(audio, "_tts_piper", boom("piper"))
     assert audio.synthesize_voiceover("hello", workspace_tmp_path / "v3.wav")[0] is None
+
+
+def test_music_prompt_and_ai_fallback(workspace_tmp_path, monkeypatch):
+    from aurora import audio
+
+    assert "devotional" in audio.music_prompt("a woman at a temple at sunset") or "indian" in audio.music_prompt("a woman at a temple")
+    assert audio.music_prompt("zzz") == audio.DEFAULT_MUSIC_PROMPT
+    monkeypatch.setattr(audio, "audio_settings", lambda: {"ai_music": True})
+    monkeypatch.setattr(audio, "generate_music", lambda text, secs, out: (_ for _ in ()).throw(RuntimeError("no model")))
+    path, note = audio.resolve_audio("ffmpeg", 3, workspace_tmp_path, "s", music="auto", prompt="x", music_dir=workspace_tmp_path / "none")
+    assert path is None and "ai music skipped" in note
+
+
+def test_split_phrases_and_ass(workspace_tmp_path):
+    from aurora.captions import build_ass, split_phrases
+
+    ph = split_phrases("Good morning from the flower market, fresh colours and a fresh start today. नमस्ते दोस्तों।")
+    assert all(len(p.split()) <= 6 for p in ph) and len(ph) >= 3
+    ass = build_ass("one two three four five six seven eight", 8, 1080, 1920, workspace_tmp_path / "c.ass")
+    text = ass.read_text(encoding="utf-8")
+    assert "Nirmala UI" in text and text.count("Dialogue:") == 2 and "0:00:04.00" in text
+    assert build_ass("   ", 5, 1080, 1920, workspace_tmp_path / "d.ass") is None
+
+
+@needs_ffmpeg
+def test_captions_burned_into_reel(workspace_tmp_path):
+    from PIL import Image
+
+    img = workspace_tmp_path / "i.png"
+    Image.new("RGB", (200, 300), (30, 30, 30)).save(img)
+    plain = run(img, workspace_tmp_path / "a.mp4", 3, 24, 270, 480)
+    capt = run(img, workspace_tmp_path / "b.mp4", 3, 24, 270, 480, caption_text="Hello brave new world today friends")
+    assert validate_video(capt, 270, 480, fps=24, duration_secs=3, require_audio=True, deep=True).ok
+    assert not capt.with_suffix(".ass").exists()
+    assert plain.read_bytes() != capt.read_bytes()
