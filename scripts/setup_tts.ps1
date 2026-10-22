@@ -19,5 +19,5 @@ if (-not (Test-Path (Join-Path $venv "Scripts\python.exe"))) {
 $pip = Join-Path $venv "Scripts\pip.exe"
 & $pip install --upgrade pip
 & $pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-& $pip install coqui-tts soundfile
+& $pip install "coqui-tts[codec]" soundfile
 Write-Host "Done. Test:  $venv\Scripts\python.exe scripts\xtts_say.py 'Hello there' en outputs\perf\xtts_test.wav"
