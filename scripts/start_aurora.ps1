@@ -1,8 +1,10 @@
 # Start / stop the three Aurora services (ComfyUI :8188, aurora-api :8000, aurora-ui :5173).
 # Commands mirror .claude/launch.json. Usage (normally via start_aurora.bat / stop_aurora.bat):
-#   start_aurora.ps1                 start whatever is not already listening, open the UI
+#   start_aurora.ps1                 launch ONE hidden, detached supervisor for all three services, open the UI
 #   start_aurora.ps1 -Stop           stop only these three (ComfyUI is spared while its queue is busy)
-#   start_aurora.ps1 -Supervise api  internal: restart loop for one service
+#   start_aurora.ps1 -Supervise all  internal: the supervisor loop
+# The supervisor is created through WMI (Win32_Process.Create) so it is NOT a child of the caller:
+# closing the launching console / killing the caller's process tree / job object does not kill it.
 param([switch]$Stop, [string]$Supervise = "", [switch]$NoBrowser)
 
 $ErrorActionPreference = "Continue"
@@ -11,66 +13,102 @@ $Logs = Join-Path $Root "logs"
 $Comfy = "C:/Rupesh/App/ComfyUI_windows_portable_nvidia/ComfyUI_windows_portable"
 
 $Services = @{
-    comfyui = @{ Port = 8188; Title = "Aurora ComfyUI"; Exe = "$Comfy/python_embeded/python.exe"
+    comfyui = @{ Port = 8188; Exe = "$Comfy/python_embeded/python.exe"
                  Args = "-s `"$Comfy/ComfyUI/main.py`" --cpu --windows-standalone-build --listen 127.0.0.1 --port 8188" }
-    api     = @{ Port = 8000; Title = "Aurora API"; Exe = "python"; Args = "server.py" }
-    ui      = @{ Port = 5173; Title = "Aurora UI"; Exe = "cmd.exe"
-                 Args = "/c npm --prefix ui run dev -- --port 5173 --strictPort" }
+    api     = @{ Port = 8000; Exe = "python"; Args = "server.py" }
+    ui      = @{ Port = 5173; Exe = "cmd.exe"; Args = "/c npm --prefix ui run dev -- --port 5173 --strictPort" }
 }
 $Order = "comfyui", "api", "ui"
 
 function Test-Port([int]$Port) {
     [bool](Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
 }
+function Get-Supervisors {
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" |
+        Where-Object { $_.CommandLine -match "start_aurora\.ps1.*-Supervise all" }
+}
 
-# ---- supervisor: runs inside its own minimized window --------------------------------------
+# ---- supervisor: one hidden long-running process ---------------------------------------------
 if ($Supervise) {
-    $s = $Services[$Supervise]
-    $Host.UI.RawUI.WindowTitle = $s.Title
     $env:PYTHONUTF8 = "1"
     Set-Location $Root
     New-Item -ItemType Directory -Force $Logs | Out-Null
-    $log = Join-Path $Logs "$Supervise.log"
-    $delay = 2
-    $waiting = $false
+    $sup = Join-Path $Logs "supervisor.log"
+    function Log([string]$svc, [string]$msg) {
+        $line = "[$(Get-Date -Format s)] $svc : $msg"
+        Add-Content $sup $line
+        if ($svc -ne "supervisor") { Add-Content (Join-Path $Logs "$svc.log") $line }
+    }
+    $st = @{}
+    foreach ($n in $Order) { $st[$n] = @{ Proc = $null; Started = $null; NextStart = Get-Date; Delay = 2; Watching = $false } }
+    Log "supervisor" "started pid=$PID"
+    $lastBeat = Get-Date
     while ($true) {
-        if (Test-Port $s.Port) {   # someone else owns the port: never kill it, take over when it frees
-            if (-not $waiting) { "[$(Get-Date -Format s)] $Supervise :$($s.Port) in use by another process; watching" | Add-Content $log; $waiting = $true }
-            Start-Sleep 5; continue
+        $now = Get-Date
+        foreach ($n in $Order) {
+            $s = $Services[$n]; $x = $st[$n]
+            $listening = Test-Port $s.Port
+            if ($x.Proc -ne $null -and $x.Proc.HasExited) {
+                $up = ($now - $x.Started).TotalSeconds
+                $x.Delay = if ($up -gt 60) { 2 } else { [Math]::Min($x.Delay * 2, 30) }
+                $x.NextStart = $now.AddSeconds($x.Delay)
+                Log $n "exited (code $($x.Proc.ExitCode)) after $([int]$up)s; restarting in $($x.Delay)s"
+                $x.Proc = $null
+            }
+            if ($x.Proc -ne $null) {   # ours and still alive: kill only if it never opened its port
+                if (-not $listening -and ($now - $x.Started).TotalSeconds -gt 300) {
+                    Log $n "no listener after 300s; killing hung start (pid $($x.Proc.Id))"
+                    taskkill /PID $x.Proc.Id /T /F | Out-Null
+                }
+                continue
+            }
+            if ($listening) {          # someone else owns the port: never kill it, take over when it frees
+                if (-not $x.Watching) { Log $n ":$($s.Port) in use by another process; watching"; $x.Watching = $true }
+                continue
+            }
+            $x.Watching = $false
+            if ($now -lt $x.NextStart) { continue }
+            Log $n "starting"
+            try {
+                $p = Start-Process -FilePath $s.Exe -ArgumentList $s.Args -WorkingDirectory $Root -WindowStyle Hidden -PassThru `
+                     -RedirectStandardOutput (Join-Path $Logs "$n.out.log") -RedirectStandardError (Join-Path $Logs "$n.err.log")
+                $null = $p.Handle      # cache handle so ExitCode is readable after exit
+                $x.Proc = $p; $x.Started = Get-Date
+            } catch {
+                $x.Delay = [Math]::Min($x.Delay * 2, 30); $x.NextStart = $now.AddSeconds($x.Delay)
+                Log $n "START FAILED: $($_.Exception.Message); retry in $($x.Delay)s"
+            }
         }
-        $waiting = $false
-        $t0 = Get-Date
-        "[$(Get-Date -Format s)] starting $Supervise" | Add-Content $log
-        $p = Start-Process -FilePath $s.Exe -ArgumentList $s.Args -WorkingDirectory $Root -NoNewWindow -PassThru `
-             -RedirectStandardOutput "$log.out" -RedirectStandardError "$log.err"
-        $null = $p.Handle          # cache handle so ExitCode is readable after exit
-        $p.WaitForExit()
-        foreach ($f in "$log.out", "$log.err") { if (Test-Path $f) { Get-Content $f | Add-Content $log; Remove-Item $f -ErrorAction SilentlyContinue } }
-        $up = ((Get-Date) - $t0).TotalSeconds
-        if ($up -gt 60) { $delay = 2 } else { $delay = [Math]::Min($delay * 2, 30) }
-        "[$(Get-Date -Format s)] $Supervise exited (code $($p.ExitCode)) after $([int]$up)s; restarting in ${delay}s" | Add-Content $log
-        Start-Sleep $delay
+        if (($now - $lastBeat).TotalSeconds -ge 60) {
+            $lastBeat = $now
+            $state = ($Order | ForEach-Object { "$_=" + $(if (Test-Port $Services[$_].Port) { "up" } else { "DOWN" }) }) -join " "
+            Log "supervisor" "heartbeat $state"
+        }
+        Start-Sleep 5
     }
 }
 
-# ---- stop ----------------------------------------------------------------------------------
+# ---- stop ------------------------------------------------------------------------------------
 if ($Stop) {
-    foreach ($name in $Order) {
-        $s = $Services[$name]
-        if ($name -eq "comfyui" -and (Test-Port $s.Port)) {
-            try {
-                $q = Invoke-RestMethod "http://127.0.0.1:8188/queue" -TimeoutSec 5
-                $busy = @($q.queue_running).Count + @($q.queue_pending).Count
-            } catch { $busy = -1 }
-            if ($busy -ne 0) {
-                Write-Warning "ComfyUI NOT stopped: queue busy or unreadable (running+pending=$busy). Stop it manually when idle."
-                continue
-            }
+    # kill the supervisor first (no /T: its children are handled below, ComfyUI may be mid-job)
+    $comfyBusy = $false
+    if (Test-Port $Services.comfyui.Port) {
+        try {
+            $q = Invoke-RestMethod "http://127.0.0.1:8188/queue" -TimeoutSec 5
+            $busy = @($q.queue_running).Count + @($q.queue_pending).Count
+        } catch { $busy = -1 }
+        if ($busy -ne 0) {
+            $comfyBusy = $true
+            Write-Warning "ComfyUI NOT stopped: queue busy or unreadable (running+pending=$busy). Stop it manually when idle."
         }
-        # kill the supervisor first so it cannot restart the service
-        Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" |
-            Where-Object { $_.CommandLine -match "start_aurora\.ps1.*-Supervise $name(\s|$)" } |
-            ForEach-Object { taskkill /PID $_.ProcessId /T /F | Out-Null }
+    }
+    Get-Supervisors | ForEach-Object { taskkill /PID $_.ProcessId /F | Out-Null }
+    if ($comfyBusy) {
+        Write-Warning "Supervisor stopped, so ComfyUI is no longer auto-restarted; re-run start_aurora.bat to re-attach."
+    }
+    foreach ($name in $Order) {
+        if ($name -eq "comfyui" -and $comfyBusy) { continue }
+        $s = $Services[$name]
         Get-NetTCPConnection -State Listen -LocalPort $s.Port -ErrorAction SilentlyContinue |
             ForEach-Object { taskkill /PID $_.OwningProcess /T /F | Out-Null }
         Write-Host "stopped $name (:$($s.Port))"
@@ -78,21 +116,15 @@ if ($Stop) {
     exit 0
 }
 
-# ---- start ---------------------------------------------------------------------------------
+# ---- start -----------------------------------------------------------------------------------
 New-Item -ItemType Directory -Force $Logs | Out-Null
-function Test-Supervisor([string]$name) {
-    [bool](Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" |
-        Where-Object { $_.CommandLine -match "start_aurora\.ps1.*-Supervise $name(\s|$)" })
-}
-foreach ($name in $Order) {
-    $s = $Services[$name]
-    if (Test-Supervisor $name) { Write-Host "$name supervisor already running - skipped"; continue }
-    # Always supervise, even when the port is already taken: the supervisor only starts the service
-    # once the port is free, and never kills a running instance.
-    Start-Process powershell -WindowStyle Minimized -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass",
-        "-File", "`"$PSCommandPath`"", "-Supervise", $name
-    if (Test-Port $s.Port) { Write-Host "supervising $name (:$($s.Port) already in use; will take over if it drops)" }
-    else { Write-Host "starting $name (:$($s.Port))" }
+if (Get-Supervisors) {
+    Write-Host "supervisor already running"
+} else {
+    $cmd = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Supervise all"
+    $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd; CurrentDirectory = $Root }
+    if ($r.ReturnValue -eq 0) { Write-Host "supervisor started (pid $($r.ProcessId)); logs\supervisor.log" }
+    else { Write-Warning "could not start supervisor (WMI code $($r.ReturnValue))"; exit 1 }
 }
 
 $deadline = (Get-Date).AddSeconds(180)
