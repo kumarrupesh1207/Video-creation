@@ -1104,10 +1104,11 @@ def _run_create_job(job_id: str, req: CreateRequest):
             _set_stage(job, "ai_motion" if ai else "reel")
             tee = _Tee(sys.stdout)
             with contextlib.redirect_stdout(tee):
-                import inspect
                 extra = {"motion": "ai", "config": cfg} if ai else {}
-                if "captions" in inspect.signature(render_reel).parameters:   # burn-in lands with the backend change
-                    extra.update(captions=req.captions, caption_text=req.voiceover_text.strip() or req.prompt)
+                if req.captions:
+                    from aurora.audio import voice_duration
+                    extra.update(caption_text=((req.voiceover_text.strip() or req.prompt) if req.voiceover else req.prompt),
+                                 caption_seconds=(voice_duration(_output_root() / "audio", slug) if req.voiceover else None))
                 render_reel(Path(image.output_path), mp4, req.duration, req.fps, rw, rh, audio, **extra)
             fell_back = ai and "AI motion failed" in tee.text
             if fell_back:

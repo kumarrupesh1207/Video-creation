@@ -172,7 +172,7 @@ const stageInfo = (job) => ({
   queued: ['Starting…', 5],
   image: ['Generating image', job.provider === 'nvidia_nim' ? 15 : 600],
   restyle: ['Restyling with ComfyUI (CPU, ~5–15 min)', 600],
-  audio: ['Preparing music / voiceover', 30],
+  audio: ['Preparing music / voiceover' + (job.request?.music === 'auto' && !job.request?.music_path ? ' (new AI music can take ~2–3 min)' : ''), job.request?.music === 'auto' && !job.request?.music_path ? 160 : 30],
   reel: ['Assembling reel', 40],
   ai_motion: ['AI motion on Kaggle (~15–35 min)', 1500],
   validating: ['Validating output', 10],
