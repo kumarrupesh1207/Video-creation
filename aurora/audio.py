@@ -61,7 +61,8 @@ def mix_audio(ffmpeg: str, out: Path, duration: float, music: Path | None = None
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     if music and voice:
-        graph = ("[0:a]loudnorm=I=-14:TP=-1.5:LRA=11[m];[1:a]loudnorm=I=-16:TP=-1.5:LRA=11,asplit[v1][v2];"
+        # apad: sidechaincompress ends with its shorter input, which cut the music when the voice finished
+        graph = ("[0:a]loudnorm=I=-14:TP=-1.5:LRA=11[m];[1:a]loudnorm=I=-16:TP=-1.5:LRA=11,apad,asplit[v1][v2];"
                  "[m][v1]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=600[duck];"
                  f"[duck][v2]amix=inputs=2:duration=longest:normalize=0,atrim=0:{d},{fade}")
         _run([ffmpeg, "-y", "-stream_loop", "-1", "-i", str(music), "-i", str(voice), "-filter_complex", graph,
