@@ -101,3 +101,37 @@ def test_upload_job_asis_and_restyle(monkeypatch, restyle):
     assert calls.get("face_lock", True) is True
     monkeypatch.undo()
     tmp.cleanup()
+
+
+def test_preflight_blocks_when_comfyui_down_or_kaggle_keys_missing(monkeypatch):
+    import json as _json
+
+    import aurora
+
+    monkeypatch.setattr(server, "_comfy_up", lambda cfg: False)
+    r = server.create_single(server.CreateRequest(prompt="x", provider="local_comfyui"))
+    assert r.status_code == 503 and "start_aurora.bat" in _json.loads(r.body)["message"]
+    monkeypatch.setattr(aurora, "load_env", lambda: None)
+    monkeypatch.delenv("KAGGLE_USERNAME", raising=False)
+    monkeypatch.delenv("KAGGLE_KEY", raising=False)
+    r = server.create_single(server.CreateRequest(prompt="x", provider="nvidia_nim", motion="ai"))
+    assert r.status_code == 503 and "Kaggle" in _json.loads(r.body)["message"]
+
+
+def test_jobs_persist_and_running_becomes_interrupted(monkeypatch):
+    import json as _json
+    import tempfile
+    from pathlib import Path
+
+    tmp = tempfile.TemporaryDirectory()
+    monkeypatch.chdir(tmp.name)
+    job = {"job_id": "create_20990101_000000", "status": "running", "stage": "image", "prompt": "p", "timeline": []}
+    server._save_job(job)
+    server._create_jobs.pop(job["job_id"], None)
+    server._load_jobs()
+    got = server._create_jobs.pop(job["job_id"])
+    assert got["status"] == "interrupted" and "restarted" in got["error"]
+    saved = _json.loads((Path(tmp.name) / "outputs" / "jobs" / f"{job['job_id']}.json").read_text(encoding="utf-8"))
+    assert saved["status"] == "interrupted"
+    monkeypatch.undo()
+    tmp.cleanup()

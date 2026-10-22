@@ -105,3 +105,14 @@ details summary { cursor: pointer; min-height: 32px; }
   .grid { grid-template-columns: repeat(3, 1fr); }
   body { padding-bottom: 76px; }
 }
+
+.runbar { position: sticky; top: 49px; z-index: 4; display: flex; gap: 12px; align-items: center; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--primary); }
+.runbar.fail { border-bottom-color: var(--bad); background: #2a1118; }
+.runbar .rb { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.runbar .rb span { color: var(--dim); overflow-wrap: anywhere; }
+.runbar.fail .rb b { color: var(--bad); }
+.rbtn { display: flex; gap: 8px; margin-top: 4px; }
+.spin { width: 22px; height: 22px; flex: none; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--primary-h); animation: sp 0.9s linear infinite; }
+@keyframes sp { to { transform: rotate(360deg); } }
+.steps .bad { color: var(--bad); border-color: var(--bad); }
+.toast { position: fixed; left: 12px; right: 12px; bottom: 72px; z-index: 9; display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 14px; background: var(--card); border: 1px solid var(--ok); border-radius: 12px; }

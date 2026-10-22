@@ -18,7 +18,7 @@ import sys
 import uuid
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from pathlib import Path
@@ -541,6 +541,7 @@ def list_jobs():
         j = {k: v for k, v in raw.items() if not k.startswith("_")}
         if raw["status"] == "running":
             j["elapsed_secs"] = round(time.time() - raw["_t0"], 1)
+            j["stage_elapsed_secs"] = round(time.time() - raw.get("_stage_t", raw["_t0"]), 1)
         create.append(j)
     return {"items": _collect_jobs(), "create_jobs": create[::-1]}
 
@@ -846,6 +847,43 @@ def open_output():
 # ─── Create flow (single prompt -> image [-> reel]) ──────────
 # Reuses ImageSwitchboard + aurora.pipeline.run + the media validators; status is exposed via /api/jobs.
 _create_jobs: dict[str, dict] = {}
+
+
+def _jobs_dir() -> Path:
+    return _output_root() / "jobs"
+
+
+def _save_job(job: dict):
+    """Persist a create-job (without runtime-only '_' keys) so history survives API restarts."""
+    try:
+        _jobs_dir().mkdir(parents=True, exist_ok=True)
+        data = {k: v for k, v in job.items() if not k.startswith("_")}
+        (_jobs_dir() / f"{job['job_id']}.json").write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    except (OSError, KeyError, TypeError):
+        pass
+
+
+def _set_stage(job: dict, stage: str):
+    job.update(stage=stage, _stage_t=time.time())
+    job.setdefault("timeline", []).append({"stage": stage, "at": datetime.now().isoformat(timespec="seconds")})
+    _save_job(job)
+
+
+def _load_jobs(limit: int = 50):
+    """Reload persisted jobs; anything that was still running when the server died becomes 'interrupted'."""
+    for p in sorted(_jobs_dir().glob("create_*.json"))[-limit:]:
+        try:
+            job = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if job.get("status") == "running":
+            job.update(status="interrupted", stage="interrupted",
+                       error="The server restarted while this job was running.")
+            _save_job(job)
+        _create_jobs.setdefault(job["job_id"], job)
+
+
+_load_jobs()
 _create_lock = threading.Lock()
 _ASPECTS = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080)}
 _AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".ogg"}
@@ -914,7 +952,8 @@ def _run_create_job(job_id: str, req: CreateRequest):
         out_dir = _output_root() / "final" / date.today().isoformat()
         out_dir.mkdir(parents=True, exist_ok=True)
         slug = f"{(slugify(req.prompt)[:-7].rstrip('-') if req.prompt.strip() else 'photo')}-{datetime.now():%H%M%S}"
-        job.update(stage="image", slug=slug)
+        job["slug"] = slug
+        _set_stage(job, "restyle" if (req.source == "upload" and req.restyle) else "image")
         t_img = time.perf_counter()
         if req.source == "upload" and not req.restyle:
             from PIL import Image
@@ -947,8 +986,7 @@ def _run_create_job(job_id: str, req: CreateRequest):
                    "reel": None, "timings_secs": {"image": round(t_img, 1)}}
         if req.mode == "reel":
             ai = req.motion == "ai"
-            job["stage"] = "ai_motion" if ai else "reel"
-            job["events"] = ["AI motion running on Kaggle (free GPU, ~15-20 min)"] if ai else []
+            job["events"] = ["AI motion running on Kaggle (free GPU, ~15-35 min)"] if ai else []
             cfg_prompt = req.prompt or "the subject"
             if ai:
                 if req.action.strip():
@@ -959,6 +997,7 @@ def _run_create_job(job_id: str, req: CreateRequest):
             mp4 = out_dir / f"{slug}.mp4"
             from aurora.audio import resolve_audio
             from aurora.motion.providers.ffmpeg_kenburns import FFmpegKenBurns
+            _set_stage(job, "audio")
             audio, audio_note = resolve_audio(
                 FFmpegKenBurns().ffmpeg, req.duration, _output_root() / "audio", slug,
                 music=req.music_path or (req.music if req.music == "auto" else None), prompt=req.prompt,
@@ -967,6 +1006,7 @@ def _run_create_job(job_id: str, req: CreateRequest):
                                **({"speaker_wav": req.speaker_wav} if req.speaker_wav else {})})
             job.setdefault("events", []).append(f"Audio: {audio_note}")
             t_reel = time.perf_counter()
+            _set_stage(job, "ai_motion" if ai else "reel")
             tee = _Tee(sys.stdout)
             with contextlib.redirect_stdout(tee):
                 render_reel(Path(image.output_path), mp4, req.duration, req.fps, rw, rh, audio,
@@ -975,6 +1015,7 @@ def _run_create_job(job_id: str, req: CreateRequest):
             if fell_back:
                 reason = tee.text.split("falling back to camera motion:", 1)[-1].strip().splitlines()[0][:200]
                 job["events"].append(f"AI motion failed, used camera motion instead: {reason}")
+            _set_stage(job, "validating")
             vr = validate_video(mp4, rw, rh, req.fps, req.duration, require_audio=True, deep=True,
                                 input_path=image.output_path)
             if not vr.ok:
@@ -988,12 +1029,38 @@ def _run_create_job(job_id: str, req: CreateRequest):
             sidecar["timings_secs"]["reel"] = round(time.perf_counter() - t_reel, 1)
         sidecar["timings_secs"]["total"] = round(time.perf_counter() - t0, 1)
         (out_dir / f"{slug}.json").write_text(json.dumps(sidecar, indent=2, ensure_ascii=False), encoding="utf-8")
-        job.update(status="done", stage="done", outputs=_gallery_item(sidecar))
+        job.update(status="done", outputs=_gallery_item(sidecar))
+        _set_stage(job, "done")
     except Exception as exc:  # noqa: BLE001 - report to the UI
-        job.update(status="failed", stage="failed", error=str(exc))
+        job.update(status="failed", error=str(exc))
+        _set_stage(job, "failed")
     finally:
         job["finished_at"] = datetime.now().isoformat(timespec="seconds")
         job["elapsed_secs"] = round(time.perf_counter() - t0, 1)
+        _save_job(job)
+
+
+def _comfy_up(cfg: dict) -> bool:
+    import urllib.request
+    url = (cfg.get("models", {}).get("comfyui", {}) or {}).get("api_url", "http://127.0.0.1:8188").rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{url}/system_stats", timeout=2):
+            return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _preflight(req: "CreateRequest") -> str | None:
+    """Plain-words reason this request cannot run right now, or None."""
+    if (req.source == "upload" and req.restyle) or (req.source == "prompt" and req.provider == "local_comfyui"):
+        if not _comfy_up(_load_config()):
+            return "ComfyUI is not running (port 8188). Start it with start_aurora.bat, then try again."
+    if req.mode == "reel" and req.motion == "ai":
+        from aurora import load_env
+        load_env()
+        if not (os.getenv("KAGGLE_USERNAME", "").strip() and os.getenv("KAGGLE_KEY", "").strip()):
+            return "AI motion needs Kaggle keys (KAGGLE_USERNAME / KAGGLE_KEY in .env). Use Camera motion or add the keys."
+    return None
 
 
 @app.post("/api/create")
@@ -1014,6 +1081,9 @@ def create_single(req: CreateRequest):
         uploads = (_output_root() / "uploads").resolve()
         if uploads not in Path(req.music_path).resolve().parents or not Path(req.music_path).is_file():
             return {"status": "error", "message": "music_path must be a file uploaded via /api/upload-music."}
+    problem = _preflight(req)
+    if problem:
+        return JSONResponse(status_code=503, content={"status": "error", "message": problem})
     with _create_lock:
         if _batch_running or any(j["status"] == "running" for j in _create_jobs.values()):
             return {"status": "error", "message": "A job is already running."}
@@ -1023,8 +1093,9 @@ def create_single(req: CreateRequest):
             "mode": req.mode, "aspect": req.aspect,
             "provider": ("upload" if req.source == "upload" and not req.restyle else req.provider), "duration": req.duration,
             "fps": req.fps, "motion": req.motion, "started_at": datetime.now().isoformat(timespec="seconds"),
-            "_t0": time.time(),
+            "_t0": time.time(), "_stage_t": time.time(), "request": req.model_dump(), "timeline": [],
         }
+        _save_job(_create_jobs[job_id])
     threading.Thread(target=_run_create_job, args=(job_id, req), daemon=True).start()
     return {"status": "success", "job_id": job_id}
 

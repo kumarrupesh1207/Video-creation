@@ -138,42 +138,62 @@ $('createForm').addEventListener('submit', async (e) => {
   Object.assign(body, { source: state.source, image_path: up ? state.photoPath : null, restyle, denoise: +$('denoise').value, face_lock: $('faceLock').checked });
   if (up && !state.photoPath) { msg.textContent = 'Choose a photo first.'; msg.className = 'hint err'; return; }
   if ((!up || restyle) && !body.prompt) { msg.textContent = 'Write a prompt first.'; msg.className = 'hint err'; return; }
+  await submitCreate(body, msg);
+});
+
+async function submitCreate(body, msg) {
   $('submit').disabled = true;
   try {
     const res = await (await fetch(`${API}/create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
-    if (res.status !== 'success') throw new Error(res.message || (Array.isArray(res.detail) ? res.detail.map((d) => `${d.loc.slice(-1)}: ${d.msg}`).join('; ') : 'Request failed'));
+    if (res.status !== 'success') throw new Error(res.message || (typeof res.detail === 'string' ? res.detail : Array.isArray(res.detail) ? res.detail.map((d) => `${d.loc.slice(-1)}: ${d.msg}`).join('; ') : 'Request failed'));
     msg.textContent = '';
+    $('runbar').hidden = true;
     showTab('queue');
     pollJobs();
   } catch (err) {
     msg.textContent = err.message; msg.className = 'hint err';
-  } finally {
     $('submit').disabled = false;
+    if (state.tab !== 'create') showTab('create');
   }
-});
+}
 
 // ─── Queue ───────────────────────────────────────────────
-const STAGES = [['image', 'Image'], ['reel', 'Reel'], ['ai_motion', 'AI motion'], ['done', 'Done']];
+// stage -> [label, rough typical seconds]
+const stageInfo = (job) => ({
+  queued: ['Starting…', 5],
+  image: ['Generating image', job.provider === 'nvidia_nim' ? 15 : 600],
+  restyle: ['Restyling with ComfyUI (CPU, ~5–15 min)', 600],
+  audio: ['Preparing music / voiceover', 30],
+  reel: ['Assembling reel', 40],
+  ai_motion: ['AI motion on Kaggle (~15–35 min)', 1500],
+  validating: ['Validating output', 10],
+}[job.stage] || [job.stage, 60]);
+const STAGE_LABEL = { image: 'Image', restyle: 'Restyle', audio: 'Audio', reel: 'Reel', ai_motion: 'AI motion', validating: 'Validate', done: 'Done', failed: 'Failed', interrupted: 'Interrupted' };
+
+function friendlyError(err = '') {
+  if (/8188|ComfyUI|Connection ?refused|ConnectionError|Max retries/i.test(err)) return 'ComfyUI is not running. Start it with start_aurora.bat, then press Retry.';
+  if (/kaggle/i.test(err)) return 'Kaggle is not set up (keys missing or rejected). Use Camera motion or add the keys.';
+  if (/nvidia|nim|40[13]|429/i.test(err)) return 'NVIDIA NIM refused the request (key or credits). Try ComfyUI instead.';
+  if (/restarted/i.test(err)) return 'The server restarted while this job was running. Press Retry.';
+  return err;
+}
+
 function renderActive(job) {
   const box = $('activeJob');
   if (!job) { box.innerHTML = '<p class="empty">No job yet. Start one from Create.</p>'; return; }
-  const idx = STAGES.findIndex(([k]) => k === job.stage);
-  const steps = STAGES.filter(([k]) => k === 'done' || k === 'image' || (job.mode === 'reel' && (job.motion === 'ai' ? k === 'ai_motion' : k === 'reel'))).map(([k, label]) => {
-    const i = STAGES.findIndex(([x]) => x === k);
-    const cls = job.status === 'done' || i < idx ? 'done' : (i === idx && job.status === 'running' ? 'cur' : '');
-    return `<div class="${cls}">${label}</div>`;
-  }).join('');
+  const seen = (job.timeline || []).map((t) => t.stage);
+  const steps = seen.map((k, i) => `<div class="${i === seen.length - 1 && job.status === 'running' ? 'cur' : (k === 'failed' || k === 'interrupted') ? 'bad' : 'done'}">${STAGE_LABEL[k] || k}</div>`).join('');
   const hint = job.status === 'running' && job.stage === 'image' && job.provider !== 'nvidia_nim'
     ? '<p class="hint">Image generation on CPU can take 5–10 minutes. You can leave this page.</p>' : '';
   const out = job.outputs;
   box.innerHTML = `
-    <div class="bar"><b>${esc(job.status === 'running' ? 'Running' : job.status === 'done' ? 'Finished' : 'Failed')}</b>
+    <div class="bar"><b>${esc(job.status === 'running' ? 'Running' : job.status === 'done' ? 'Finished' : job.status === 'interrupted' ? 'Interrupted' : 'Failed')}</b>
       <span class="hint">${fmtSecs(job.elapsed_secs)}</span></div>
     <div class="steps">${steps}</div>${hint}
     <dl class="kv"><dt>Prompt</dt><dd>${esc(job.prompt)}</dd><dt>Output</dt><dd>${job.mode === 'reel' ? `Reel ${job.duration}s @ ${job.fps}fps` : 'Image'} · ${esc(job.aspect)}</dd>
       <dt>Provider</dt><dd>${esc(out?.provider || job.provider)}</dd><dt>Job</dt><dd>${esc(job.job_id)}</dd></dl>
     ${(job.events || []).map((e) => `<p class="hint${/failed/.test(e) ? ' err' : ''}">${esc(e)}</p>`).join('')}
-    ${job.error ? `<p class="err-text">${esc(job.error)}</p>` : ''}
+    ${job.error ? `<p class="err-text">${esc(friendlyError(job.error))}</p>` : ''}
     ${out ? '<button class="btn primary" id="viewResult" type="button">View result</button>' : ''}`;
   $('viewResult')?.addEventListener('click', () => openViewer(out));
 }
@@ -182,8 +202,40 @@ function renderList(jobs) {
   const el = $('jobList');
   el.innerHTML = jobs.length ? jobs.map((j) => `
     <div class="item"><span class="t">${esc(j.prompt)}</span>
-      <span class="s ${j.status === 'done' ? 'ok' : j.status === 'failed' ? 'bad' : ''}">${esc(j.status)} · ${fmtSecs(j.elapsed_secs)}</span></div>`).join('')
+      <span class="s ${j.status === 'done' ? 'ok' : j.status === 'failed' || j.status === 'interrupted' ? 'bad' : ''}">${esc(j.status)} · ${fmtSecs(j.elapsed_secs)}</span></div>`).join('')
     : '<p class="empty">Nothing here yet.</p>';
+}
+
+const dismissed = new Set((() => { try { return JSON.parse(sessionStorage.getItem('dismissed') || '[]'); } catch { return []; } })());
+function renderRunBar(latest, running) {
+  const bar = $('runbar');
+  if (running) {
+    const [label, est] = stageInfo(latest);
+    const left = Math.max(0, est - (latest.stage_elapsed_secs || 0));
+    const pct = Math.min(95, ((latest.stage_elapsed_secs || 0) / est) * 100);
+    bar.className = 'runbar run';
+    bar.innerHTML = `<div class="spin"></div><div class="rb"><b>Processing on backend… ${esc(label)}</b>
+      <span>Elapsed ${fmtSecs(latest.elapsed_secs)} · ${left > 0 ? `about ${fmtSecs(left)} left in this step` : 'taking longer than usual, still working'}</span>
+      <div class="bar-bg"><i style="width:${pct}%"></i></div></div>`;
+    bar.hidden = false;
+  } else if (latest && ['failed', 'interrupted'].includes(latest.status) && !dismissed.has(latest.job_id)) {
+    bar.className = 'runbar fail';
+    bar.innerHTML = `<div class="rb"><b>${latest.status === 'failed' ? 'Job failed' : 'Job interrupted'}</b>
+      <span>${esc(friendlyError(latest.error))}</span>
+      <div class="rbtn"><button class="btn small" id="retryBtn" type="button">Retry</button><button class="btn ghost small" id="dismissBtn" type="button">Dismiss</button></div></div>`;
+    bar.hidden = false;
+    $('dismissBtn').onclick = () => { dismissed.add(latest.job_id); try { sessionStorage.setItem('dismissed', JSON.stringify([...dismissed])); } catch { /* ignore */ } bar.hidden = true; };
+    $('retryBtn').onclick = () => submitCreate(latest.request, $('formMsg'));
+  } else bar.hidden = true;
+}
+
+function toast(text, action) {
+  const t = $('toast');
+  t.innerHTML = `<span>${esc(text)}</span>${action ? '<button class="btn small" id="toastBtn" type="button">View result</button>' : ''}`;
+  t.hidden = false;
+  if (action) $('toastBtn').onclick = () => { t.hidden = true; action(); };
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => { t.hidden = true; }, 15000);
 }
 
 async function pollJobs() {
@@ -194,12 +246,19 @@ async function pollJobs() {
     const latest = create_jobs[0];
     renderActive(latest);
     renderList(create_jobs.slice(1));
+    renderRunBar(latest, running);
     $('qBadge').hidden = !running;
     const top = $('topStatus');
-    top.className = 'pill' + (running ? ' run' : latest?.status === 'failed' ? ' fail' : '');
-    top.textContent = running ? `Running · ${latest.stage}` : latest?.status === 'failed' ? 'Last job failed' : 'Idle';
+    const bad = latest && ['failed', 'interrupted'].includes(latest.status);
+    top.className = 'pill' + (running ? ' run' : bad ? ' fail' : '');
+    top.textContent = running ? `Running · ${stageInfo(latest)[0].split(' (')[0]}` : bad ? 'Last job failed' : 'Idle';
     $('submit').disabled = running;
-    if (state.prevRunning && !running) state.galleryKey = '';
+    if (running) { $('formMsg').textContent = 'A job is running on the backend. Wait for it to finish (see the bar above).'; $('formMsg').className = 'hint'; }
+    else if ($('formMsg').textContent.startsWith('A job is running')) $('formMsg').textContent = '';
+    if (state.prevRunning && !running) {
+      state.galleryKey = '';
+      if (latest?.status === 'done' && latest.outputs) toast('Your result is ready.', () => openViewer(latest.outputs));
+    }
     state.prevRunning = running;
   } catch { $('topStatus').textContent = 'API offline'; $('topStatus').className = 'pill fail'; }
 }
