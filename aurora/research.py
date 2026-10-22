@@ -107,3 +107,144 @@ def research_ideas(niche: str, language: str = "English", platform: str = "Insta
     except Exception as exc:  # noqa: BLE001 - network/quota/etc: never break the caller
         reason = f"Gemini failed: {str(exc)[:120]}"
     return _local_llm(niche, language, platform, n, cfg) or _fallback(niche, language, n, reason)
+
+
+# ----------------------------------------------------------------------------- motion-comic format
+SERIES_DIR = ROOT / "outputs" / "series"
+COMIC_STYLE = "cel-shaded anime comic panel"
+
+
+class Character(BaseModel):
+    name: str
+    description: str = Field(min_length=10)  # FIXED look: hair, eyes, outfit, colours (reused verbatim in every prompt)
+    style: str = COMIC_STYLE
+
+
+class Panel(BaseModel):
+    shot: str = "medium"  # close-up | wide | medium | action
+    characters: list[str] = []
+    image_prompt: str = Field(min_length=5)  # the scene only; the character sheet is added by code
+    narration: str = Field(min_length=3)  # ~6-12 words
+    bubble: str = ""
+    sfx: str = ""
+    action: bool = False
+
+
+class SeriesInfo(BaseModel):
+    title: str
+    part: int = 1
+    total_parts: int = 1  # the story is planned as 1 or 2 parts
+    recap: str = ""
+
+
+class Comic(BaseModel):
+    series: SeriesInfo
+    character_sheet: list[Character] = Field(min_length=1)
+    panels: list[Panel] = Field(min_length=3, max_length=10)
+    cliffhanger: str = ""
+    cta: str = ""
+
+
+def load_series(channel: str, series_dir: Path = SERIES_DIR) -> dict:
+    p = Path(series_dir) / f"{channel}.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_series(channel: str, comic: dict, series_dir: Path = SERIES_DIR) -> dict:
+    """Continuity state for the next part: characters, last-part summary, fixed image seed."""
+    prev = load_series(channel, series_dir)
+    state = {"channel": channel, "title": comic["series"]["title"], "part": comic["series"]["part"],
+             "total_parts": comic["series"].get("total_parts", 1),
+             "characters": comic["character_sheet"], "last_summary": " ".join(p["narration"] for p in comic["panels"])[:600],
+             "cliffhanger": comic.get("cliffhanger", ""), "seed": prev.get("seed") or (abs(hash(channel)) % 2**31 or 7)}
+    Path(series_dir).mkdir(parents=True, exist_ok=True)
+    (Path(series_dir) / f"{channel}.json").write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    return state
+
+
+def panel_prompt(panel: dict, sheet: list[dict]) -> str:
+    """Final image prompt: style + the FIXED character descriptions for this panel + shot + scene."""
+    names = {n.lower() for n in panel.get("characters", [])}
+    chars = [c for c in sheet if not names or c["name"].lower() in names] or sheet[:1]
+    return (f"{COMIC_STYLE}, " + ", ".join(f"{c['name']}: {c['description']}" for c in chars)
+            + f", {panel.get('shot', 'medium')} shot, {panel['image_prompt']}, vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no speech bubbles")
+
+
+COMIC_PROMPT = (
+    "You write ORIGINAL anime-style motion-comic scripts for vertical short videos (never use existing franchises or "
+    "their characters). Language of narration, speech bubbles and CTA: {language}. Series premise: {premise}. "
+    "Continuity state (JSON, may be empty; keep these characters' looks EXACTLY and continue the story): {state}. "
+    "Write Part {part} with exactly {n} panels. Plan the whole story as {total_rule}. Return: series {{title, part, total_parts, recap}} (recap = one line of the story so far), "
+    "character_sheet (each main character: name, a fixed visual description of hair, eyes, outfit, colours; style "
+    "'{style}'), panels (each: shot close-up|wide|medium|action, characters present, image_prompt = the scene only in "
+    "English, narration of 10-16 words, optional short bubble line, sfx/mood tag, action true for fight/chase panels), "
+    "{ending}. Safe for all audiences."
+)
+
+
+def _comic_fallback(premise: str, n: int, state: dict, note: str) -> dict:
+    sheet = state.get("characters") or [{"name": "Kaito", "style": COMIC_STYLE, "description":
+             "young man, spiky silver hair, bright blue eyes, long black coat with red scarf"}]
+    hero = sheet[0]["name"]
+    beats = [("wide", "establishing shot of the city skyline at dusk", f"{premise}. The story begins tonight.", False),
+             ("close-up", f"close-up of {hero}'s determined face", f"{hero} knew there was no turning back.", False),
+             ("medium", f"{hero} walking through a crowded neon street", "A strange signal pulled him forward.", False),
+             ("action", f"{hero} dodging a glowing energy blast, dynamic angle", "Then the ambush began.", True),
+             ("action", f"{hero} striking back with a flash of light, speed lines", "He fought with everything he had.", True),
+             ("close-up", f"{hero} staring at a shadowy figure in the smoke, shocked", "But the figure knew his name...", False)]
+    panels = [Panel(shot=s, characters=[hero], image_prompt=p, narration=t, action=a).model_dump()
+              for s, p, t, a in (beats * 2)[:max(3, min(n, 10))]]
+    part = int(state.get("part", 0)) + 1
+    return {"series": {"title": state.get("title") or premise[:40], "part": part, "recap": state.get("last_summary", "")[:120]},
+            "character_sheet": sheet, "panels": panels, "cliffhanger": "The figure knew his name.",
+            "cta": f"Follow for Part {part + 1}"}
+
+
+def research_comic(channel: str, premise: str, language: str = "English", panels: int = 6, cfg: dict | None = None,
+                   client=None, series_dir: Path = SERIES_DIR, max_parts: int | None = None) -> dict:
+    """Part N+1 of a series: {"comic": {...validated...}, "source": "gemini|topic_fallback", "note": str}."""
+    cfg = cfg if cfg is not None else _settings()
+    rcfg, state = cfg.get("research", {}), load_series(channel, series_dir)
+    max_parts = int(max_parts or rcfg.get("max_parts", 2))
+    if state and int(state.get("part", 0)) >= int(state.get("total_parts", 1)):
+        state = {}  # previous story is finished -> start a new one (new characters, part 1)
+    n, part = max(5, min(int(panels), 10)), int(state.get("part", 0)) + 1
+    total = max(part, min(int(state.get("total_parts", max_parts)), max_parts))
+    key = os.getenv(rcfg.get("api_key_env", "GEMINI_API_KEY"), "").strip()
+    reason = "no GEMINI_API_KEY"
+    if client is not None or key:
+        try:
+            if client is None:
+                from google import genai
+
+                client = genai.Client(api_key=key)
+            from google.genai import types
+
+            resp = client.models.generate_content(
+                model=rcfg.get("model", "gemini-3.1-flash-lite"),
+                contents=COMIC_PROMPT.format(
+                    language=language, premise=premise, state=json.dumps(state, ensure_ascii=False)[:3000], part=part, n=n,
+                    style=COMIC_STYLE,
+                    total_rule=(f"exactly {total} parts" if state else f"1 or 2 parts (set total_parts; at most {max_parts})"),
+                    ending=("this is the FINAL part: resolve the story, no cliffhanger, cta = 'The End'" if part >= total else
+                            "end on a cliffhanger and cta = 'Part " + str(part + 1) + " coming soon'")),
+                config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=Comic))
+            comic = Comic.model_validate_json(resp.text)
+            comic.series.part = part
+            comic.series.total_parts = max(part, min(comic.series.total_parts, max_parts, total if state else max_parts))
+            if part >= comic.series.total_parts:
+                comic.cliffhanger, comic.cta = "", "The End"
+            return {"comic": comic.model_dump(), "source": "gemini", "note": ""}
+        except Exception as exc:  # noqa: BLE001
+            reason = f"Gemini failed/invalid: {str(exc)[:100]}"
+    fb = _comic_fallback(premise, n, state, reason)
+    fb["series"]["total_parts"] = total if state else min(2, max_parts)
+    if part >= fb["series"]["total_parts"]:
+        fb["cliffhanger"], fb["cta"] = "", "The End"
+    else:
+        fb["cta"] = f"Part {part + 1} coming soon"
+    return {"comic": Comic.model_validate(fb).model_dump(),
+            "source": "topic_fallback", "note": reason}

@@ -97,6 +97,8 @@ class LocalComfyUIProvider(ImageProvider):
                 sampler[key] = value
         if sampler:
             workflow_overrides[seed_node].update(sampler)
+        if style == "anime" and lc_cfg.get("anime_checkpoint") and "4" in workflow:
+            workflow_overrides["4"] = {"ckpt_name": lc_cfg["anime_checkpoint"]}
 
         refine_cfg = lc_cfg.get("refine", {})
         do_refine = refine_cfg.get("enabled", False) if refine is None else refine
@@ -246,6 +248,78 @@ class LocalComfyUIProvider(ImageProvider):
                 "source_path": str(source_path),
                 "workflow_overrides": overrides,
             },
+        )
+
+    def generate_with_reference(
+        self,
+        reference_path: str | Path,
+        prompt: str,
+        style: str,
+        resolution: list[int],
+        job_id: str,
+        negative_prompt: str | None = None,
+        seed: int | None = None,
+        weight: float | None = None,
+        steps: int | None = None,
+        cfg_scale: float | None = None,
+    ) -> ImageResult:
+        """Text-to-image conditioned on a reference image via IP-Adapter (character/outfit consistency across panels)."""
+        from aurora.monitoring.media_validator import validate_image
+        from src.modules.video_engine import upload_image
+
+        start = time.time()
+        reference_path = Path(reference_path)
+        if not reference_path.is_file():
+            raise FileNotFoundError(f"[LocalComfyUI] Reference image not found: {reference_path}")
+        cfg = copy.deepcopy(self.config)
+        lc_cfg = cfg.get("providers", {}).get("local_comfyui", {})
+        width, height = (int(resolution[0]) // 8 * 8, int(resolution[1]) // 8 * 8)
+        job_root = Path(cfg.get("paths", {}).get("base_output", "outputs")) / job_id
+        (job_root / "images").mkdir(parents=True, exist_ok=True)
+        (job_root / "videos").mkdir(parents=True, exist_ok=True)
+        cfg.setdefault("paths", {})
+        cfg["paths"]["images_dir"] = str(job_root / "images")
+        cfg["paths"]["videos_dir"] = str(job_root / "videos")
+        comfy_cfg = cfg.get("models", {}).get("comfyui", {})
+        uploaded = upload_image(reference_path, comfy_cfg.get("api_url", "http://127.0.0.1:8188"))
+        runtime_negative = negative_prompt or lc_cfg.get("negative_prompt", self.DEFAULT_NEGATIVE)
+        try:
+            runtime_seed = int(seed) if seed is not None else 0
+        except (TypeError, ValueError):
+            runtime_seed = 0
+        if runtime_seed <= 0:
+            runtime_seed = random.randint(1, 2**31 - 1)
+        sampler = {"seed": runtime_seed}
+        for key, value in (
+            ("steps", steps if steps is not None else lc_cfg.get("steps")),
+            ("cfg", cfg_scale if cfg_scale is not None else lc_cfg.get("cfg")),
+            ("sampler_name", lc_cfg.get("sampler_name")),
+            ("scheduler", lc_cfg.get("scheduler")),
+        ):
+            if value is not None:
+                sampler[key] = value
+        img_wf = comfy_cfg.get("ipadapter_workflow", "src/workflows/image_gen_ipadapter.json")
+        overrides = {
+            "3": sampler, "5": {"width": width, "height": height}, "6": {"text": prompt}, "7": {"text": runtime_negative},
+            "10": {"filename_prefix": f"vf_{job_id}_ref"}, "12": {"image": uploaded},
+            "13": {"ipadapter_file": lc_cfg.get("ipadapter_file", "ip-adapter-plus_sd15.safetensors")},
+            "15": {"weight": float(weight if weight is not None else lc_cfg.get("reference_weight", 0.7))},
+        }
+        if style == "anime" and lc_cfg.get("anime_checkpoint"):
+            overrides["4"] = {"ckpt_name": lc_cfg["anime_checkpoint"]}
+        orch = ComfyOrchestrator(cfg)
+        outputs = orch.run_workflow(img_wf, overrides)
+        if not outputs:
+            raise RuntimeError("[LocalComfyUI] reference render returned no image outputs.")
+        image_path = Path(outputs[0])
+        report = validate_image(image_path, width, height)
+        if not report.ok:
+            raise RuntimeError(f"[LocalComfyUI] reference render failed validation: {report.errors}")
+        return ImageResult(
+            provider="local_comfyui", model=overrides.get("4", {}).get("ckpt_name") or "unknown", style=style,
+            latency_ms=int((time.time() - start) * 1000), output_path=str(image_path), width=width, height=height,
+            seed=runtime_seed, negative_prompt=runtime_negative, normalized_prompt=normalize_prompt(prompt),
+            context={"mode": "reference", "reference": str(reference_path), "workflow_overrides": overrides},
         )
 
     @staticmethod

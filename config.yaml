@@ -41,7 +41,12 @@ audio:                             # voiceover engines: see assets/voices/README
 research:                          # aurora/research.py (Gemini text, free tier; key from AI Studio)
   model: "gemini-3.1-flash-lite"    # free-tier text model id; change here if Google retires it
   grounding: false                 # Google Search grounding is paid-only
+  max_parts: 2                     # comic stories are 1-2 parts
   api_key_env: "GEMINI_API_KEY"
+
+comic:                             # aurora/comic.py image settings (ComfyUI first, NIM fallback)
+  steps: 20
+  comfy_resolution: [512, 896]
 
 motion:
   liveportrait:
@@ -120,6 +125,7 @@ providers:
     steps: 25
     sampler_name: "dpmpp_2m"
     scheduler: "karras"
+    anime_checkpoint: "Counterfeit-V2.5_fp16.safetensors"   # used when style == anime (CreativeML OpenRAIL-M)
     default_resolution: [512, 768]   # used when the request gives none
     refine:                          # optional hires-fix style 2nd pass (slow on CPU)
       enabled: false
@@ -207,3 +213,20 @@ vram:
   torch_gc_after_each_module: true
   sleep_after_cleanup_sec: 2
   comfyui_free_memory_endpoint: "/free"
+
+# ── Autopilot (research → create → veto window → publish) ──────────────
+autopilot:
+  publish:
+    approval: veto          # auto-publish after veto_hours unless stopped
+    veto_hours: 6
+    slots: ["12:30", "18:30", "21:00"]   # IST; one reel per slot
+    timezone: Asia/Kolkata
+    max_attempts: 3
+  channels:
+    - name: main            # token: outputs/tokens/youtube_main.json ("Rupesh Kumar" channel)
+      niche: "original anime short stories with original characters (no existing copyrighted characters): epic battles, emotional moments, power-ups, mysterious worlds"
+      language: en
+      platforms: [youtube]
+      reels_per_day: 3
+      motion: ai            # free Kaggle AI motion; falls back to camera motion
+      voice: en-US-AvaNeural   # young adult female, natural

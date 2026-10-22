@@ -160,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
     ensure_utf8_console()
     load_env()
     ap = argparse.ArgumentParser(description="Aurora autorun: topics -> reels")
-    ap.add_argument("--topics", type=Path, required=True, help="text file, one topic per line")
+    ap.add_argument("--topics", type=Path, default=Path("topics.txt"), help="text file, one topic per line")
     ap.add_argument("--config", type=Path, default=ROOT / "config.yaml")
     ap.add_argument("--out", type=Path, default=ROOT / "outputs" / "final")
     ap.add_argument("--music", default="auto", help="auto (pick from assets/music by mood; silent if empty) | <file> | none")
@@ -179,11 +179,24 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--fps", type=int, default=24)
     ap.add_argument("--motion", choices=["camera", "ai", "google"], default="camera",
                     help="camera = local Ken Burns (free, fast); ai = Kaggle Wan; google = paid Veo/Omni (budget-capped) -> falls back google>ai>camera")
+    ap.add_argument("--format", choices=["reel", "comic"], default="reel", help="comic = anime motion-comic series part (aurora/comic.py)")
+    ap.add_argument("--channel", default="anime", help="series channel name for --format comic")
+    ap.add_argument("--premise", default=None, help="series premise for --format comic (first part)")
     ap.add_argument("--no-llm", action="store_true", help="skip the LLM; use the topic text as prompt and caption")
     ap.add_argument("--limit", type=int, default=0, help="max topics to render this run (0 = all)")
     args = ap.parse_args(argv)
 
     cfg = yaml.safe_load(args.config.read_text(encoding="utf-8"))
+    if args.format == "comic":
+        from aurora.comic import make_comic_reel
+
+        providers = [p.strip() for p in args.providers.split(",")] if args.providers else None
+        if providers:
+            cfg.setdefault("providers", {})["fallback_order"] = providers
+        res = make_comic_reel(args.channel, args.premise or (read_topics(args.topics)[0] if args.topics.exists() else "an original anime story"),
+                              args.out / "comic", cfg=cfg)
+        print(f"[autorun] OK comic {res['video']} ({res['seconds']}s) {res['title']}")
+        return 0
     if args.providers:
         cfg.setdefault("providers", {})["fallback_order"] = [p.strip() for p in args.providers.split(",")]
     from backend.app.services.image_switchboard import ImageSwitchboard
