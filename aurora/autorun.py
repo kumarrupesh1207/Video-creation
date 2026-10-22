@@ -1,6 +1,6 @@
 """One-command automation: topics -> LLM prompt+caption -> image -> 15s reel -> validated MP4 + JSON sidecar.
 
-    python -m aurora.autorun --topics topics.txt [--music song.mp3] [--voiceover] [--providers local_comfyui]
+    python -m aurora.autorun --topics topics.txt [--music auto|song.mp3|none] [--voiceover] [--providers local_comfyui]
 
 Sequential, low priority (PC stays usable) and resumable: topics with an ok sidecar are skipped.
 """
@@ -19,6 +19,7 @@ from pathlib import Path
 import yaml
 
 from aurora import ensure_utf8_console, load_env
+from aurora.audio import resolve_audio
 from aurora.monitoring.media_validator import validate_image, validate_video
 from aurora.pipeline import run as render_reel
 
@@ -79,30 +80,6 @@ def write_prompt_and_caption(cfg: dict, topic: str) -> dict:
         return fallback
 
 
-def make_voiceover(cfg: dict, caption: str, slug: str, music: Path | None, ffmpeg: str) -> tuple[Path | None, str]:
-    """Optional XTTS voiceover (CPU). Returns (audio path or music, note). Skips gracefully."""
-    try:
-        from src.modules.audio_engine import AudioEngine
-
-        if not AudioEngine.check_installation():
-            return music, "voiceover skipped: XTTS not installed"
-        engine = AudioEngine(cfg)
-        if not engine.ref_audio.exists():
-            return music, f"voiceover skipped: missing {engine.ref_audio}"
-        wav = engine.synthesize(caption, f"{slug}.wav")
-        engine.unload()
-    except Exception as exc:  # noqa: BLE001
-        return music, f"voiceover skipped: {exc}"
-    if not music:
-        return wav, "voiceover"
-    mixed = wav.with_name(f"{slug}_mix.wav")
-    cmd = [ffmpeg, "-y", "-i", str(wav), "-i", str(music), "-filter_complex",
-           "[1:a]volume=0.25[m];[0:a][m]amix=inputs=2:duration=first[a]", "-map", "[a]", str(mixed)]
-    if subprocess.run(cmd, capture_output=True, text=True, timeout=300).returncode == 0:
-        return mixed, "voiceover+music"
-    return wav, "voiceover (music mix failed)"
-
-
 def process_topic(cfg: dict, switchboard, topic: str, args: argparse.Namespace, out_dir: Path) -> dict:
     slug = slugify(topic)
     started = time.perf_counter()
@@ -120,9 +97,11 @@ def process_topic(cfg: dict, switchboard, topic: str, args: argparse.Namespace, 
 
     from aurora.motion.providers.ffmpeg_kenburns import FFmpegKenBurns
 
-    audio, audio_note = (Path(args.music) if args.music else None), ("music" if args.music else "silent")
-    if args.voiceover:
-        audio, audio_note = make_voiceover(cfg, text["caption"], slug, audio, FFmpegKenBurns().ffmpeg)
+    audio, audio_note = resolve_audio(
+        FFmpegKenBurns().ffmpeg, args.duration, ROOT / "outputs" / "audio", slug, music=args.music,
+        prompt=f"{topic} {text['image_prompt']}",
+        voiceover_text=(args.voiceover_text or text["caption"]) if args.voiceover else None,
+    )
 
     out_dir.mkdir(parents=True, exist_ok=True)
     mp4 = out_dir / f"{slug}.mp4"
@@ -178,8 +157,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--topics", type=Path, required=True, help="text file, one topic per line")
     ap.add_argument("--config", type=Path, default=ROOT / "config.yaml")
     ap.add_argument("--out", type=Path, default=ROOT / "outputs" / "final")
-    ap.add_argument("--music", type=Path, default=None)
-    ap.add_argument("--voiceover", action="store_true", help="XTTS voiceover of the caption (CPU; skipped if unavailable)")
+    ap.add_argument("--music", default="auto", help="auto (pick from assets/music by mood; silent if empty) | <file> | none")
+    ap.add_argument("--voiceover", action="store_true", help="offline Piper voiceover (English/Hindi) of the caption, ducked over the music")
+    ap.add_argument("--voiceover-text", default=None, help="text to speak instead of the caption")
     ap.add_argument("--providers", default=None, help="comma list overriding image fallback_order, e.g. local_comfyui")
     ap.add_argument("--style", default="cinematic")
     ap.add_argument("--width", type=int, default=512)

@@ -31,3 +31,6 @@ Outputs: `outputs/final/2026-10-21/*.mp4` + `.json` sidecars (1080x1920, 24 fps,
 Notes: Ollama is up but only `qwen3:8b` is installed (config says llama3:8b); autorun picks an installed model, but on this CPU the call exceeded the 120 s timeout, so it fell back to the topic text. Use `--no-llm` to skip the wait. Kaggle tier (`kaggle_provider`, `scripts/kaggle/aurora_kaggle_worker.py`) is prepared, OFF, untested (no credentials).
 
 QA follow-ups applied: switchboard checks exact size/fps/duration for its own static renderer, deep mode adds black-frame sampling, autorun rejects a reel byte-identical to another topic's and records `engine_mode`. Still open: dHash placeholder list, job-record rule (SUCCESS vs mock/null GPU), non-silent audio check when `--music`/`--voiceover`, Kaggle fake-worker contract test.
+
+## Audio (2026-10-22)
+Test reel with tone + Piper voiceover (autorun, camera motion, NIM image): reel step 19.1 s total (audio processing ~14 s: Piper load+synth, loudnorm, ducking mix); silent/no-music path unchanged (no audio step). Voice: Piper en_US-lessac / hi_IN-pratham (CPU, offline). Coqui XTTS cannot run here: not installed, no Python 3.14 support, and assets/reference_voice.wav is missing.

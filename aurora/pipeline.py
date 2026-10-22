@@ -331,14 +331,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--width", type=int, default=1080)
     parser.add_argument("--height", type=int, default=1920)
     parser.add_argument("--audio", type=Path, default=None, help="optional audio file (silent track if omitted)")
+    parser.add_argument("--music", default=None, help="auto|<file>|none: processed music (loop/trim, fades, loudnorm)")
+    parser.add_argument("--voiceover-text", default=None, help="speak this text (Piper) over the music")
     parser.add_argument("--prompt-ledger", type=Path, default=None)
     args = parser.parse_args(argv)
     if args.prompt_ledger is not None:
         output_path = run_prompt_ledger(args.image_path, args.output_path, args.prompt_ledger)
     else:
+        audio = args.audio
+        if audio is None and (args.music or args.voiceover_text):
+            from aurora.audio import resolve_audio
+            from aurora.motion.providers.ffmpeg_kenburns import FFmpegKenBurns
+
+            audio, note = resolve_audio(FFmpegKenBurns().ffmpeg, args.duration_secs, Path("outputs") / "audio",
+                                        args.output_path.stem, music=args.music, prompt=args.image_path.stem,
+                                        voiceover_text=args.voiceover_text)
+            print(f"[audio] {note}")
         output_path = run(
             args.image_path, args.output_path, args.duration_secs,
-            fps=args.fps, width=args.width, height=args.height, audio_path=args.audio,
+            fps=args.fps, width=args.width, height=args.height, audio_path=audio,
         )
     print(output_path)
     return 0
