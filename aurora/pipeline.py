@@ -60,6 +60,17 @@ def _run_reel(
     logger = StructuredLogger(component="pipeline")
     provider = FFmpegKenBurns(logger=logger)
     logger.info("pipeline_start", provider=provider.name, mode=provider.mode.value, tier=provider.tier.value, duration_secs=duration_secs)
+    if motion == "google":  # google -> ai (Kaggle) -> camera
+        g_path = _google_motion_reel(image_path, output_path, duration_secs, fps, width, height, audio_path,
+                                     config or {}, provider.ffmpeg, logger)
+        if g_path:
+            report = validate_video(g_path, width, height, fps=fps, duration_secs=duration_secs,
+                                    require_audio=True, deep=True, input_path=image_path)
+            if report.ok:
+                return g_path
+            logger.error("output_validation_failed", provider="google_video", errors=report.errors)
+        logger.warning("google_motion_fallback", provider="kaggle_provider", reason="Google video unavailable, over budget or invalid")
+        motion = "ai"
     if motion == "ai":
         ai_path = _ai_motion_reel(image_path, output_path, duration_secs, fps, width, height, audio_path,
                                   config or {}, provider.ffmpeg, logger)
@@ -103,6 +114,37 @@ def _run_reel(
         cost_usd=result.cost_usd,
     )
     return result.output_path
+
+
+def _google_motion_reel(image_path, output_path, duration_secs, fps, width, height, audio_path, config, ffmpeg, logger):
+    """Google Veo/Omni clip(s) fitted to the reel. Returns the reel path, or None to fall back (never raises)."""
+    try:
+        import math
+
+        from aurora.monitoring.media_validator import _ffprobe
+        from aurora.motion.providers.ffmpeg_kenburns import audio_args
+        from aurora.motion.providers.google_video_provider import GoogleVideoProvider
+
+        res = GoogleVideoProvider(config).generate(image_path, duration=math.ceil(duration_secs),
+                                                   caption_text=config.get("_motion_prompt", ""), job_id=logger.job_id)
+        clip = res.output_path
+        has_audio = any(s.get("codec_type") == "audio" for s in _ffprobe(Path(clip)).get("streams", []))
+        vf = (f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,fps={fps},"
+              "tpad=stop_mode=clone:stop_duration=6,format=yuv420p")
+        if audio_path or not has_audio:  # our music/voice mix wins; silent track if there is nothing
+            audio_in, audio_out = audio_args(audio_path)
+            maps = ["-map", "0:v", "-map", "1:a"]
+        else:  # keep the model's native audio
+            audio_in, maps = [], ["-map", "0:v", "-map", "0:a"]
+            audio_out = ["-af", "apad", "-c:a", "aac", "-b:a", "128k", "-shortest"]
+        subprocess.run([ffmpeg, "-y", "-i", str(clip), *audio_in, *maps, "-vf", vf, "-t", str(duration_secs), "-r", str(fps),
+                        "-c:v", "libx264", "-crf", "18", "-preset", "medium", "-movflags", "+faststart", *audio_out,
+                        str(output_path)], capture_output=True, text=True, timeout=600, check=True)
+        logger.info("google_motion_complete", provider="google_video", cost_usd=res.context.get("cost_usd"))
+        return Path(output_path)
+    except Exception as exc:  # noqa: BLE001 - includes GoogleVideoUnavailable and BudgetExceeded
+        logger.error("google_motion_failed", provider="google_video", error=str(exc))
+        return None
 
 
 def _ai_motion_reel(image_path, output_path, duration_secs, fps, width, height, audio_path, config, ffmpeg, logger):

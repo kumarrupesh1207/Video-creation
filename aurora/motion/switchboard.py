@@ -35,7 +35,8 @@ class MotionSwitchboard:
             "framepack_provider": ("aurora.motion.providers.framepack_provider", "FramepackProvider"),
             "svdxt_provider": ("aurora.motion.providers.svdxt_provider", "SVDXTProvider"),
             "wan2gp_provider": ("aurora.motion.providers.wan2gp_provider", "Wan2GPProvider"),
-            "kaggle_provider": ("aurora.motion.providers.kaggle_provider", "KaggleProvider"),  # OFF (config)
+            "kaggle_provider": ("aurora.motion.providers.kaggle_provider", "KaggleProvider"),
+            "google_video": ("aurora.motion.providers.google_video_provider", "GoogleVideoProvider"),  # paid, budget-capped  # OFF (config)
         }
         self._provider_cache: dict[str, object] = {}
         self.telemetry = TelemetryCollector()

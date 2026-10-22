@@ -38,6 +38,11 @@ audio:                             # voiceover engines: see assets/voices/README
   rate: "+0%"                      # edge speaking rate, e.g. "-10%"
   pitch: "+0Hz"
 
+research:                          # aurora/research.py (Gemini text, free tier; key from AI Studio)
+  model: "gemini-3.1-flash-lite"    # free-tier text model id; change here if Google retires it
+  grounding: false                 # Google Search grounding is paid-only
+  api_key_env: "GEMINI_API_KEY"
+
 motion:
   liveportrait:
     enabled: true
@@ -75,6 +80,16 @@ motion:
     wan2gp:
       runtime_cmd: ""
       output_dir: "outputs/wan2gp_worker_runs"
+    google:                          # PAID tier (Veo / Gemini Omni). OFF; needs GEMINI_API_KEY + billing + a budget
+      enabled: false
+      model: "gemini-omni-1.1-flash"  # or a veo-* id; preview ids shut down 2026-10-22, check ai.google.dev/gemini-api/docs
+      resolution: "720p"
+      generate_audio: true
+      clip_seconds: 8
+      rate_usd_per_sec: 0.10         # estimate used for the budget guard (Lite 0.05, Fast/Omni 0.10, standard 0.40)
+      monthly_budget_inr: 0          # 0 = refuse every call; e.g. 500 allows about Rs 500/month
+      usd_inr: 85
+      api_key_env: "GEMINI_API_KEY"
     kaggle:                          # free-GPU tier ("AI motion"); motion_mode "kaggle_provider"; falls back to local FFmpeg
       enabled: true                  # needs KAGGLE_USERNAME/KAGGLE_KEY in .env
       timeout_sec: 3600
