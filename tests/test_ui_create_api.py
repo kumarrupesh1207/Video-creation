@@ -201,3 +201,23 @@ def test_publish_endpoints_veto_restore_reschedule(monkeypatch):
     assert e.value.status_code == 400
     assert server.publish_health()["channels"]["test"]["token"] in (True, False)
     tmp.cleanup()
+
+
+def test_approvals_and_comment_endpoints(monkeypatch):
+    import aurora.autopilot as ap
+    import aurora.publish.analytics as an
+    import aurora.publish.comments as cm
+
+    monkeypatch.setattr(ap, "approvals_summary", lambda q, ch=None: {"queue": [], "comment_drafts": {"main": [{"id": "c1"}]}, "weekly_report": {}})
+    assert server.approvals("main")["comment_drafts"]["main"][0]["id"] == "c1"
+    seen = {}
+    monkeypatch.setattr(cm, "approve", lambda ch, cid, reply=None: seen.update(ch=ch, cid=cid, reply=reply) or {"status": "approved"})
+    monkeypatch.setattr(cm, "reject", lambda ch, cid: (_ for _ in ()).throw(ValueError("no such comment")))
+    assert server.comment_approve("main", "c1", server.CommentApproveRequest(reply="  thanks!  "))["status"] == "success"
+    assert seen == {"ch": "main", "cid": "c1", "reply": "thanks!"}
+    with pytest.raises(server.HTTPException) as e:
+        server.comment_reject("main", "zzz")
+    assert e.value.status_code == 400
+    monkeypatch.setattr(an, "latest_report", lambda ch: {"views": 5})
+    assert server.report_latest("main") == {"report": {"views": 5}}
+

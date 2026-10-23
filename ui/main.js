@@ -24,6 +24,7 @@ function showTab(name) {
   if (name === 'gallery') loadGallery();
   if (name === 'system') loadSystem();
   if (name === 'queue') loadPublish();
+  if (name === 'approvals') loadApprovals();
   window.scrollTo(0, 0);
 }
 document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -402,11 +403,11 @@ async function loadPublish() {
   } catch { /* publish module unavailable: keep the section hidden */ }
 }
 
-$('pubList').addEventListener('click', async (e) => {
+async function pubClick(e) {
   const b = e.target.closest('button[data-act]');
   if (!b) return;
   const { act, id } = b.dataset;
-  if (act === 'resched') { pubOpen.has(id) ? pubOpen.delete(id) : pubOpen.add(id); return loadPublish(); }
+  if (act === 'resched') { pubOpen.has(id) ? pubOpen.delete(id) : pubOpen.add(id); loadPublish(); if (state.tab === 'approvals') loadApprovals(); return; }
   let path = `/publish/${encodeURIComponent(id)}/${act}`, body = null;
   if (act === 'rsset') {
     const v = $(`rs-${id}`)?.value;
@@ -419,8 +420,49 @@ $('pubList').addEventListener('click', async (e) => {
   const res = await fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
   if (!res.ok) { const d = await res.json().catch(() => ({})); toast(d.detail || 'Action failed.'); }
   loadPublish();
-});
+  loadPublish();
+  if (state.tab === 'approvals') loadApprovals();
+}
+$('pubList').addEventListener('click', pubClick);
+$('apVideos').addEventListener('click', pubClick);
 
 loadPublish();
 setInterval(() => { if (state.tab === 'queue') loadPublish(); }, 10000);
 setInterval(() => document.querySelectorAll('.cd').forEach((el) => { el.textContent = countdown(el.dataset.at); }), 1000);
+
+// ─── Approvals (videos waiting, comment replies, weekly report) ──
+const WAITING = ['scheduled', 'pending_approval', 'vetoed'];
+async function loadApprovals() {
+  try {
+    const d = await getJson('/approvals');
+    const vids = (d.queue || []).filter((i) => WAITING.includes(i.status));
+    pubItems = vids;
+    $('apVideos').innerHTML = vids.map(pubCard).join('') || '<p class="empty">No videos waiting.</p>';
+    const drafts = Object.entries(d.comment_drafts || {}).flatMap(([ch, list]) => list.map((c) => ({ ...c, channel: ch })));
+    if (!document.activeElement?.closest?.('#apComments textarea')) {
+      $('apComments').innerHTML = drafts.map((c) => `<div class="pub cm" data-ch="${esc(c.channel)}" data-id="${esc(c.id)}">
+        <div class="who">${esc(c.author || 'viewer')} · ${esc(c.channel)}</div><blockquote>${esc(c.text)}</blockquote>
+        <textarea maxlength="500" aria-label="Reply draft">${esc(c.reply || '')}</textarea>
+        <div class="acts"><button class="btn ok" data-cm="approve" type="button">Send</button><button class="btn" data-cm="reject" type="button">Skip</button></div></div>`).join('') || '<p class="empty">No comments need a reply.</p>';
+    }
+    const reps = Object.entries(d.weekly_report || {}).filter(([, r]) => r);
+    $('apReport').innerHTML = reps.map(([ch, r]) => `<div class="pub"><b>${esc(ch)}</b><div class="nums">
+      <div><b>${r.views ?? '–'}</b><span>views</span></div><div><b>${r.watch_minutes ?? '–'}</b><span>watch minutes</span></div>
+      <div><b>${r.avg_view_pct ?? '–'}%</b><span>avg viewed</span></div><div><b>${r.subs ?? '–'}</b><span>subscribers</span></div></div>
+      ${(r.top || []).slice(0, 3).map((x, i) => `<div class="when">${i + 1}. ${esc(typeof x === 'string' ? x : x.title || x.video_id || '')}${x.views != null ? ` · ${x.views} views` : ''}</div>`).join('')}
+      ${r.insight ? `<p class="hint">${esc(r.insight)}</p>` : ''}</div>`).join('') || '<p class="empty">No weekly report yet.</p>';
+    $('apBadge').hidden = !(vids.some((i) => i.status === 'pending_approval') || drafts.length);
+  } catch { /* publish module unavailable */ }
+}
+$('apComments').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-cm]');
+  if (!b) return;
+  const card = b.closest('.cm');
+  b.disabled = true;
+  const body = b.dataset.cm === 'approve' ? JSON.stringify({ reply: card.querySelector('textarea').value }) : null;
+  const res = await fetch(`${API}/comments/${encodeURIComponent(card.dataset.ch)}/${encodeURIComponent(card.dataset.id)}/${b.dataset.cm}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); toast(d.detail || 'Action failed.'); }
+  loadApprovals();
+});
+loadApprovals();
+setInterval(() => { if (state.tab === 'approvals') loadApprovals(); }, 15000);

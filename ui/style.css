@@ -138,3 +138,12 @@ details summary { cursor: pointer; min-height: 32px; }
 .tag.failed, .tag.vetoed { color: var(--bad); border-color: var(--bad); }
 .banner { background: #2a1118; border: 1px solid var(--bad); color: #ffb4c0; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; font-size: 13px; }
 .pub input[type=datetime-local] { margin-top: 0; }
+
+.tabbar button { font-size: 12px; padding: 0 2px; }
+.cm textarea { margin-top: 0; min-height: 70px; }
+.cm .who { font-size: 13px; color: var(--dim); }
+.cm blockquote { border-left: 3px solid var(--line); padding-left: 10px; color: var(--text); overflow-wrap: anywhere; }
+.nums { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.nums div { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.nums b { display: block; font-size: 20px; }
+.nums span { font-size: 12px; color: var(--dim); }

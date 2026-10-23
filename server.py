@@ -1349,6 +1349,44 @@ def publish_health():
     return {"channels": channels}
 
 
+# ─── Approvals (videos waiting, comment reply drafts, weekly report) ──
+@app.get("/api/approvals")
+def approvals(channel: str | None = None):
+    from aurora.autopilot import approvals_summary
+    from aurora.publish.queue import PublishQueue
+    data = approvals_summary(PublishQueue(), [channel] if channel else None)
+    data["queue"] = [_publish_item(i) for i in data.get("queue", [])]
+    return data
+
+
+class CommentApproveRequest(BaseModel):
+    reply: str | None = Field(None, max_length=500)
+
+
+def _comment_action(fn_name: str, channel: str, comment_id: str, *args):
+    from aurora.publish import comments
+    try:
+        return {"status": "success", "comment": getattr(comments, fn_name)(channel, comment_id, *args)}
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "Not allowed in the current state.")
+
+
+@app.post("/api/comments/{channel}/{comment_id}/approve")
+def comment_approve(channel: str, comment_id: str, req: CommentApproveRequest):
+    return _comment_action("approve", channel, comment_id, (req.reply or "").strip() or None)
+
+
+@app.post("/api/comments/{channel}/{comment_id}/reject")
+def comment_reject(channel: str, comment_id: str):
+    return _comment_action("reject", channel, comment_id)
+
+
+@app.get("/api/reports/{channel}/latest")
+def report_latest(channel: str):
+    from aurora.publish.analytics import latest_report
+    return {"report": latest_report(channel)}
+
+
 def _gpu_info():
     exe = shutil.which("nvidia-smi")
     if not exe:

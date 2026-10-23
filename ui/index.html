@@ -165,6 +165,17 @@
       <details class="card"><summary>Live logs</summary><pre id="logs" class="logs"></pre></details>
     </section>
 
+    <!-- APPROVALS -->
+    <section id="tab-approvals" class="tab">
+      <h2>Videos waiting</h2>
+      <div id="apVideos"></div>
+      <h2>Comment replies</h2>
+      <p class="hint">Nothing is posted until you tap Send.</p>
+      <div id="apComments"></div>
+      <h2>Weekly report</h2>
+      <div id="apReport"></div>
+    </section>
+
     <!-- GALLERY -->
     <section id="tab-gallery" class="tab">
       <div class="bar"><h2>Gallery</h2><button id="openFolder" class="btn ghost small" type="button">Open folder</button></div>
@@ -182,6 +193,7 @@
   <nav class="tabbar">
     <button data-tab="create" class="on">Create</button>
     <button data-tab="queue">Queue<i id="qBadge" hidden></i></button>
+    <button data-tab="approvals">Approve<i id="apBadge" hidden></i></button>
     <button data-tab="gallery">Gallery</button>
     <button data-tab="system">System</button>
   </nav>
