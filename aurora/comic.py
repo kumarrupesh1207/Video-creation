@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from contextlib import contextmanager
 import shutil
 import subprocess
 from datetime import date, datetime
@@ -25,6 +26,20 @@ from aurora.monitoring.media_validator import _ffprobe, validate_video
 
 ROOT = Path(__file__).resolve().parents[1]
 W, H, FPS, XF, PAD = 1080, 1920, 24, 0.4, 0.4
+
+
+@contextmanager
+def frame(w: int, h: int):
+    """Render at another frame size (e.g. `with comic.frame(1920, 1080):` for 16:9 episodes); restores the portrait defaults."""
+    global W, H
+    old = (W, H)
+    prev = comic_layout.set_frame(w, h)
+    W, H = int(w), int(h)
+    try:
+        yield
+    finally:
+        W, H = old
+        comic_layout.restore_frame(prev)
 COVER_S, END_S = 2.4, 3.0
 MAX_NARRATION_WORDS = 12  # keeps a 6-panel reel at ~28-34 s
 PANEL_MIN_S = 4.4  # hold at least this long per panel (voice is never slowed; the rest is a pause)
@@ -179,7 +194,7 @@ def _overlay_free(path: Path, narration: str, bubble: str, title: str, subtitle:
     S = comic_layout.SAFE
     blocked, narr_box = [], None
     if narration:
-        (f, lines, lh, x0, y0, bw, bh), cost = _place_text(d, narration, occ, blocked, 54, 30, (880, 700, 560, 440, 340), 28, 22, head_zone)
+        (f, lines, lh, x0, y0, bw, bh), cost = _place_text(d, narration, occ, blocked, 54, 30, (1100, 880, 700, 560, 440, 340), 28, 22, head_zone)
         if cost > CLEAN_COST:  # no clean region: slim semi-transparent strip pinned to the very top edge, at most 2 lines
             for size in range(46, 29, -2):
                 f = _font(size, narration)
@@ -198,7 +213,7 @@ def _overlay_free(path: Path, narration: str, bubble: str, title: str, subtitle:
                 d.text((x0 + 28, y0 + 22 + k * lh), l, font=f, fill=(20, 20, 20, 255))
         blocked.append(narr_box)
     if bubble:
-        placed = _place_text(d, bubble, occ, blocked, 54, 30, (760, 600, 480, 380, 300), 46, 28, head_zone)
+        placed = _place_text(d, bubble, occ, blocked, 54, 30, (900, 760, 600, 480, 380, 300), 46, 28, head_zone)
         (f, lines, lh, x0, y0, bw, bh), cost = placed
         if cost > CLEAN_COST:
             S0 = comic_layout.SAFE
@@ -242,7 +257,7 @@ def _overlay_free(path: Path, narration: str, bubble: str, title: str, subtitle:
             d.text((x0 + (bw - d.textlength(l, font=f)) / 2, y0 + 28 + k * lh), l, font=f, fill=(20, 20, 20, 255))
     if title:  # cover / end card over the (dimmed) art, centred in the safe area
         f, lines, lh = fit_text(d, title, S[2] - S[0] - 20, 400, 110, 56)
-        y = 700
+        y = int(H * 0.36)
         for l in lines:
             d.text((S[0] + (S[2] - S[0] - d.textlength(l, font=f)) / 2, y), l, font=f, fill=(255, 255, 255, 255), stroke_width=7, stroke_fill=(0, 0, 0, 255))
             y += lh
@@ -353,15 +368,18 @@ def _duration(path: Path) -> float:
 
 
 def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, work: Path, voice: str = "en-US-AvaNeural",
-                 music: bool = True, language: str = "English", layout_aware: bool = True, layout: dict | None = None) -> dict:
-    """Panels (+images) -> final mp4. Returns {"seconds", "voice_notes", "music"}."""
+                 music: bool = True, language: str = "English", layout_aware: bool = True, layout: dict | None = None,
+                 cover: bool = True, end_card="default", music_text: str = "epic anime orchestral battle hero",
+                 max_words: int | None = None, cover_label: str = "PART") -> dict:
+    """Panels (+images) -> final mp4. Returns {"seconds", "voice_notes", "music", "panel_times"}.
+    cover=False drops the title card; end_card=None drops the end card, a (title, subtitle) tuple customises it."""
     work.mkdir(parents=True, exist_ok=True)
     panels, series = comic["panels"], comic["series"]
     part = series["part"]
     L = comic_layout.Layout.from_cfg(layout)
     clips: list[tuple[Path, float]] = []  # (clip, seconds)
     voices: list[tuple[Path | None, float]] = []  # (voice file, start seconds)
-    notes, t = [], 0.0
+    notes, t, panel_times = [], 0.0, []
 
     def fitted(img, name):  # bands mode only: art-window-shaped crop (full-bleed uses the whole image)
         if not L.bands:
@@ -372,17 +390,19 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
             notes.append(f"art crop skipped for {name}: {str(exc)[:60]}")
             return Path(img)
 
-    cover = render_clip(ffmpeg, fitted(images[0], "cover"), make_overlay(work / "ov_cover.png", title=series["title"], subtitle=f"PART {part}", layout=L),
-                        COVER_S, "zoom_in", work / "clip_cover.mp4", dim=True, layout=L)
-    clips.append((cover, COVER_S))
-    voices.append((None, 0.0))
-    t += COVER_S - XF
+    if cover:
+        cover_clip = render_clip(ffmpeg, fitted(images[0], "cover"), make_overlay(work / "ov_cover.png", title=series["title"], subtitle=f"{cover_label} {part}", layout=L),
+                                 COVER_S, "zoom_in", work / "clip_cover.mp4", dim=True, layout=L)
+        clips.append((cover_clip, COVER_S))
+        voices.append((None, 0.0))
+        t += COVER_S - XF
     for i, (p, img) in enumerate(zip(panels, images)):
-        p = {**p, "narration": trim_words(p["narration"])}
+        p = {**p, "narration": trim_words(p["narration"], max_words or MAX_NARRATION_WORDS)}
         vfile, note = synthesize_voiceover(p["narration"], work / f"voice_{i}.wav",
                                            options={"voice_engine": "edge", "voice": voice, "language": "hi" if language.lower().startswith("hi") else "en"})
         notes.append(note)
-        secs = max((_duration(vfile) if vfile else 3.0) + PAD, PANEL_MIN_S)
+        vdur = _duration(vfile) if vfile else 0.0
+        secs = max((vdur if vfile else 3.0) + PAD, PANEL_MIN_S)
         motion = "punch" if p.get("action") else MOTIONS[i % len(MOTIONS)]
         sx, occ, head, head_zone = None, None, None, None
         if layout_aware and not L.bands:  # full-bleed: where are the characters over the whole move? (mask + faces)
@@ -404,11 +424,15 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
         ov = make_overlay(work / f"ov_{i}.png", narration=p["narration"], bubble=p.get("bubble", ""), speaker_x=sx, layout=L, occ=occ, head=head, head_zone=head_zone)
         clips.append((render_clip(ffmpeg, fitted(img, str(i)), ov, secs, motion, work / f"clip_{i}.mp4", layout=L), secs))
         voices.append((vfile, t + 0.05))
+        panel_times.append({"i": i, "start": round(t, 2), "voice_start": round(t + 0.05, 2), "voice_end": round(t + 0.05 + vdur, 2),
+                            "end": round(t + secs - XF, 2), "narration": p["narration"]})
         t += secs - XF
     final = part >= int(series.get("total_parts", 1))
-    end_ov = make_overlay(work / "ov_end.png", title="The End" if final else "To be continued...",
-                          subtitle="" if final else f"Part {part + 1} coming soon", layout=L)
-    clips.append((render_clip(ffmpeg, fitted(images[-1], "end"), end_ov, END_S, "zoom_out", work / "clip_end.mp4", dim=True, layout=L), END_S))
+    if end_card is not None:
+        e_title, e_sub = end_card if isinstance(end_card, (tuple, list)) else (
+            "The End" if final else "To be continued...", "" if final else f"Part {part + 1} coming soon")
+        end_ov = make_overlay(work / "ov_end.png", title=e_title, subtitle=e_sub, layout=L)
+        clips.append((render_clip(ffmpeg, fitted(images[-1], "end"), end_ov, END_S, "zoom_out", work / "clip_end.mp4", dim=True, layout=L), END_S))
     total = sum(s for _, s in clips) - XF * (len(clips) - 1)
 
     # video: xfade chain; audio: per-panel voices placed on the timeline, music ducked under them
@@ -425,7 +449,7 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
     music_wav = None
     if music:
         try:
-            music_wav = generate_music("epic anime orchestral battle hero", min(total, 30), work / "music.wav")
+            music_wav = generate_music(music_text, min(total, 30), work / "music.wav")
         except Exception as exc:  # noqa: BLE001 - music is optional
             notes.append(f"music skipped: {str(exc)[:80]}")
     audio = None
@@ -449,7 +473,7 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
             "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-maxrate", "6M", "-bufsize", "12M", "-pix_fmt", "yuv420p", "-af", "apad", "-c:a", "aac", "-b:a", "160k",
             "-movflags", "+faststart", "-shortest", str(out_mp4)]
     _run(cmd, timeout=1800)
-    return {"seconds": round(total, 2), "voice_notes": notes, "music": bool(music_wav)}
+    return {"seconds": round(total, 2), "voice_notes": notes, "music": bool(music_wav), "panel_times": panel_times}
 
 
 def _comfy_up(cfg: dict) -> bool:

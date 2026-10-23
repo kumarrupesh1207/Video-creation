@@ -24,6 +24,8 @@ Runs on a CPU-only Windows PC (Ryzen 5 5600G, 16 GB, no NVIDIA GPU). History/sta
 - Reels from topics: `python -m aurora.autorun --topics topics.txt [--motion camera|ai] [--voiceover] [--music auto]`
 - Autopilot: `python -m aurora.autopilot render --channel main --limit 1`, `status`, `veto <id>`,
   `publish-due --dry-run`. YouTube consent: `python -m aurora.publish.youtube auth --channel <name>`.
+- Long episode (16:9, ~45 panels, 3 acts) + Shorts: `python -m aurora.episode --channel main [--shorts 4]` — resumable: generates panels under the
+  daily NIM cap (25/day, ComfyUI off), saves progress in `outputs/episodes/<slug>/`, renders when complete. Never uploads.
 - Offline voice (XTTS) setup: `scripts/setup_tts.ps1` (separate `.venv-tts`, Python 3.11).
 - Secrets live in `.env` (see `.env.example`); never print or commit them.
 
@@ -37,6 +39,7 @@ Runs on a CPU-only Windows PC (Ryzen 5 5600G, 16 GB, no NVIDIA GPU). History/sta
 - Supervisor must run detached (WMI), never as a child of the launching shell (98c7c37).
 - Kaggle chained segments run in child processes of the worker; in-process loops leak GPU/RAM (ae7cf81).
 - When mixing voice over music, pad the voice (`apad`) before `sidechaincompress` or the music cuts out (2a57670).
+- Episode panels are never regenerated and the daily NIM cap is never exceeded; a paused episode resumes with the same command (`aurora/episode.py`).
 - Comic panel prompts forbid image-drawn text; final encodes stay phone-sized (~≤10 Mbps) (56f21ce).
 - Write files as UTF-8 with the Write/Edit tools — PowerShell `>`/Out-File wrote UTF-16 NULs into a test (daf2fc0).
 - Tokens/client secrets live in git-ignored `outputs/tokens/` (c16483c).

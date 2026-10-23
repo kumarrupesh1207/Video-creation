@@ -313,12 +313,13 @@ def head_point(occ, faces_frame: list[Box] | None = None, head_zone=None) -> tup
     return int(xs.mean() * CELL), int(ys.mean() * CELL)
 
 
-def best_spot(occ, w_px: int, h_px: int, blocked: list[Box] = (), safe=SAFE, head=None) -> tuple[int, int, float]:
+def best_spot(occ, w_px: int, h_px: int, blocked: list[Box] = (), safe=None, head=None) -> tuple[int, int, float]:
     """Top-left (x, y) px inside the safe area minimising overlap with occupied cells (any head-zone overlap is worse than any body overlap).
     Zero overlap wins; ties prefer the top, then the sides. Returns (x, y, cost) with cost = occupied fraction of the box (head/upper body weighted 3x)."""
     import cv2
     import numpy as np
 
+    safe = safe or SAFE
     o = occ.copy()
     blk = np.zeros_like(occ)
     for b in blocked:  # another text box: a HARD no-go like the head zone (it may sit on body cells, so track it separately)
@@ -341,3 +342,59 @@ def best_spot(occ, w_px: int, h_px: int, blocked: list[Box] = (), safe=SAFE, hea
             if key < best_key:
                 best_key, best = key, (cx * CELL, cy * CELL, float(cost))
     return best
+
+
+def set_frame(w: int, h: int) -> tuple:
+    """Switch the module to another frame size (e.g. 1920x1080 episodes); returns the previous state for restoring.
+    Safe area: portrait keeps the platform-UI margins (right 12%, bottom 18%); landscape keeps 4% sides and 10% at the bottom."""
+    global W, H, CANVAS_W, CANVAS_H, SAFE
+    old = (W, H, CANVAS_W, CANVAS_H, SAFE)
+    W, H = int(w), int(h)
+    CANVAS_W, CANVAS_H = int(W * 1.5), int(H * 1.5)
+    SAFE = (int(W * 0.037), int(H * 0.02), int(W * 0.88), int(H * 0.82)) if H > W else (int(W * 0.04), int(H * 0.04), int(W * 0.96), int(H * 0.90))
+    return old
+
+
+def restore_frame(old: tuple) -> None:
+    global W, H, CANVAS_W, CANVAS_H, SAFE
+    W, H, CANVAS_W, CANVAS_H, SAFE = old
+
+
+def subject_x(image_path: Path, faces: list[Box] | None = None) -> float:
+    """x (image px) of the subject: the largest face, else the mask's centre of mass in the upper 70%, else the image centre."""
+    from PIL import Image
+
+    with Image.open(image_path) as im:
+        iw, ih = im.size
+    faces = detect_faces(Path(image_path)) if faces is None else faces
+    real = [f for f in faces if (f[2] - f[0]) < iw * 0.9]  # the "no face found" fallback box can span the whole frame
+    if real:
+        f = max(real, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+        return (f[0] + f[2]) / 2
+    mask = foreground_mask(Path(image_path))
+    if mask is not None and mask.sum() > 0:
+        import numpy as np
+
+        cols = mask[: int(mask.shape[0] * 0.7)].sum(axis=0)
+        if cols.sum() > 0:
+            return float((cols * np.arange(len(cols))).sum() / cols.sum() * iw / mask.shape[1])
+    return iw / 2
+
+
+def portrait_crop(image_path: Path, out_path: Path, win_w: int = 1080, win_h: int = 1920, faces: list[Box] | None = None) -> Path:
+    """Crop to the 9:16 window around the SUBJECT (face / mask), for cutting vertical Shorts out of 16:9 episode panels."""
+    from PIL import Image
+
+    with Image.open(image_path) as im:
+        im = im.convert("RGB")
+        iw, ih = im.size
+        want = win_w / win_h
+        if abs(iw / ih - want) / want < 0.03:
+            im.save(out_path)
+            return out_path
+        if iw / ih < want:  # taller than the window: vertical window by subject
+            return art_crop(image_path, out_path, win_w, win_h)
+        cw = int(round(ih * want))
+        x0 = int(min(max(subject_x(image_path, faces) - cw / 2, 0), iw - cw))
+        im.crop((x0, 0, x0 + cw, ih)).save(out_path)
+    return out_path

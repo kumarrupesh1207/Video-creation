@@ -193,7 +193,12 @@ def _cut(text: str, n: int) -> str:
     return (cut[:i] if i > n // 2 else cut).rstrip(" ,;")
 
 
-def panel_prompt(panel: dict, sheet: list[dict], max_chars: int = MAX_PROMPT_CHARS) -> str:
+PROMPT_SUFFIX_WIDE = (", composition: widescreen 16:9 frame, character off-centre with clear empty background space on one side (room for text), "
+                      "single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, "
+                      "no speech bubbles, wordless, vibrant colors, clean lineart, original characters")
+
+
+def panel_prompt(panel: dict, sheet: list[dict], max_chars: int = MAX_PROMPT_CHARS, wide: bool = False) -> str:
     """Final image prompt: style + the FIXED character descriptions for this panel + shot + scene + composition/no-text suffix.
     Kept under max_chars (NIM limit): character descriptions and the scene are shortened first; the suffix and shot never are."""
     names = {n.lower() for n in panel.get("characters", [])}
@@ -202,7 +207,7 @@ def panel_prompt(panel: dict, sheet: list[dict], max_chars: int = MAX_PROMPT_CHA
     shot = f", {panel.get('shot', 'medium')} shot, "
     for desc_n, scene_n in ((10_000, 10_000), (170, 260), (120, 200), (80, 150), (50, 100)):
         who = ", ".join(f"{c['name']}: {_cut(c['description'], desc_n)}" for c in chars)
-        text = head + who + shot + _cut(panel["image_prompt"], scene_n) + PROMPT_SUFFIX
+        text = head + who + shot + _cut(panel["image_prompt"], scene_n) + (PROMPT_SUFFIX_WIDE if wide else PROMPT_SUFFIX)
         if len(text) <= max_chars:
             return nim_safe(text)
     return nim_safe(text[:max_chars])
@@ -296,3 +301,169 @@ def research_comic(channel: str, premise: str, language: str = "English", panels
         fb["cta"] = f"Part {part + 1} coming soon"
     return {"comic": Comic.model_validate(fb).model_dump(),
             "source": "topic_fallback", "note": reason}
+
+
+# ----------------------------------------------------------------------------- long episodes (16:9, ~4-5 min, ~45 panels, 3 acts)
+class ActOutline(BaseModel):
+    name: str
+    summary: str
+
+
+class EpisodeOutline(BaseModel):
+    title: str = Field(min_length=3)
+    hook: str = Field(min_length=3)
+    description: str
+    keywords: list[str]
+    hashtags: list[str]
+    series: SeriesInfo
+    character_sheet: list[Character] = Field(min_length=1)
+    acts: list[ActOutline] = Field(min_length=3, max_length=3)
+    cta: str = ""
+
+
+class ActPanels(BaseModel):
+    panels: list[Panel] = Field(min_length=6, max_length=24)
+
+
+class Act(BaseModel):
+    name: str
+    summary: str
+    panels: list[Panel]
+
+
+class Episode(BaseModel):
+    title: str
+    hook: str
+    description: str
+    keywords: list[str]
+    hashtags: list[str]
+    series: SeriesInfo
+    character_sheet: list[Character]
+    acts: list[Act] = Field(min_length=3, max_length=3)
+    cta: str = ""
+
+
+ACT_SPLIT = (0.31, 0.38, 0.31)  # act 1 setup / act 2 conflict / act 3 climax + resolution
+EP_OUTLINE_PROMPT = (
+    "You write ORIGINAL anime-style YouTube story episodes (16:9, about 4-5 minutes, never existing franchises). Language of titles, "
+    "narration and bubbles: {language}. Premise: {premise}. {cast}{learn}Plan Episode {ep} as a complete story in exactly 3 acts "
+    "(setup, conflict, climax and resolution). Return: title (curiosity-driven, <= 70 chars, no clickbait lies), hook (first line "
+    "that grabs in 3 seconds), description (3 short paragraphs: hook, recap, what to expect), keywords (8-12 search phrases people type), "
+    "hashtags (5-8), series {{title, part (= episode number), total_parts, recap}}, character_sheet (name + fixed visual description of hair, "
+    "eyes, outfit, colours; style '{style}'), acts (3 x {{name, summary of what happens}}), cta. Safe for all audiences."
+)
+EP_ACT_PROMPT = (
+    "Continue the ORIGINAL anime episode '{title}' (language {language}). Story outline: {outline}. {cast}Write ACT {k} ('{act_name}': {act_summary}) as "
+    "exactly {n} panels. Previous act ended with: {previous}. Each panel: shot close-up|wide|medium|action, characters present (names exactly "
+    "as in the character sheet: {names}), image_prompt = the scene only in English (no text, no lettering, single scene), narration of 12-16 words "
+    "in {language}, optional short bubble line, sfx/mood tag, action true for fights/chases. Keep pacing varied and end the act on a beat that pulls "
+    "into the next. Safe for all audiences."
+)
+
+
+def _episode_fallback(channel: str, premise: str, n_panels: int, cast: list[dict], ep_no: int) -> dict:
+    """Deterministic 3-act template (no API): a valid Episode built from the locked cast; flagged topic_fallback by the caller."""
+    sheet = [{"name": m["name"], "description": m["description"], "style": COMIC_STYLE} for m in cast] or [
+        {"name": "Kaito", "style": COMIC_STYLE, "description": "young man, spiky silver hair, bright blue eyes, long black coat with red scarf"}]
+    hero = sheet[0]["name"]
+    beats = [
+        ("wide", "{h} walking alone through ruins under a huge pale moon", "{h} had been walking for days, and the silence was getting heavier.", False),
+        ("close-up", "close-up of {h}'s determined face lit by faint blue light", "Something deep inside him refused to turn back.", False),
+        ("medium", "{h} crossing a broken stone bridge over a glowing abyss", "Every step on that old bridge sounded like a warning.", False),
+        ("action", "{h} dodging a shockwave, debris flying, dynamic angle", "Then the ground shook and the ancient defenses woke up.", True),
+        ("close-up", "{h} breathing hard, sweat on his brow, eyes sharp", "He was tired, but fear was not going to win today.", False),
+        ("wide", "an enormous shadowy guardian rising from the ruins", "Something huge was rising out of the dust ahead of him.", False),
+    ]
+    sizes = [round(n_panels * f) for f in ACT_SPLIT]
+    sizes[2] = n_panels - sizes[0] - sizes[1]
+    names = ["Act 1: The Silence", "Act 2: The Awakening", "Act 3: The Light"]
+    acts, k = [], 0
+    for ai, size in enumerate(sizes):
+        panels = []
+        for j in range(size):
+            shot, img, nar, act = beats[(k + j) % len(beats)]
+            panels.append(Panel(shot=shot, characters=[hero], image_prompt=img.format(h=hero), narration=nar.format(h=hero), action=act).model_dump())
+        acts.append({"name": names[ai], "summary": f"{hero} " + ["sets out", "faces the guardian", "finds the light"][ai] + ".", "panels": panels})
+        k += size
+    title = premise.split(".")[0][:60] or "The Last Light"
+    return {"title": title, "hook": f"{hero} had one chance left.", "description": f"{premise}\n\nAn original anime story episode.",
+            "keywords": ["anime story", "original anime", "motion comic", "fantasy adventure", hero.lower()],
+            "hashtags": ["#anime", "#animestory", "#originalstory"],
+            "series": {"title": title, "part": ep_no, "total_parts": ep_no, "recap": ""}, "character_sheet": sheet, "acts": acts,
+            "cta": "Subscribe for the next episode."}
+
+
+def _call_json(client, model: str, contents: str, schema, retries: int = 1):
+    """generate_content -> validated pydantic object; one retry on invalid JSON."""
+    from google.genai import types
+
+    last = None
+    for _ in range(retries + 1):
+        try:
+            resp = client.models.generate_content(model=model, contents=contents, config=types.GenerateContentConfig(
+                response_mime_type="application/json", response_schema=schema))
+            return schema.model_validate_json(resp.text)
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+    raise last
+
+
+def research_episode(channel: str, premise: str, language: str = "English", n_panels: int = 45, cfg: dict | None = None, client=None,
+                     series_dir: Path = SERIES_DIR, cast_root: Path | None = None, analytics: dict | None = None) -> dict:
+    """A 16:9 long episode: {"episode": {...validated Episode...}, "source": "gemini|topic_fallback", "note": str}.
+    analytics (optional, from the Publisher's weekly report): {"top_titles": [...], "top_keywords": [...]} -> "what worked" in the prompt."""
+    cfg = cfg if cfg is not None else _settings()
+    rcfg = cfg.get("research", {})
+    from aurora import cast as cast_mod
+
+    cast = cast_mod.load_cast(channel, cast_root or cast_mod.CAST_ROOT) if cfg.get("comic", {}).get("cast_lock", False) else []
+    state = load_series(f"{channel}-episodes", series_dir)
+    ep_no = int(state.get("episode", 0)) + 1
+    n_panels = max(24, min(int(n_panels), 54))
+    key = os.getenv(rcfg.get("api_key_env", "GEMINI_API_KEY"), "").strip()
+    reason = "no GEMINI_API_KEY"
+    if client is not None or key:
+        try:
+            if client is None:
+                from google import genai
+
+                client = genai.Client(api_key=key)
+            model = rcfg.get("model", "gemini-3.1-flash-lite")
+            learn = ""
+            if analytics:
+                learn = ("What worked best on this channel recently (learn from the patterns, never copy): titles "
+                         f"{analytics.get('top_titles', [])[:5]}; keywords {analytics.get('top_keywords', [])[:8]}. ")
+            outline = _call_json(client, model, EP_OUTLINE_PROMPT.format(language=language, premise=premise, cast=cast_mod.prompt_text(cast),
+                                                                         learn=learn, ep=ep_no, style=COMIC_STYLE), EpisodeOutline)
+            if cast:
+                outline.character_sheet = [Character(**c) for c in cast_mod.merge_cast([c.model_dump() for c in outline.character_sheet], cast)]
+            outline.series.part = ep_no
+            sizes = [round(n_panels * f) for f in ACT_SPLIT]
+            sizes[2] = n_panels - sizes[0] - sizes[1]
+            names = ", ".join(c.name for c in outline.character_sheet)
+            acts, previous = [], "the story begins"
+            for k, size in enumerate(sizes, 1):
+                got = _call_json(client, model, EP_ACT_PROMPT.format(
+                    title=outline.title, language=language, outline=json.dumps([a.model_dump() for a in outline.acts], ensure_ascii=False)[:1500],
+                    cast=cast_mod.prompt_text(cast), k=k, act_name=outline.acts[k - 1].name, act_summary=outline.acts[k - 1].summary, n=size,
+                    previous=previous, names=names), ActPanels)
+                acts.append(Act(name=outline.acts[k - 1].name, summary=outline.acts[k - 1].summary, panels=got.panels))
+                previous = got.panels[-1].narration
+            ep = Episode(title=outline.title, hook=outline.hook, description=outline.description, keywords=outline.keywords,
+                         hashtags=outline.hashtags, series=outline.series, character_sheet=outline.character_sheet, acts=acts, cta=outline.cta)
+            total = sum(len(a.panels) for a in ep.acts)
+            if not 36 <= total <= 56:
+                raise ValueError(f"episode has {total} panels (want 36-56)")
+            return {"episode": ep.model_dump(), "source": "gemini", "note": ""}
+        except Exception as exc:  # noqa: BLE001
+            reason = f"Gemini failed/invalid: {str(exc)[:100]}"
+    fb = _episode_fallback(channel, premise, n_panels, cast, ep_no)
+    return {"episode": Episode.model_validate(fb).model_dump(), "source": "topic_fallback", "note": reason}
+
+
+def save_episode_state(channel: str, episode: dict, series_dir: Path = SERIES_DIR) -> None:
+    last = episode["acts"][-1]["panels"][-1]["narration"] if episode.get("acts") else ""
+    Path(series_dir).mkdir(parents=True, exist_ok=True)
+    (Path(series_dir) / f"{channel}-episodes.json").write_text(json.dumps(
+        {"channel": channel, "episode": episode["series"]["part"], "title": episode["title"], "last_summary": last,
+         "characters": episode["character_sheet"]}, indent=2, ensure_ascii=False), encoding="utf-8")
