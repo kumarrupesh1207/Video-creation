@@ -51,6 +51,10 @@ class PublishQueue:
     def __init__(self, path: Path = QUEUE_PATH, cfg: dict | None = None):
         self.path = Path(path)
         self.s = settings(cfg)
+        # YouTube handle each channel profile must authorise as (config autopilot.channels[].expected_handle)
+        self.expected_handles = {c["name"]: c["expected_handle"]
+                                 for c in ((cfg or {}).get("autopilot") or {}).get("channels", [])
+                                 if c.get("name") and c.get("expected_handle")}
 
     # ---- storage -------------------------------------------------
     def _load(self) -> list[dict]:
@@ -118,7 +122,7 @@ class PublishQueue:
                 "id": uuid.uuid4().hex[:12], "channel": channel, "platform": platform, "path": str(path), "sha256": sha,
                 "title": (meta.get("title") or path.stem)[:100], "description": meta.get("description", ""),
                 "tags": list(meta.get("tags", [])), "ai_disclosure": bool(meta.get("ai_disclosure", True)),
-                "privacy": meta.get("privacy", "public"), "approval": mode,
+                "privacy": meta.get("privacy", "public"), "approval": mode, "series": meta.get("series"),
                 "status": "pending_approval" if mode == "manual" else "scheduled",
                 "publish_at": self.next_slot(channel, now, taken).isoformat(), "created_at": now.isoformat(),
                 "attempts": 0, "video_id": None, "error": None, "stats": None,

@@ -248,3 +248,13 @@ autopilot:
       voice: en-US-AvaNeural   # young adult female, natural
       format: comic         # motion-comic series (aurora/comic.py); omit for plain image reels
       panels: 6
+    - name: shinobi         # token: outputs/tokens/youtube_shinobi.json; run: python -m aurora.publish.youtube auth --channel shinobi
+      expected_handle: "@ShinobiMindset1"   # upload is refused if the token belongs to another channel
+      niche: "original anime short stories with original characters (no existing copyrighted characters): epic battles, emotional moments, power-ups, mysterious worlds"
+      language: en
+      platforms: [youtube]
+      reels_per_day: 3
+      motion: ai
+      voice: en-US-AvaNeural
+      format: comic
+      panels: 6             # cast: assets/characters/shinobi (copy of main's locked cast, Kaelen)

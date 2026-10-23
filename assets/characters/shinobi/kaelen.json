@@ -1,0 +1,26 @@
+{
+  "name": "Kaelen",
+  "role": "protagonist",
+  "description": "Young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm.",
+  "distinguishing_marks": "silver spiky hair, emerald eyes, tattered dark indigo hooded cloak over tactical gear, glowing blue runes on the forearm",
+  "personality": "Curious and brave; hesitant at first, then determined and defiant when cornered. Earnest, short lines ('Is this the source of the ancients?', 'Come and face me then, monster!').",
+  "voice_notes": "Dialogue appears only as speech bubbles. Narration (a separate narrator, never Kaelen) uses the channel voice en-US-AvaNeural. Keep Kaelen's lines short and emotional, never sarcastic.",
+  "first_story": "Echoes of the Aether",
+  "references": [
+    {
+      "file": "kaelen_ref1.jpg",
+      "from_panel": 2,
+      "use": "clearest face + runes (medium)"
+    },
+    {
+      "file": "kaelen_ref2.jpg",
+      "from_panel": 1,
+      "use": "face, open-mouthed expression (close-up)"
+    },
+    {
+      "file": "kaelen_ref3.jpg",
+      "from_panel": 4,
+      "use": "full body, cloak and outfit (reference for costume)"
+    }
+  ]
+}

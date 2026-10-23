@@ -45,8 +45,8 @@ def test_veto_blocks_publish_and_manual_mode(q, workspace_tmp_path, vid):
     it = q.enqueue("facts", vid, {"title": "T"}, now=NOW)
     q.veto(it["id"])
     assert q.due(NOW + timedelta(days=2)) == []
-    q.approve(it["id"])
-    assert len(q.due(NOW + timedelta(days=2))) == 1
+    q.approve(it["id"])  # approve schedules relative to the real clock
+    assert len(q.due(datetime.now(timezone.utc) + timedelta(days=3))) == 1
     mq = PublishQueue(workspace_tmp_path / "m.json", {"autopilot": {"publish": {"approval": "manual"}}})
     m = mq.enqueue("facts", vid, {"title": "T"}, now=NOW)
     assert m["status"] == "pending_approval" and mq.due(NOW + timedelta(days=2)) == []
@@ -251,3 +251,84 @@ def test_research_failure_skips_instead_of_off_niche_topic():
     calls = iter([{"source": "topic_fallback", "ideas": [{}]}, {"source": "gemini", "ideas": [{"title": "Ok", "hook": "h", "scenes": []}]}])
     flaky = type("R", (), {"research_ideas": staticmethod(lambda *a: next(calls))})
     assert autopilot.get_ideas(ch, 1, flaky, sleep=lambda s: None)[0]["title"] == "Ok"
+
+
+# ---- shinobi: scopes, channel check, playlists, publish-one -------------------------
+def _svc_with_playlists(existing=None, items=None):
+    svc = MagicMock()
+    svc.playlists.return_value.list.return_value.execute.return_value = {"items": existing or []}
+    svc.playlists.return_value.insert.return_value.execute.return_value = {"id": "PL_NEW"}
+    svc.playlistItems.return_value.list.return_value.execute.return_value = {"items": items or []}
+    return svc
+
+
+def test_old_token_scopes_ask_for_reauth(workspace_tmp_path, monkeypatch):
+    tp = workspace_tmp_path / "youtube_x.json"
+    tp.write_text('{"scopes": ["https://www.googleapis.com/auth/youtube.upload"], "refresh_token": "r"}', encoding="utf-8")
+    monkeypatch.setattr(yt, "token_path", lambda c: tp)
+    with pytest.raises(yt.AuthRequired, match="re-run"):
+        yt.get_credentials("x")
+
+
+def test_verify_channel_matches_or_refuses():
+    svc = MagicMock()
+    svc.channels.return_value.list.return_value.execute.return_value = {"items": [{"id": "UC1", "snippet": {"title": "Shinobi", "customUrl": "@shinobimindset1"}}]}
+    assert yt.verify_channel(svc, "@ShinobiMindset1")["id"] == "UC1"
+    with pytest.raises(yt.ChannelMismatch):
+        yt.verify_channel(svc, "@SomeoneElse")
+
+
+def test_playlist_created_once_cached_and_privacy(workspace_tmp_path):
+    svc = _svc_with_playlists()
+    pid = yt.add_to_series_playlist(svc, "shinobi", "Echoes of the Aether", "V1", "private", workspace_tmp_path)
+    assert pid == "PL_NEW"
+    assert svc.playlists.return_value.insert.call_args.kwargs["body"]["status"]["privacyStatus"] == "private"
+    yt.add_to_series_playlist(svc, "shinobi", "Echoes of the Aether", "V2", "private", workspace_tmp_path)
+    assert svc.playlists.return_value.insert.call_count == 1  # second video reuses the cached playlist
+    assert svc.playlistItems.return_value.insert.call_count == 2
+    yt.add_to_series_playlist(svc, "shinobi", "Echoes of the Aether", "V3", "public", workspace_tmp_path)
+    assert svc.playlists.return_value.update.call_args.kwargs["body"]["status"]["privacyStatus"] == "public"
+
+
+def test_playlist_reuses_existing_and_skips_duplicate_item(workspace_tmp_path):
+    svc = _svc_with_playlists(existing=[{"id": "PL_OLD", "snippet": {"title": "echoes of the aether"}, "status": {"privacyStatus": "public"}}],
+                              items=[{"id": "already"}])
+    assert yt.add_to_series_playlist(svc, "shinobi", "Echoes of the Aether", "V1", "public", workspace_tmp_path) == "PL_OLD"
+    svc.playlists.return_value.insert.assert_not_called()
+    svc.playlistItems.return_value.insert.assert_not_called()
+
+
+def test_publish_one_requires_confirm_and_bypasses_kill_switch(workspace_tmp_path, vid):
+    q2 = PublishQueue(workspace_tmp_path / "p.json", {"autopilot": {"publish": {}}})  # kill-switch off
+    it = q2.enqueue("shinobi", vid, {"title": "T", "series": "Echoes"}, now=NOW)
+    q2.veto(it["id"])
+    up, pl = MagicMock(return_value="VID9"), MagicMock(return_value="PLX")
+    with pytest.raises(PermissionError):
+        autopilot.publish_one(q2, it["id"], "private", False, service_factory=lambda c: object(), uploader=up)
+    up.assert_not_called()
+    done = autopilot.publish_one(q2, it["id"], "private", True, service_factory=lambda c: object(), uploader=up, playlist_fn=pl)
+    assert done["status"] == "published" and done["video_id"] == "VID9" and done["privacy"] == "private" and done["playlist_id"] == "PLX"
+    assert up.call_args.kwargs["privacy"] == "private" and pl.call_args.args[-1] == "private"
+    with pytest.raises(ValueError):  # never twice
+        autopilot.publish_one(q2, it["id"], "private", True, service_factory=lambda c: object(), uploader=up)
+
+
+def test_wrong_channel_blocks_publish_due(q, vid):
+    it = q.enqueue("facts", vid, {"title": "T"}, now=NOW)
+
+    def wrong(c):
+        raise yt.ChannelMismatch("authorised channel is @other")
+
+    up = MagicMock()
+    autopilot.publish_due(q, now=NOW + timedelta(days=1), service_factory=wrong, uploader=up)
+    up.assert_not_called()
+    assert q.get(it["id"])["status"] == "scheduled"
+
+
+def test_series_playlist_step_runs_and_failure_does_not_unpublish(q, vid):
+    it = q.enqueue("facts", vid, {"title": "T", "series": "Echoes"}, now=NOW)
+    pl = MagicMock(side_effect=RuntimeError("playlist quota"))
+    autopilot.publish_due(q, now=NOW + timedelta(days=1), service_factory=lambda c: object(),
+                          uploader=MagicMock(return_value="V1"), playlist_fn=pl)
+    got = q.get(it["id"])
+    assert got["status"] == "published" and "playlist quota" in got["playlist_error"]

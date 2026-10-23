@@ -3,6 +3,7 @@
 One token file per channel => channels never mix. One-time consent: `python -m aurora.publish.youtube auth --channel NAME`.
 client_secret.json path comes from env YOUTUBE_CLIENT_SECRET (.env). videos.insert costs ~1600 quota units (default 10000/day).
 `status.containsSyntheticMedia` is the API field for YouTube's altered/synthetic-content disclosure (present in the v3 discovery doc).
+After auth the token's channel is checked against the profile's `expected_handle`; a mismatch refuses to upload.
 """
 from __future__ import annotations
 
@@ -15,8 +16,10 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly",
+          "https://www.googleapis.com/auth/youtube.force-ssl"]  # force-ssl: playlists
 TOKEN_DIR = ROOT / "outputs" / "tokens"  # outputs/ is git-ignored
+STATE_DIR = ROOT / "outputs" / "publish_state"
 RETRY_STATUS = {500, 502, 503, 504}
 QUOTA_REASONS = {"quotaExceeded", "uploadLimitExceeded", "dailyLimitExceeded", "rateLimitExceeded"}
 
@@ -26,7 +29,11 @@ class QuotaExceeded(Exception):
 
 
 class AuthRequired(Exception):
-    """No valid token: run the one-time consent for this channel."""
+    """No valid token (or missing scopes): run the one-time consent for this channel."""
+
+
+class ChannelMismatch(Exception):
+    """The authorised Google account is not the channel this profile expects: refuse to upload."""
 
 
 def token_path(channel: str) -> Path:
@@ -34,16 +41,34 @@ def token_path(channel: str) -> Path:
 
 
 def get_credentials(channel: str, interactive: bool = False):
+    from google.auth.exceptions import RefreshError
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
 
     tp = token_path(channel)
-    creds = Credentials.from_authorized_user_file(str(tp), SCOPES) if tp.exists() else None
+    reauth = f"re-run: python -m aurora.publish.youtube auth --channel {channel}"
+    creds = None
+    if tp.exists():
+        try:
+            granted = set(json.loads(tp.read_text(encoding="utf-8")).get("scopes") or [])
+        except ValueError:
+            granted = set()
+        if set(SCOPES) <= granted:
+            creds = Credentials.from_authorized_user_file(str(tp), SCOPES)
+        elif not interactive:  # token made before a scope was added (e.g. force-ssl for playlists)
+            raise AuthRequired(f"token for '{channel}' lacks scopes {sorted(set(SCOPES) - granted)}; {reauth}")
     if creds and creds.valid:
         return creds
     if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        try:
+            creds.refresh(Request())
+        except RefreshError as e:
+            if not interactive:
+                raise AuthRequired(f"token for '{channel}' expired or revoked ({e}); {reauth}") from e
+            creds = None
     else:
+        creds = None
+    if creds is None:
         if not interactive:
             raise AuthRequired(f"no YouTube token for channel '{channel}'; run: python -m aurora.publish.youtube auth --channel {channel}")
         from google_auth_oauthlib.flow import InstalledAppFlow
@@ -57,10 +82,29 @@ def get_credentials(channel: str, interactive: bool = False):
     return creds
 
 
-def build_service(channel: str, interactive: bool = False):
+def _norm_handle(h: str | None) -> str:
+    return "@" + str(h or "").strip().lstrip("@").lower()
+
+
+def verify_channel(service, expected_handle: str | None) -> dict:
+    """channels.list(mine=true): the token's channel must match the profile's expected handle (when one is set)."""
+    items = service.channels().list(part="snippet", mine=True).execute().get("items", [])
+    if not items:
+        raise ChannelMismatch("this Google account has no YouTube channel")
+    sn = items[0]["snippet"]
+    info = {"id": items[0].get("id"), "title": sn.get("title"), "handle": sn.get("customUrl")}
+    if expected_handle and _norm_handle(info["handle"]) != _norm_handle(expected_handle):
+        raise ChannelMismatch(f"authorised channel is {info['handle']} ({info['title']}) but the profile expects "
+                              f"{expected_handle}; re-run auth with the right Google account")
+    return info
+
+
+def build_service(channel: str, interactive: bool = False, expected_handle: str | None = None):
     from googleapiclient.discovery import build
 
-    return build("youtube", "v3", credentials=get_credentials(channel, interactive), cache_discovery=False)
+    service = build("youtube", "v3", credentials=get_credentials(channel, interactive), cache_discovery=False)
+    verify_channel(service, expected_handle)
+    return service
 
 
 def build_body(meta: dict, privacy: str = "public", publish_at: str | None = None) -> dict:
@@ -115,6 +159,64 @@ def upload_short(service, path: str | Path, meta: dict, privacy: str = "public",
     return response["id"]
 
 
+# ---- playlists: one per series, ids cached so repeated runs are idempotent --------------
+def _state_file(channel: str, state_dir: Path) -> Path:
+    return Path(state_dir) / f"{re.sub(r'[^A-Za-z0-9_-]+', '_', channel)}_playlists.json"
+
+
+def _save_cache(sf: Path, cache: dict) -> None:
+    sf.parent.mkdir(parents=True, exist_ok=True)
+    tmp = sf.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, sf)
+
+
+def ensure_playlist(service, channel: str, title: str, video_privacy: str = "public", state_dir: Path = STATE_DIR) -> str:
+    """Find or create the playlist `title`; public only when the video is public, otherwise private."""
+    sf = _state_file(channel, state_dir)
+    try:
+        cache = json.loads(sf.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cache = {}
+    want = "public" if video_privacy == "public" else "private"
+    entry = cache.get(title)
+    if entry:
+        if want == "public" and entry.get("privacy") != "public":  # a public video must not sit in a private list
+            service.playlists().update(part="snippet,status", body={
+                "id": entry["id"], "snippet": {"title": title}, "status": {"privacyStatus": "public"}}).execute()
+            entry["privacy"] = "public"
+            _save_cache(sf, cache)
+        return entry["id"]
+    pid, privacy, token = None, want, None
+    while pid is None:  # reuse an existing playlist with this title (cache lost, or made by hand)
+        r = service.playlists().list(part="snippet,status", mine=True, maxResults=50, pageToken=token).execute()
+        for p in r.get("items", []):
+            if p["snippet"]["title"].strip().lower() == title.strip().lower():
+                pid, privacy = p["id"], p.get("status", {}).get("privacyStatus", want)
+                break
+        token = r.get("nextPageToken")
+        if pid or not token:
+            break
+    if pid is None:
+        pid = service.playlists().insert(part="snippet,status", body={
+            "snippet": {"title": title, "description": f"{title} - AI-generated series."},
+            "status": {"privacyStatus": want}}).execute()["id"]
+    cache[title] = {"id": pid, "privacy": privacy}
+    _save_cache(sf, cache)
+    return pid
+
+
+def add_to_series_playlist(service, channel: str, series: str, video_id: str, video_privacy: str = "public",
+                           state_dir: Path = STATE_DIR) -> str:
+    """Add the video to its series playlist unless it is already there; returns the playlist id."""
+    pid = ensure_playlist(service, channel, series, video_privacy, state_dir)
+    have = service.playlistItems().list(part="id", playlistId=pid, videoId=video_id, maxResults=1).execute().get("items", [])
+    if not have:
+        service.playlistItems().insert(part="snippet", body={"snippet": {
+            "playlistId": pid, "resourceId": {"kind": "youtube#video", "videoId": video_id}}}).execute()
+    return pid
+
+
 def fetch_stats(service, video_ids: list[str]) -> dict[str, dict]:
     """views/likes/comments per video id (1 quota unit per call, 50 ids max)."""
     out: dict[str, dict] = {}
@@ -133,9 +235,26 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="YouTube one-time consent")
     ap.add_argument("cmd", choices=["auth"])
     ap.add_argument("--channel", required=True)
+    ap.add_argument("--expected-handle", help="default: expected_handle of this channel in config.yaml")
     a = ap.parse_args(argv)
+    expected = a.expected_handle
+    if expected is None:
+        try:
+            import yaml
+
+            cfg = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8")) or {}
+            expected = next((c.get("expected_handle") for c in (cfg.get("autopilot") or {}).get("channels", [])
+                             if c.get("name") == a.channel), None)
+        except OSError:
+            expected = None
     get_credentials(a.channel, interactive=True)
-    print(f"[youtube] token saved: {token_path(a.channel)}")
+    try:
+        info = verify_channel(build_service(a.channel), expected)
+    except ChannelMismatch as e:
+        token_path(a.channel).unlink(missing_ok=True)  # never keep a token for the wrong channel
+        print(f"[youtube] WRONG CHANNEL, token deleted: {e}")
+        return 2
+    print(f"[youtube] token saved: {token_path(a.channel)} -> {info['handle']} ({info['title']})")
     return 0
 
 

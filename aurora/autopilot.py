@@ -4,6 +4,7 @@
     python -m aurora.autopilot publish-due  [--channel NAME]
     python -m aurora.autopilot analytics
     python -m aurora.autopilot status | veto ID | approve ID
+    python -m aurora.autopilot publish-one ID --privacy private --i-confirm   (bypasses the kill-switch for ONE item)
 
 Config (config.yaml) `autopilot:` section, see docs/AUTOPILOT.md. Channels never mix: own token file + queue tag.
 Research interface (aurora/research.py, built by Backend): generate_ideas(niche, language, n, channel=None) ->
@@ -174,16 +175,17 @@ def compose_meta(idea: dict, sha256: str) -> dict:
     ai = idea.get("ai_disclosure", True)
     desc = "\n\n".join(x for x in (idea.get("description", ""), " ".join(t if t.startswith("#") else f"#{t}" for t in tags),
                                     "AI-generated content." if ai else "") if x)
-    return {"title": title[:100], "description": desc, "tags": tags, "ai_disclosure": ai, "sha256": sha256}
+    return {"title": title[:100], "description": desc, "tags": tags, "ai_disclosure": ai, "sha256": sha256,
+            "series": series if series and part else None}
 
 
 # ---- publish ---------------------------------------------------------
 def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | None = None, service_factory=None,
-                uploader=None, dry_run: bool = False, ig_publisher=None) -> dict:
+                uploader=None, dry_run: bool = False, ig_publisher=None, playlist_fn=None) -> dict:
     """Upload every due, non-vetoed item. Stops a channel on quota; failures retry up to max_attempts."""
     from aurora.publish import youtube as yt
 
-    service_factory = service_factory or yt.build_service
+    service_factory = service_factory or (lambda ch: yt.build_service(ch, expected_handle=queue.expected_handles.get(ch)))
     uploader = uploader or yt.upload_short
     result = {"published": [], "failed": [], "deferred": []}
     if not dry_run and not queue.s.get("enabled", False):  # global kill-switch: autopilot.publish.enabled (default false)
@@ -234,6 +236,7 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
             queue.mark_published(it["id"], vid)
             result["published"].append(it["id"])
             print(f"[autopilot] {ch}: published {vid}")
+            _add_to_playlist(queue, it, vid, services[ch], playlist_fn)
         except yt.QuotaExceeded as e:
             queue.defer(it["id"], QUOTA_BACKOFF, f"quota: {e}")
             blocked.add(ch)
@@ -242,6 +245,52 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
             queue.mark_failed(it["id"], f"{type(e).__name__}: {e}")
             result["failed"].append(it["id"])
     return result
+
+
+def _add_to_playlist(queue: PublishQueue, it: dict, video_id: str, service, playlist_fn=None, privacy: str | None = None) -> None:
+    """Series videos go into a per-series playlist. A playlist failure never un-publishes the item."""
+    if not it.get("series"):
+        return
+    from aurora.publish import youtube as yt
+
+    try:
+        pid = (playlist_fn or yt.add_to_series_playlist)(service, it["channel"], it["series"], video_id,
+                                                         privacy or it.get("privacy", "public"))
+        queue._update(it["id"], playlist_id=pid, playlist_error=None)
+    except Exception as e:  # noqa: BLE001
+        queue._update(it["id"], playlist_error=f"{type(e).__name__}: {e}"[:300])
+        print(f"[autopilot] {it['channel']}: playlist step failed (video is published): {e}", file=sys.stderr)
+
+
+def publish_one(queue: PublishQueue, item_id: str, privacy: str = "private", confirm: bool = False,
+                service_factory=None, uploader=None, playlist_fn=None) -> dict:
+    """Upload ONE queue item, bypassing the global kill-switch for that item only. Requires explicit confirm."""
+    from aurora.publish import youtube as yt
+
+    if not confirm:
+        raise PermissionError("publish-one needs the explicit --i-confirm flag")
+    if privacy not in ("private", "unlisted", "public"):
+        raise ValueError(f"bad privacy {privacy!r}")
+    it = queue.get(item_id)
+    if not it or it.get("platform", "youtube") != "youtube":
+        raise ValueError("no such YouTube queue item")
+    if it["status"] in ("publishing", "published"):
+        raise ValueError(f"item is already {it['status']}")
+    if not Path(it["path"]).exists():
+        raise FileNotFoundError(it["path"])
+    ch = it["channel"]
+    service = (service_factory or (lambda c: yt.build_service(c, expected_handle=queue.expected_handles.get(c))))(ch)
+    queue.mark_publishing(item_id)
+    try:
+        vid = (uploader or yt.upload_short)(service, it["path"], it, privacy=privacy)
+    except Exception as e:  # noqa: BLE001 - leave it vetoed-safe: never auto-retry a one-off
+        queue._update(item_id, status="failed", error=f"{type(e).__name__}: {e}"[:500])
+        raise
+    queue._update(item_id, privacy=privacy)
+    done = queue.mark_published(item_id, vid)
+    print(f"[autopilot] {ch}: published {vid} as {privacy}")
+    _add_to_playlist(queue, done, vid, service, playlist_fn, privacy)
+    return queue.get(item_id)
 
 
 def _publish_instagram(queue: PublishQueue, it: dict, result: dict, ig_publisher=None) -> None:
@@ -308,7 +357,9 @@ def main(argv: list[str] | None = None) -> int:
     ensure_utf8_console()
     load_env()
     ap = argparse.ArgumentParser(description="Aurora autopilot")
-    ap.add_argument("cmd", choices=["render", "publish-due", "analytics", "status", "veto", "approve"])
+    ap.add_argument("cmd", choices=["render", "publish-due", "publish-one", "analytics", "status", "veto", "approve"])
+    ap.add_argument("--privacy", default="private", choices=["private", "unlisted", "public"], help="publish-one only")
+    ap.add_argument("--i-confirm", action="store_true", help="publish-one: required; bypasses the kill-switch for this ONE item")
     ap.add_argument("id", nargs="?")
     ap.add_argument("--channel")
     ap.add_argument("--limit", type=int, default=0)
@@ -325,6 +376,15 @@ def main(argv: list[str] | None = None) -> int:
         run_render(cfg, q, a.channel, a.limit)
     elif a.cmd == "publish-due":
         print(publish_due(q, a.channel, now=datetime.fromisoformat(a.at).astimezone(timezone.utc) if a.at else None, dry_run=a.dry_run))
+    elif a.cmd == "publish-one":
+        if not a.id:
+            ap.error("queue id required")
+        try:
+            it = publish_one(q, a.id, a.privacy, a.i_confirm)
+        except PermissionError as e:
+            print(f"[autopilot] refused: {e}", file=sys.stderr)
+            return 2
+        print(f"[autopilot] done: https://youtu.be/{it['video_id']} ({it['privacy']})")
     elif a.cmd == "analytics":
         print(f"[autopilot] stats updated for {collect_analytics(q)} videos")
     elif a.cmd == "status":
