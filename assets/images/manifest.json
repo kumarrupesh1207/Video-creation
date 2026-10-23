@@ -281,6 +281,1536 @@
       ],
       "motion_variant_count": 10,
       "last_used_at": "2026-05-17T07:24:31.607835Z"
+    },
+    "8a572b04f464e88e6e381d27eee72f4ba5f333972c412f1c1fe6082dba8f1caf": {
+      "file_path": "outputs\\first_light_20261020_223203\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-20T17:02:06.467375Z",
+      "last_used_at": "2026-10-20T17:02:06.467867Z",
+      "lineage": {
+        "prompt_normalized": "a lone traveler standing on a cliff at golden hour, vast misty valley below, dramatic clouds, cinematic lighting, highly detailed",
+        "style_preset": "cinematic",
+        "dimensions": "1344x768",
+        "seed": 670429304
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "f987020616c443f572683106f06c6d8319de0b8e29a7ec9d3ff8d1c9a20f6a54": {
+      "file_path": "outputs\\perf_nim_before\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-20T18:11:03.081786Z",
+      "last_used_at": "2026-10-20T18:11:03.082306Z",
+      "lineage": {
+        "prompt_normalized": "portrait photo of a man in a navy suit, studio light",
+        "style_preset": "cinematic",
+        "dimensions": "1344x768",
+        "seed": 86330492
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "efa4f9bc6ee19f3b8bda55780622388a9c3b7ec4e44fe9da3dfcf97f653ba472": {
+      "file_path": "outputs\\perf_nim_after\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-20T18:22:10.119165Z",
+      "last_used_at": "2026-10-20T18:22:10.119731Z",
+      "lineage": {
+        "prompt_normalized": "portrait photo of a man in a navy suit, studio light",
+        "style_preset": "cinematic",
+        "dimensions": "1024x1024",
+        "seed": 663822374
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "6b00aa987fb29dbdbb8e452a7ca912901db033b7eb4e80b8bd6cebd490783b6f": {
+      "file_path": "outputs\\autorun_20261021_000622_a-man-in-a-navy-suit\\images\\vf_autorun_20261021_000622_a-man-in-a-navy-suit_ComfyUI_Final_00001_.png",
+      "registered_at": "2026-10-20T18:46:15.986636Z",
+      "last_used_at": "2026-10-20T18:46:15.987163Z",
+      "lineage": {
+        "prompt_normalized": "a man in a navy suit in a city at night, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "512x768",
+        "seed": 1370346382
+      },
+      "versioning": {
+        "provider": "local_comfyui",
+        "model": "Realistic_Vision_V6.0_NV_B1_fp16.safetensors",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "72625779658b58a157d996762996f50d2d694b2a2b416fe9e5fdf26cf5a89ea4": {
+      "file_path": "outputs\\autorun_20261021_001637_a-woman-in-a-traditi\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-20T18:46:43.981480Z",
+      "last_used_at": "2026-10-20T18:46:43.981870Z",
+      "lineage": {
+        "prompt_normalized": "a woman in a traditional indian saree at a temple at sunset, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 429613082
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "1cd111bfee8579cc2241383d0417923b0d1ed4fd89eef669326395aae3a20a34": {
+      "file_path": "outputs\\create_20261021_103411\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-21T05:04:24.900906Z",
+      "last_used_at": "2026-10-21T05:04:24.913544Z",
+      "lineage": {
+        "prompt_normalized": "a man in a navy suit walking in a city at night, neon reflections on wet street, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 93280076
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "2da196241269050a35c7049e69f8cc1de597b29876a777356d4551336884430d": {
+      "file_path": "outputs\\autorun_20261021_110251_goku-and-vegeta-figh\\images\\vf_autorun_20261021_110251_goku-and-vegeta-figh_ComfyUI_Final_00001_.png",
+      "registered_at": "2026-10-21T05:44:12.769314Z",
+      "last_used_at": "2026-10-21T05:44:12.770021Z",
+      "lineage": {
+        "prompt_normalized": "goku and vegeta fighting mid-air, dragon ball anime style, energy blasts clashing, glowing auras, dramatic sky, dynamic action pose, vertical composition, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "anime",
+        "dimensions": "512x768",
+        "seed": 1636688164
+      },
+      "versioning": {
+        "provider": "local_comfyui",
+        "model": "Realistic_Vision_V6.0_NV_B1_fp16.safetensors",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "fb4dc7569a8be14033769c654d4d31fd86f1513e4856b3ffc35f2360e8df46d0": {
+      "file_path": "outputs\\autorun_20261021_111548_cinematic-portrait-o\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-21T05:45:51.075693Z",
+      "last_used_at": "2026-10-21T05:45:51.076140Z",
+      "lineage": {
+        "prompt_normalized": "cinematic portrait of a confident indian man in a tailored navy suit on a rainy mumbai street at night, neon reflections, shallow depth of field, photorealistic, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 166047642
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "5b94b32251fd8612e1661d33f77af7f72efd5624adb0eac8dd89345ccae40e7b": {
+      "file_path": "outputs\\autorun_20261021_111558_original-anime-chara\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-21T05:46:00.790797Z",
+      "last_used_at": "2026-10-21T05:46:00.791298Z",
+      "lineage": {
+        "prompt_normalized": "original anime character, young warrior with spiky silver hair and glowing blue aura, powering up on a cliff, lightning sky, vibrant cel-shaded anime style, dynamic action, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 104619260
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "2682f0c4a6d0cacdad3fe16000d93d72bf99f0acdd461d9938c0ecf2d8bb24ff": {
+      "file_path": "outputs\\autorun_20261021_111607_luxury-perfume-bottl\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-21T05:46:12.231536Z",
+      "last_used_at": "2026-10-21T05:46:12.232018Z",
+      "lineage": {
+        "prompt_normalized": "luxury perfume bottle on black marble with gold splashes and soft rim lighting, premium product photography, ultra detailed, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 987188883
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "949fc9ef5789517c7cd538e27836e46fa2d3e666a3c1e2f2a0f2068e13d2689a": {
+      "file_path": "outputs\\autorun_20261021_112813_original-anime-chara\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-21T05:58:17.774555Z",
+      "last_used_at": "2026-10-21T05:58:17.775059Z",
+      "lineage": {
+        "prompt_normalized": "original anime character, young warrior with spiky silver hair and glowing blue aura, powering up on a cliff, lightning sky, vibrant cel-shaded anime style, dynamic action, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 407949284
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "8163470e6d6db51336f0f53e80a865f09618031427da661d5eeee2c7694d60d2": {
+      "file_path": "outputs\\autorun_20261021_113037_original-anime-chara\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-21T06:00:44.831346Z",
+      "last_used_at": "2026-10-21T06:00:44.831854Z",
+      "lineage": {
+        "prompt_normalized": "original anime character, young warrior with spiky silver hair and glowing blue aura, powering up on a cliff, lightning sky, vibrant cel-shaded anime style, dynamic action, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 495155793
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "941f47f6f11e42c55b707fb00ef142668ded2c88c56c0ca8063dc6c9f5ac0c70": {
+      "file_path": "outputs\\autorun_20261021_135341_original-anime-chara\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-21T08:23:45.015771Z",
+      "last_used_at": "2026-10-21T08:23:45.016296Z",
+      "lineage": {
+        "prompt_normalized": "original anime character, young warrior with spiky silver hair and glowing blue aura, powering up on a cliff, lightning sky, vibrant cel-shaded anime style, dynamic action, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 1237990963
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "f673e7601a4a79ec06f6acdb5b79020838694a8d8e351deaeea24cf53614c7c4": {
+      "file_path": "outputs\\autorun_20261021_141810_original-anime-chara\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-21T08:48:13.626791Z",
+      "last_used_at": "2026-10-21T08:48:13.627643Z",
+      "lineage": {
+        "prompt_normalized": "original anime character, young warrior with spiky silver hair and glowing blue aura, powering up on a cliff, lightning sky, vibrant cel-shaded anime style, dynamic action, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 1922714850
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "fbb1d0694a3df9e91baa60bca31f7b075068d05b1221a7a08bbb6aa2c945eb02": {
+      "file_path": "outputs\\action_test_150927\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-21T09:39:30.851720Z",
+      "last_used_at": "2026-10-21T09:39:30.853000Z",
+      "lineage": {
+        "prompt_normalized": "cinematic photo of a young indian man in casual clothes running along a busy railway station platform to catch a departing train, full body side view, motion, evening light, photorealistic",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 1069201122
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "daaeb347833568759b911152fadc41485cb9c7bb52ee75359c5e98e9a711531d": {
+      "file_path": "outputs\\create_20261021_151043\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-21T09:40:50.794127Z",
+      "last_used_at": "2026-10-21T09:40:50.795295Z",
+      "lineage": {
+        "prompt_normalized": "a man running and trying to catch the train, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 1052206964
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "0a8cd97ad03867f46a1e7e44f89b7d1db857be766ab6745a9e644a6277a52f6d": {
+      "file_path": "outputs\\create_20261021_151654\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-21T09:47:00.788625Z",
+      "last_used_at": "2026-10-21T09:47:00.789344Z",
+      "lineage": {
+        "prompt_normalized": "a man running and trying to catch the train, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 1234169530
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "9771fcc68384af26bec9debbd1acd2a41626dd418b1918a615d4efd611b1f80b": {
+      "file_path": "outputs\\autorun_20261022_090319_a-young-woman-in-a-y\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T03:33:23.771481Z",
+      "last_used_at": "2026-10-22T03:33:23.772357Z",
+      "lineage": {
+        "prompt_normalized": "a young woman in a yellow kurta walking through a flower market in the morning, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 333146164
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "d51cfa36e6b6b61e143795ca5bb53bbd268b868d92ca5a25488bc694b3d0fecb": {
+      "file_path": "outputs\\autorun_20261022_131305_a-young-indian-woman\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T07:43:08.352914Z",
+      "last_used_at": "2026-10-22T07:43:08.353589Z",
+      "lineage": {
+        "prompt_normalized": "a young indian woman in a yellow kurta walking through a sunlit marigold field at golden hour, cinematic, photorealistic, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 1423138816
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "83dc3c4edff2362a4274505a5b1267a54d1798f946900aa6293a7f98a92e0338": {
+      "file_path": "outputs\\autorun_20261022_131321_a-confident-indian-m\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T07:43:23.736439Z",
+      "last_used_at": "2026-10-22T07:43:23.737093Z",
+      "lineage": {
+        "prompt_normalized": "a confident indian man in a navy suit looking at the mumbai skyline from a rooftop at sunset, cinematic, photorealistic, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 2072718698
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "52fc95c3469c0bad51fe05056999802c805f79cc653a23f45772bddb5e8c25e8": {
+      "file_path": "outputs\\create_20261022_134345\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T08:14:09.227946Z",
+      "last_used_at": "2026-10-22T08:14:09.228871Z",
+      "lineage": {
+        "prompt_normalized": "a man in a navy suit in a city at night, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 126432808
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "f7517de7fc2d03e06f91b289ff95f2fb5206a19fbb219ef8264be2a3b63a617b": {
+      "file_path": "outputs\\autorun_20261022_140331_a-woman-in-a-traditi\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T08:33:34.169371Z",
+      "last_used_at": "2026-10-22T08:33:34.170037Z",
+      "lineage": {
+        "prompt_normalized": "a woman in a traditional saree at a temple at sunset, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 1645252989
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "8e8c4899fd8e14358578d1d6009618460d5c06130675b23d77c935e25c33ed65": {
+      "file_path": "outputs\\autorun_20261022_140352_a-young-man-in-a-nav\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T08:33:55.127757Z",
+      "last_used_at": "2026-10-22T08:33:55.128425Z",
+      "lineage": {
+        "prompt_normalized": "a young man in a navy suit walking through the city at night, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 1690855573
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "67f49639792809e6f72d0158a0edfb037e896fdeb1962ba82aaa012740427bbf": {
+      "file_path": "outputs\\create_20261022_201056\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T14:41:03.945850Z",
+      "last_used_at": "2026-10-22T14:41:03.946834Z",
+      "lineage": {
+        "prompt_normalized": "a calm sunrise over the himalayas, golden light, mist in the valleys, cinematic, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 1155166887
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "1d9154208ac216a6fc9d5b43c4dae275f069b3ca84f2fd40af7eda9875fe85e9": {
+      "file_path": "outputs\\autorun_20261022_212142_a-man-in-a-navy-suit\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T15:53:46.277411Z",
+      "last_used_at": "2026-10-22T15:53:46.278567Z",
+      "lineage": {
+        "prompt_normalized": "a man in a navy suit in a city at night, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 1898235748
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "f7889babbe9f8fafcb5a9d5956f24ec94e42d28b72467f9d558c5ce026983953": {
+      "file_path": "outputs\\autorun_20261022_215020_a-man-in-a-navy-suit\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T16:22:25.085441Z",
+      "last_used_at": "2026-10-22T16:22:25.086267Z",
+      "lineage": {
+        "prompt_normalized": "a man in a navy suit in a city at night, masterpiece, best quality, sharp focus, natural lighting",
+        "style_preset": "cinematic",
+        "dimensions": "768x1344",
+        "seed": 2029013835
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "75923882cc9c70d068058a81972894e31552d9afe5569e1d384a5ff1733f77cc": {
+      "file_path": "outputs\\comic_20261022_220730_anime-e2e-part1-crystal-_p0\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T16:37:34.248883Z",
+      "last_used_at": "2026-10-22T16:37:34.249637Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, ren: teenage boy, messy silver hair, bright blue eyes, long black coat with a red scarf, glowing blue crystal pendant, wide shot, a lone boy on a rooftop above a glowing futuristic city at night, giant moon, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 983620117
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "97e166ffd41c2ca62fea168f64057147c9aa3ca114b586d80ca9f897cc107ef8": {
+      "file_path": "outputs\\comic_20261022_220730_anime-e2e-part1-crystal-_p1\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T16:37:39.476756Z",
+      "last_used_at": "2026-10-22T16:37:39.477579Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, ren: teenage boy, messy silver hair, bright blue eyes, long black coat with a red scarf, glowing blue crystal pendant, close-up shot, his pendant pulses with blue light, his eyes widen, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 983620117
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "d4bb60f753903713792386fa0ef63e7a2bb4b48616cd81969d30cc875bfe22d4": {
+      "file_path": "outputs\\comic_20261022_220730_anime-e2e-part1-crystal-_p2\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T16:37:44.708442Z",
+      "last_used_at": "2026-10-22T16:37:44.709828Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, ren: teenage boy, messy silver hair, bright blue eyes, long black coat with a red scarf, glowing blue crystal pendant, mira: young woman, long crimson ponytail, amber eyes, white and gold armor, curved silver sword, medium shot, mira lands on the roof in front of him, sword drawn, wind blowing, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 983620117
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "2bd75a666b8d5f9f3dd7b41c6152e31e82101101d1cf7f14894866f454423716": {
+      "file_path": "outputs\\comic_20261022_220730_anime-e2e-part1-crystal-_p3\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T16:37:50.744732Z",
+      "last_used_at": "2026-10-22T16:37:50.746192Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, ren: teenage boy, messy silver hair, bright blue eyes, long black coat with a red scarf, glowing blue crystal pendant, mira: young woman, long crimson ponytail, amber eyes, white and gold armor, curved silver sword, action shot, mira slashes at ren who leaps back, blue sparks flying, dynamic angle, speed lines, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 983620117
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "0e8445612aec62bc49f080205f6cea4aa898fd4b414c5809e4aa0f602de5a126": {
+      "file_path": "outputs\\comic_20261022_220730_anime-e2e-part1-crystal-_p4\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T16:37:54.571335Z",
+      "last_used_at": "2026-10-22T16:37:54.573011Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, ren: teenage boy, messy silver hair, bright blue eyes, long black coat with a red scarf, glowing blue crystal pendant, action shot, ren raises his pendant releasing a huge blue energy wave, shockwave, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 983620117
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "560b790c7476eb6cdbd0e2da8527c26989d6adc5e3130afe7e6e7313fcc1eedf": {
+      "file_path": "outputs\\comic_20261022_220730_anime-e2e-part1-crystal-_p5\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T16:37:59.190028Z",
+      "last_used_at": "2026-10-22T16:37:59.191496Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, mira: young woman, long crimson ponytail, amber eyes, white and gold armor, curved silver sword, close-up shot, mira kneeling in smoke, shocked, staring at the glowing light, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 983620117
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "7770cccb07cd7f64b9148cc3ff01250f91ffb97748b94994a7f3b28588db3e18": {
+      "file_path": "outputs\\comic_20261022_222358_anime-e2e-comfy-part1-cr_p0\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T17:45:27.891725Z",
+      "last_used_at": "2026-10-22T17:45:27.894345Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, ren: teenage boy, messy silver hair, bright blue eyes, long black coat with a red scarf, glowing blue crystal pendant, wide shot, a lone boy on a rooftop above a glowing futuristic city at night, giant moon, vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 122010601
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "f481cd3cdc21bd2be6ed7c3a56fa2497fb6e37cd74a90e54768a9773dcae4918": {
+      "file_path": "outputs\\comic_20261022_222358_anime-e2e-comfy-part1-cr_p1\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T17:45:31.242956Z",
+      "last_used_at": "2026-10-22T17:45:31.246202Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, ren: teenage boy, messy silver hair, bright blue eyes, long black coat with a red scarf, glowing blue crystal pendant, close-up shot, his pendant pulses with blue light, his eyes widen, vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 122010601
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "a3c5a11c234c0eb48038f949b01a38e366f3b91e1463a2df8b7665c907972e8b": {
+      "file_path": "outputs\\comic_20261022_222358_anime-e2e-comfy-part1-cr_p2\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T17:45:34.887676Z",
+      "last_used_at": "2026-10-22T17:45:34.889902Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, ren: teenage boy, messy silver hair, bright blue eyes, long black coat with a red scarf, glowing blue crystal pendant, mira: young woman, long crimson ponytail, amber eyes, white and gold armor, curved silver sword, medium shot, mira lands on the roof in front of him, sword drawn, wind blowing, vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 122010601
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "912fb55d95a3f1eae809c279f0537eed78e91f0c4559c92686ba0571fcea0d26": {
+      "file_path": "outputs\\comic_20261022_222358_anime-e2e-comfy-part1-cr_p3\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T17:45:38.617700Z",
+      "last_used_at": "2026-10-22T17:45:38.621097Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, ren: teenage boy, messy silver hair, bright blue eyes, long black coat with a red scarf, glowing blue crystal pendant, mira: young woman, long crimson ponytail, amber eyes, white and gold armor, curved silver sword, action shot, mira slashes at ren who leaps back, blue sparks flying, dynamic angle, speed lines, vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 122010601
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "97ffdecd31fbeb31bc70868ffac88499363d63b25dfa88a9cfa4a9e7782ee2c0": {
+      "file_path": "outputs\\comic_20261022_222358_anime-e2e-comfy-part1-cr_p4\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T17:45:42.657180Z",
+      "last_used_at": "2026-10-22T17:45:42.662577Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, ren: teenage boy, messy silver hair, bright blue eyes, long black coat with a red scarf, glowing blue crystal pendant, action shot, ren raises his pendant releasing a huge blue energy wave, shockwave, vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 122010601
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "7e600df735149ce6a9acc7a9fc45804af578fed92f350a72b6d010d906c17029": {
+      "file_path": "outputs\\comic_20261022_222358_anime-e2e-comfy-part1-cr_p5\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-22T17:45:46.886746Z",
+      "last_used_at": "2026-10-22T17:45:46.888945Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, mira: young woman, long crimson ponytail, amber eyes, white and gold armor, curved silver sword, close-up shot, mira kneeling in smoke, shocked, staring at the glowing light, vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 122010601
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "443b2eef96e05c0ce5b2f3857e80064bc6392c28169266ca78edede0771bdcfb": {
+      "file_path": "outputs\\comic_20261023_085402_main-part1-aetheria-risi_p0\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:24:08.168468Z",
+      "last_used_at": "2026-10-23T03:24:08.169508Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, kaelen: young male with silver spiky hair, piercing electric blue eyes, wearing a dark navy leather tunic and gold-trimmed pauldrons, cel-shaded anime comic panel., wide shot, a lone warrior standing before a shimmering, ethereal portal in a desolate, rocky wasteland., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "9973095db75f8bfa97cc74f57e0380bd0d85f07334559cd606705a814c6a748d": {
+      "file_path": "outputs\\comic_20261023_085402_main-part1-aetheria-risi_p1\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:24:12.320885Z",
+      "last_used_at": "2026-10-23T03:24:12.321862Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, kaelen: young male with silver spiky hair, piercing electric blue eyes, wearing a dark navy leather tunic and gold-trimmed pauldrons, cel-shaded anime comic panel., medium shot, kaelen reaching out his gloved hand toward the swirling blue light of the portal., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "9fa80270450e13a9d9fe67563bd7489ee28f0fd7a2b533a845009cca02b8b0fc": {
+      "file_path": "outputs\\comic_20261023_085402_main-part1-aetheria-risi_p2\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:24:17.324427Z",
+      "last_used_at": "2026-10-23T03:24:17.325378Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, kaelen: young male with silver spiky hair, piercing electric blue eyes, wearing a dark navy leather tunic and gold-trimmed pauldrons, cel-shaded anime comic panel., close-up shot, kaelen's face showing intense concentration and a reflection of the portal in his blue eyes., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "2ddfea1151cc239348577e9b85a7e5d7e4d24fac946f867faa0352139ab06df8": {
+      "file_path": "outputs\\comic_20261023_085402_main-part1-aetheria-risi_p3\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:24:20.558437Z",
+      "last_used_at": "2026-10-23T03:24:20.559481Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, kaelen: young male with silver spiky hair, piercing electric blue eyes, wearing a dark navy leather tunic and gold-trimmed pauldrons, cel-shaded anime comic panel., action shot, kaelen being sucked into the portal, his body surrounded by streaks of neon energy., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "08998a0a5352405142fc6469cc9cb041866e191804014a7d7576ba2f421bf4be": {
+      "file_path": "outputs\\comic_20261023_085428_main-part1-neon-aether-r_p0\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:24:32.277481Z",
+      "last_used_at": "2026-10-23T03:24:32.278467Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, kaelen: short silver hair with glowing blue tips, sharp emerald eyes, wearing a sleek white tech-suit with neon blue armor plating., wide shot, a futuristic city floating in clouds, ruined skyscrapers with glowing energy veins, kaelen standing on a fractured ledge., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "353abf29de6310775c04f75fc504a0c6980f8f91993b2ce74e20711353149144": {
+      "file_path": "outputs\\comic_20261023_085428_main-part1-neon-aether-r_p1\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:24:35.548729Z",
+      "last_used_at": "2026-10-23T03:24:35.549705Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, kaelen: short silver hair with glowing blue tips, sharp emerald eyes, wearing a sleek white tech-suit with neon blue armor plating., medium shot, kaelen looking at his hand as a bright blue pulse of light ripples through the air., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "de567c31d4264bbc576860afaa690af30f7ff1e04280fd25788596a115fa86e3": {
+      "file_path": "outputs\\comic_20261023_085428_main-part1-neon-aether-r_p2\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:24:38.829411Z",
+      "last_used_at": "2026-10-23T03:24:38.830416Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, void stalker: faceless entity shrouded in swirling purple mist, wearing tattered obsidian robes and floating spectral chains, glowing crimson eyes., wide shot, dark purple clouds swirling as a terrifying, hooded figure emerges from a jagged rift in space., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "f5f54cff7ae51d20aaec1c7c587a94e5622eecbf596b69904b66f06fcc490ba5": {
+      "file_path": "outputs\\comic_20261023_085428_main-part1-neon-aether-r_p3\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:24:42.032477Z",
+      "last_used_at": "2026-10-23T03:24:42.033489Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, kaelen: short silver hair with glowing blue tips, sharp emerald eyes, wearing a sleek white tech-suit with neon blue armor plating., close-up shot, kaelen's face showing determination, his eyes glowing intensely emerald green as armor forms over his chest., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "39e0fc0db0dfe8658738de4f0f5bc82726ad14f05bd467308a9a5901aeac6e67": {
+      "file_path": "outputs\\comic_20261023_085428_main-part1-neon-aether-r_p4\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:24:47.927487Z",
+      "last_used_at": "2026-10-23T03:24:47.928503Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, kaelen: short silver hair with glowing blue tips, sharp emerald eyes, wearing a sleek white tech-suit with neon blue armor plating., void stalker: faceless entity shrouded in swirling purple mist, wearing tattered obsidian robes and floating spectral chains, glowing crimson eyes., action shot, kaelen leaping into the air with a glowing energy blade clashing against a massive shadowy spectral chain., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "5092ede472e7ec47e741fe65a1da317d15617716a11ed9613159e38da968015b": {
+      "file_path": "outputs\\comic_20261023_085428_main-part1-neon-aether-r_p5\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:24:51.163540Z",
+      "last_used_at": "2026-10-23T03:24:51.164577Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, void stalker: faceless entity shrouded in swirling purple mist, wearing tattered obsidian robes and floating spectral chains, glowing crimson eyes., close-up shot, the void stalker looms over kaelen, the purple mist swallowing the scene as the ground crumbles away., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "06de48dce13c3d510a81d46f279def3db2b3a4c8120cac759c4b39c786cbe870": {
+      "file_path": "outputs\\comic_20261023_085549_main-part2-neon-aether-r_p0\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:25:53.145307Z",
+      "last_used_at": "2026-10-23T03:25:53.146489Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime comic panel, kaelen: short silver hair with glowing blue tips, sharp emerald eyes, wearing a sleek white tech-suit with neon blue armor plating., void stalker: faceless entity shrouded in swirling purple mist, wearing tattered obsidian robes and floating spectral chains, glowing crimson eyes., action shot, kaelen falling through a dark abyss, glowing blue aura erupting from his body, void stalker descending above with chains., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no text, no letters, no words, no captions, no speech bubbles",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "7f7cfaa1517bcf4053076e029cc99e7bd5c0a7eb31c8eec361020f0b764ff7ee": {
+      "file_path": "outputs\\comic_20261023_090005_main-part2-neon-aether-r_p0\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:30:12.067934Z",
+      "last_used_at": "2026-10-23T03:30:12.069298Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, one single full-bleed scene, kaelen: short silver hair with glowing blue tips, sharp emerald eyes, wearing a sleek white tech-suit with neon blue armor plating., void stalker: faceless entity shrouded in swirling purple mist, wearing tattered obsidian robes and floating spectral chains, glowing crimson eyes., action shot, kaelen suspended in mid-air, hands glowing with brilliant azure energy, pushing against the encroaching purple mist of the void stalker in a dark abyss., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no frame, no text, no letters, no words, no captions, no signature, no watermark, no speech bubbles, no sound effect lettering",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "d024fd554f5e5c3d4a03bb64c3c002a6452c0d83a9d5e0ef569adb888ea34838": {
+      "file_path": "outputs\\comic_20261023_090005_main-part2-neon-aether-r_p1\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:30:19.558580Z",
+      "last_used_at": "2026-10-23T03:30:19.559661Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, one single full-bleed scene, kaelen: short silver hair with glowing blue tips, sharp emerald eyes, wearing a sleek white tech-suit with neon blue armor plating., medium shot, close up of kaelen's emerald eyes widening as his white tech-suit armor pulses with intense, blinding cyan neon light., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no frame, no text, no letters, no words, no captions, no signature, no watermark, no speech bubbles, no sound effect lettering",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "48751cbe878166fcee763516c5f5b216b377bc7b1502f19611c4863179b10f24": {
+      "file_path": "outputs\\comic_20261023_090005_main-part2-neon-aether-r_p2\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:30:26.668946Z",
+      "last_used_at": "2026-10-23T03:30:26.670151Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, one single full-bleed scene, kaelen: short silver hair with glowing blue tips, sharp emerald eyes, wearing a sleek white tech-suit with neon blue armor plating., void stalker: faceless entity shrouded in swirling purple mist, wearing tattered obsidian robes and floating spectral chains, glowing crimson eyes., action shot, kaelen unleashing a massive shockwave of blue aether energy that shatters the void stalker's spectral chains and disperses the purple mist., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no frame, no text, no letters, no words, no captions, no signature, no watermark, no speech bubbles, no sound effect lettering",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "1261c2153dddc1b7efeaa7c8d304260a78c8ade1b1e034aee9a1055900dbe59a": {
+      "file_path": "outputs\\comic_20261023_090005_main-part2-neon-aether-r_p3\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:30:30.829919Z",
+      "last_used_at": "2026-10-23T03:30:30.834382Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, one single full-bleed scene, kaelen: short silver hair with glowing blue tips, sharp emerald eyes, wearing a sleek white tech-suit with neon blue armor plating., wide shot, the abyss dissolving into a landscape of new, vibrant flora and reconstructive reality under a bright, clear sky., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no frame, no text, no letters, no words, no captions, no signature, no watermark, no speech bubbles, no sound effect lettering",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "a217defe00513ac895a62d04f3310f1bb795ed9e465e3370712cf3f5ba2e2807": {
+      "file_path": "outputs\\comic_20261023_090005_main-part2-neon-aether-r_p4\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:30:34.750345Z",
+      "last_used_at": "2026-10-23T03:30:34.753258Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, one single full-bleed scene, kaelen: short silver hair with glowing blue tips, sharp emerald eyes, wearing a sleek white tech-suit with neon blue armor plating., medium shot, kaelen stands tall on lush grass, his suit cooling down, looking at the horizon with a calm and determined expression., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no frame, no text, no letters, no words, no captions, no signature, no watermark, no speech bubbles, no sound effect lettering",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "796d59331555e614718b260d52d6f6ac6990b9d0033fcf98693178c7c5437750": {
+      "file_path": "outputs\\comic_20261023_090005_main-part2-neon-aether-r_p5\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T03:30:40.187688Z",
+      "last_used_at": "2026-10-23T03:30:40.192698Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, one single full-bleed scene, kaelen: short silver hair with glowing blue tips, sharp emerald eyes, wearing a sleek white tech-suit with neon blue armor plating., close-up shot, close-up on kaelen's face as he smiles, the neon blue glow on his suit slowly fading into a steady heartbeat rhythm., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no frame, no text, no letters, no words, no captions, no signature, no watermark, no speech bubbles, no sound effect lettering",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "e83101daefae2d02053d5538ebe915a045c739bce19a47315f5d52eee59a874d": {
+      "file_path": "outputs\\comic_20261023_093248_main-sq-test-part1-neon-_p0\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:02:53.037105Z",
+      "last_used_at": "2026-10-23T04:02:53.040325Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, one single full-bleed scene, kaito: short silver hair with a messy fringe, piercing amber eyes, wearing a sleek black high-collar tactical jacket with glowing neon blue seams., wide shot, a desolate neon-lit cityscape with flickering holographic advertisements, rainy atmosphere, kaito stands on a rusted steel rooftop looking into the distance., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no frame, no text, no letters, no words, no captions, no signature, no watermark, no speech bubbles, no sound effect lettering, wordless illustration, no speech balloons",
+        "style_preset": "anime",
+        "dimensions": "1024x1024",
+        "seed": 1505827391
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "ffe5708b453dc7795190e2ec2c94a7320d0113c7b6ab51bcbc92cf2461ff2196": {
+      "file_path": "outputs\\comic_20261023_093248_main-sq-test-part1-neon-_p1\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:02:57.406814Z",
+      "last_used_at": "2026-10-23T04:02:57.410017Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, one single full-bleed scene, kaito: short silver hair with a messy fringe, piercing amber eyes, wearing a sleek black high-collar tactical jacket with glowing neon blue seams., medium shot, kaito draws a katana made of pure crystalline light, blue sparks flying, his amber eyes narrowing with focus, cinematic side view., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no frame, no text, no letters, no words, no captions, no signature, no watermark, no speech bubbles, no sound effect lettering, wordless illustration, no speech balloons",
+        "style_preset": "anime",
+        "dimensions": "1024x1024",
+        "seed": 1505827391
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "7b5a1c95b514b26b6dbb85b14952f21f47e586460957255d7d5058d07e6bccd1": {
+      "file_path": "outputs\\comic_20261023_093248_main-sq-test-part1-neon-_p2\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:03:01.669025Z",
+      "last_used_at": "2026-10-23T04:03:01.671266Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, one single full-bleed scene, kaito: short silver hair with a messy fringe, piercing amber eyes, wearing a sleek black high-collar tactical jacket with glowing neon blue seams., action shot, kaito dashing forward in a blur, leaving a trail of blue light, the ground beneath him shattering into digital shards., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no frame, no text, no letters, no words, no captions, no signature, no watermark, no speech bubbles, no sound effect lettering, wordless illustration, no speech balloons",
+        "style_preset": "anime",
+        "dimensions": "1024x1024",
+        "seed": 1505827391
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "631272530c73a3df4568400af60c0bf4c0d89b2574f29a7c87d55b97534ee2b4": {
+      "file_path": "outputs\\comic_20261023_093248_main-sq-test-part1-neon-_p2_retry\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:03:06.044885Z",
+      "last_used_at": "2026-10-23T04:03:06.046398Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, one single full-bleed scene, kaito: short silver hair with a messy fringe, piercing amber eyes, wearing a sleek black high-collar tactical jacket with glowing neon blue seams., action shot, kaito dashing forward in a blur, leaving a trail of blue light, the ground beneath him shattering into digital shards., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no frame, no text, no letters, no words, no captions, no signature, no watermark, no speech bubbles, no sound effect lettering, wordless illustration, no speech balloons, wordless illustration, clean art, no speech balloons, no lettering",
+        "style_preset": "anime",
+        "dimensions": "1024x1024",
+        "seed": 1505828393
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "dd1c0cfe81c45e81e6e9fe94ef02df57ac4797c83e2edb84f5c3bc9b782221f5": {
+      "file_path": "outputs\\comic_20261023_093248_main-sq-test-part1-neon-_p3\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:03:10.170233Z",
+      "last_used_at": "2026-10-23T04:03:10.174755Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, one single full-bleed scene, kaito: short silver hair with a messy fringe, piercing amber eyes, wearing a sleek black high-collar tactical jacket with glowing neon blue seams., close-up shot, kaito looking up in shock, face lit by a massive pulsating purple rift in the sky, intense reflection in his eyes., vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no frame, no text, no letters, no words, no captions, no signature, no watermark, no speech bubbles, no sound effect lettering, wordless illustration, no speech balloons",
+        "style_preset": "anime",
+        "dimensions": "1024x1024",
+        "seed": 1505827391
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "7fc448b6302e6e7f9f4a64665a22928d35c9c984e83e8e6232e5c4c756cb99d7": {
+      "file_path": "outputs\\comic_20261023_101712_main-part1-aether-of-the_p0\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:47:17.116519Z",
+      "last_used_at": "2026-10-23T04:47:17.119073Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: short messy white hair, sharp amber eyes, charcoal-colored tactical combat gear with glowing blue circuits, cel-shaded anime comic panel, wide shot, kaelen standing before a massive floating stone door in a desolate desert tower, dust swirling around, dramatic lighting, cel-shaded, composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "8b069aace4ab11c0e29f30cd942a34e9869596c6648429084449dca48a86936e": {
+      "file_path": "outputs\\comic_20261023_101712_main-part1-aether-of-the_p1\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:47:21.339716Z",
+      "last_used_at": "2026-10-23T04:47:21.343198Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: short messy white hair, sharp amber eyes, charcoal-colored tactical combat gear with glowing blue circuits, cel-shaded anime comic panel, medium shot, kaelen pushing his hands against the stone door, blue energy veins pulsing from his gloves into the rock, dynamic sparks, composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "ccc0e723f110b512621fde16000eb47281ef7e316febce58f1b1c3e65a64c1d0": {
+      "file_path": "outputs\\comic_20261023_101712_main-part1-aether-of-the_p2\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:47:25.421067Z",
+      "last_used_at": "2026-10-23T04:47:25.424163Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: short messy white hair, sharp amber eyes, charcoal-colored tactical combat gear with glowing blue circuits, cel-shaded anime comic panel, close-up shot, kaelen's face illuminated by a blinding golden light emanating from behind the door, shocked expression, composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "f31a40b4626b3b2df658e35649c296ae5869eb08c65706774a208071015b29a5": {
+      "file_path": "outputs\\comic_20261023_101712_main-part1-aether-of-the_p3\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:47:29.483105Z",
+      "last_used_at": "2026-10-23T04:47:29.486840Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: short messy white hair, sharp amber eyes, charcoal-colored tactical combat gear with glowing blue circuits, cel-shaded anime comic panel, wide shot, kaelen standing in a vast chamber filled with floating gravity-defying shards of obsidian, glowing energy streams everywhere, composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "24bd2f1e1ffce2dcde74a4a5719ff63b0621e2c68afe92ca0824fe5525ea1a7c": {
+      "file_path": "outputs\\comic_20261023_101712_main-part1-aether-of-the_p4\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:47:33.455001Z",
+      "last_used_at": "2026-10-23T04:47:33.456978Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: short messy white hair, sharp amber eyes, charcoal-colored tactical combat gear with glowing blue circuits, cel-shaded anime comic panel, action shot, kaelen dodging a massive stone construct arm swiping at him from the shadows, high speed motion lines, composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "6cbc81bf3210de1aaa18e3965b2f60e819dd93dae0f9056fe7154a8f4919b7af": {
+      "file_path": "outputs\\comic_20261023_101712_main-part1-aether-of-the_p5\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:47:37.469915Z",
+      "last_used_at": "2026-10-23T04:47:37.472492Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: short messy white hair, sharp amber eyes, charcoal-colored tactical combat gear with glowing blue circuits, cel-shaded anime comic panel, close-up shot, kaelen unsheathing a blade of solid light, fierce determination, shadows looming over him, composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "bf58d5c07c3c633c92e0cccdedf9a59a7ed5daf74bdaf61e40122da417302892": {
+      "file_path": "outputs\\comic_20261023_101845_main-part1-echoes-of-the_p0\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:48:50.544371Z",
+      "last_used_at": "2026-10-23T04:48:50.546190Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., wide shot, a desolate wasteland with floating crystalline shards under a twilight sky, kaelen walking towards a massive glowing monolith., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "df02eeb6117ebdc05cbab6140c9099e62c035b6a322f908e00ef6c6353f3979c": {
+      "file_path": "outputs\\comic_20261023_101845_main-part1-echoes-of-the_p1\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:48:54.659009Z",
+      "last_used_at": "2026-10-23T04:48:54.661822Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., close-up shot, kaelen eyes widening as he touches the glowing blue pulse of the ancient monolith surface., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "8d5700d9009fc0fd35cbf1fd4e41b8483164a72e759e0d3c5562829f5295dcd6": {
+      "file_path": "outputs\\comic_20261023_101845_main-part1-echoes-of-the_p2\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:48:58.901272Z",
+      "last_used_at": "2026-10-23T04:48:58.908855Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., medium shot, bright blue energy flows from the monolith into kaelen's arm, causing his eyes to glow intensely bright., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "954300b8fe65eb41a7bf888e96bfb0434ff63e77a4c78344c08a12ce0ee28787": {
+      "file_path": "outputs\\comic_20261023_101845_main-part1-echoes-of-the_p3\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:49:03.104628Z",
+      "last_used_at": "2026-10-23T04:49:03.112684Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., action shot, kaelen is thrown backward by a shockwave while debris floats into the air around him., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "421b71a70d7347f47a63750978ad705e0972bd7015f542a1a8d9354fff76b836": {
+      "file_path": "outputs\\comic_20261023_101845_main-part1-echoes-of-the_p3_retry\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:49:07.213768Z",
+      "last_used_at": "2026-10-23T04:49:07.217062Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., action shot, kaelen is thrown backward by a shockwave while debris floats into the air around him., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters, wordless illustration, clean art, no speech balloons, no lettering",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67608930
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "b76edc5de6d0c5d80df5f05b150ad714aeba314d668712bdb1fb604dbf3c7fb5": {
+      "file_path": "outputs\\comic_20261023_101845_main-part1-echoes-of-the_p4\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:49:11.486608Z",
+      "last_used_at": "2026-10-23T04:49:11.489283Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., medium shot, kaelen stands up, now enveloped in a swirling blue aura, staring at a giant shadowy mechanical beast emerging from the ground., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "8896599ecb87bce751ffa321ba3cada920753603c0e5d5d557406731369ad131": {
+      "file_path": "outputs\\comic_20261023_101845_main-part1-echoes-of-the_p5\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T04:49:15.523075Z",
+      "last_used_at": "2026-10-23T04:49:15.525538Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., close-up shot, kaelen clenching his fist, charging up a ball of blue energy, looking determined and fierce., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "9bf3d94994e54d34172a8f307e826672bd6c7200acc587cf9732cf9d9200c62d": {
+      "file_path": "outputs\\comic_20261023_103949_main-part2-echoes-of-the_p0\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T05:09:53.107440Z",
+      "last_used_at": "2026-10-23T05:09:53.109000Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., action shot, kaelen narrowly dodging a massive stone fist from a colossal guardian, blue energy sparking erratically from his forearm., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "f4eaf102cacfb75971ab8734c213a8b409d16586bbdce392e70f2b59ac37cd98": {
+      "file_path": "outputs\\comic_20261023_103949_main-part2-echoes-of-the_p1\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T05:09:57.022790Z",
+      "last_used_at": "2026-10-23T05:09:57.024423Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., close-up shot, kaelen staring at his glowing blue runes, clenching his fist as he breathes heavily in a ruined courtyard., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "4b558fbc3d54e2f2e4e6c1028e1751bfb85c1dd70eba50ad0e5ae9abd9163ff7": {
+      "file_path": "outputs\\comic_20261023_103949_main-part2-echoes-of-the_p2\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T05:10:01.302326Z",
+      "last_used_at": "2026-10-23T05:10:01.304360Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., medium shot, a surge of brilliant azure light erupts from kaelen's arm, vaporizing the debris around him., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "4e066cf08d5d769222555ce1d569e117a5f2dec74ed8175678181ca4072dcd76": {
+      "file_path": "outputs\\comic_20261023_103949_main-part2-echoes-of-the_p3\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T05:10:07.478596Z",
+      "last_used_at": "2026-10-23T05:10:07.480204Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., action shot, kaelen mid-air, striking the center of the guardian with a glowing, rune-infused fist., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "fd1b2e7da5e620993c970723319037b88457548af3d4af113f10024eddc99508": {
+      "file_path": "outputs\\comic_20261023_103949_main-part2-echoes-of-the_p4\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T05:10:11.307371Z",
+      "last_used_at": "2026-10-23T05:10:11.309406Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., wide shot, the colossal guardian crumbling into glowing dust, kaelen standing still as the ruins settle., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "f1e5a9679778e2397521a05645119af9b93b319cd3a7eeb758c4755ba052dcbd": {
+      "file_path": "outputs\\comic_20261023_103949_main-part2-echoes-of-the_p5\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T05:10:17.088562Z",
+      "last_used_at": "2026-10-23T05:10:17.090204Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., close-up shot, kaelen looking towards the horizon as the sun rises over the desolate landscape., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "e8e39c389822f6ce5e8f9ba69163831d73d9bf22127f8262c371dbc3f4195b95": {
+      "file_path": "outputs\\comic_20261023_104814_main-part2-echoes-of-the_p0\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T05:18:18.526147Z",
+      "last_used_at": "2026-10-23T05:18:18.528866Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., action shot, kaelen dodging a massive stone fist while the blue runes on his forearm flare intensely with white light., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "7a1b6cba34f6824bf57c5188fd97233cadbe8f3d3a066fbdb19bc1bd8a8bcd3e": {
+      "file_path": "outputs\\comic_20261023_104814_main-part2-echoes-of-the_p1\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T05:18:22.731117Z",
+      "last_used_at": "2026-10-23T05:18:22.732819Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., close-up shot, close up of kaelen's face, his emerald eyes glowing with a faint blue aura of determination., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "07e655724fe11870693cb1b15c9482bcfd4b6316ef176acce1f30b22ad1d2fe7": {
+      "file_path": "outputs\\comic_20261023_104814_main-part2-echoes-of-the_p2\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T05:18:28.275099Z",
+      "last_used_at": "2026-10-23T05:18:28.276721Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., medium shot, kaelen thrusting his hand forward as a massive shockwave of blue energy ripples across the ruins., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "ca16dcfa0a23af9bb60b532960d7038cd73bbfb4e015c87c77cc70a6e32705a6": {
+      "file_path": "outputs\\comic_20261023_104814_main-part2-echoes-of-the_p3\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T05:18:32.136197Z",
+      "last_used_at": "2026-10-23T05:18:32.137899Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., action shot, a blinding beam of blue light striking the stone guardian, disintegrating its armor into glowing dust., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "983296362bb187f5797fd6d16c145d430bef3150c933730ddea15850c7f53eb1": {
+      "file_path": "outputs\\comic_20261023_104814_main-part2-echoes-of-the_p4\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T05:18:35.961058Z",
+      "last_used_at": "2026-10-23T05:18:35.962925Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., wide shot, kaelen standing alone in the clearing as the guardian falls, the ruins becoming peaceful again., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
+    },
+    "1b8b470c2e1e815eb765dc101e1b63eb485a9d89f2d92dcdf58d951a1de43960": {
+      "file_path": "outputs\\comic_20261023_104814_main-part2-echoes-of-the_p5\\images\\nvidia_nim.jpg",
+      "registered_at": "2026-10-23T05:18:40.526915Z",
+      "last_used_at": "2026-10-23T05:18:40.528600Z",
+      "lineage": {
+        "prompt_normalized": "cel-shaded anime illustration, single panel, kaelen: young man with silver spiky hair, sharp emerald eyes, wearing a tattered dark indigo cloak over tactical gear, glowing blue runes on his forearm., medium shot, kaelen walking away into the sunset through the ancient ruins, glowing runes slowly fading from view., composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, no speech bubbles, wordless, vibrant colors, clean lineart, original characters",
+        "style_preset": "anime",
+        "dimensions": "768x1344",
+        "seed": 67607927
+      },
+      "versioning": {
+        "provider": "nvidia_nim",
+        "model": "black-forest-labs/flux.2-klein-4b",
+        "provider_version": "1.0.0",
+        "model_version": "1.0.0",
+        "workflow_version": "1.0.0"
+      }
     }
   }
 }

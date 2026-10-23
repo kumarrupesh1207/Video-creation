@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "comfyui",
+      "runtimeExecutable": "C:/Rupesh/App/ComfyUI_windows_portable_nvidia/ComfyUI_windows_portable/python_embeded/python.exe",
+      "runtimeArgs": ["-s", "C:/Rupesh/App/ComfyUI_windows_portable_nvidia/ComfyUI_windows_portable/ComfyUI/main.py", "--cpu", "--windows-standalone-build", "--listen", "127.0.0.1", "--port", "8188"],
+      "port": 8188
+    },
+    {
+      "name": "aurora-api",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["server.py"],
+      "port": 8000
+    },
+    {
+      "name": "aurora-ui",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "ui", "run", "dev", "--", "--port", "5173", "--strictPort"],
+      "port": 5173
+    }
+  ]
+}
