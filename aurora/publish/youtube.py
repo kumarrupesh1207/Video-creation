@@ -211,25 +211,46 @@ def ensure_playlist(service, channel: str, title: str, video_privacy: str = "pub
     return pid
 
 
+def _retry_404(call, what: str, sleep=time.sleep, delays: tuple = (2, 5, 10)):
+    """A just-created playlist can answer 404 for a few seconds (eventual consistency): retry with backoff, then fail loudly."""
+    import sys
+
+    from googleapiclient.errors import HttpError
+
+    for i in range(len(delays) + 1):
+        try:
+            return call()
+        except HttpError as e:
+            if getattr(getattr(e, "resp", None), "status", 0) != 404:
+                raise
+            if i == len(delays):
+                print(f"[youtube] !!! {what}: still 404 after {len(delays)} retries; the video was NOT added", file=sys.stderr)
+                raise
+            sleep(delays[i])
+
+
 def add_to_series_playlist(service, channel: str, series: str, video_id: str, video_privacy: str = "public",
                            state_dir: Path = STATE_DIR, description: str | None = None, part: int | None = None,
-                           budget=None) -> str:
+                           budget=None, sleep=time.sleep) -> str:
     """Add the video to its series playlist unless already there, at position part-1 (parts stay in order)."""
     pid = ensure_playlist(service, channel, series, video_privacy, state_dir, description)
+    pl = service.playlistItems()
     if budget:
         budget.spend("playlistItems.list")
-    have = service.playlistItems().list(part="id", playlistId=pid, videoId=video_id, maxResults=1).execute().get("items", [])
+    have = _retry_404(lambda: pl.list(part="id", playlistId=pid, videoId=video_id, maxResults=1).execute(),
+                      f"playlist {pid} lookup", sleep).get("items", [])
     if have:
         return pid
     snippet = {"playlistId": pid, "resourceId": {"kind": "youtube#video", "videoId": video_id}}
     if part and part > 0:
         if budget:
             budget.spend("playlistItems.list")
-        total = service.playlistItems().list(part="id", playlistId=pid, maxResults=1).execute().get("pageInfo", {}).get("totalResults", 0)
-        snippet["position"] = min(part - 1, int(total))  # never beyond the end
+        total = _retry_404(lambda: pl.list(part="id", playlistId=pid, maxResults=1).execute(),
+                           f"playlist {pid} size", sleep).get("pageInfo", {}).get("totalResults", 0)
+        snippet["position"] = min(part - 1, int(total))  # explicit position, never beyond the end
     if budget:
         budget.spend("playlistItems.insert")
-    service.playlistItems().insert(part="snippet", body={"snippet": snippet}).execute()
+    _retry_404(lambda: pl.insert(part="snippet", body={"snippet": snippet}).execute(), f"playlist {pid} insert", sleep)
     return pid
 
 

@@ -191,3 +191,30 @@ def test_approvals_summary_lists_queue_drafts_report(q, vid, workspace_tmp_path,
     it = q.enqueue("facts", vid, {"title": "T"}, now=NOW)
     s = autopilot.approvals_summary(q, ["facts"])
     assert [i["id"] for i in s["queue"]] == [it["id"]] and s["comment_drafts"] == {"facts": []} and "facts" in s["weekly_report"]
+
+
+def _http_404():
+    from googleapiclient.errors import HttpError
+
+    return HttpError(MagicMock(status=404), b'{"error": {"errors": [{"reason": "playlistNotFound"}]}}')
+
+
+def test_new_playlist_404_is_retried_then_added_at_position(workspace_tmp_path):
+    svc = _svc_with_playlists()
+    ex = svc.playlistItems.return_value.list.return_value.execute
+    ex.side_effect = [_http_404(), _http_404(), {"items": []}, {"pageInfo": {"totalResults": 0}}]
+    slept = []
+    yt.add_to_series_playlist(svc, "shinobi", "Echoes", "V1", "private", workspace_tmp_path, part=1, sleep=slept.append)
+    assert slept == [2, 5]
+    assert svc.playlistItems.return_value.insert.call_args.kwargs["body"]["snippet"]["position"] == 0
+
+
+def test_playlist_404_that_never_clears_fails_loudly(workspace_tmp_path, capsys):
+    from googleapiclient.errors import HttpError
+
+    svc = _svc_with_playlists()
+    svc.playlistItems.return_value.list.return_value.execute.side_effect = _http_404()
+    with pytest.raises(HttpError):
+        yt.add_to_series_playlist(svc, "shinobi", "Echoes", "V1", "private", workspace_tmp_path, part=1, sleep=lambda s: None)
+    assert "NOT added" in capsys.readouterr().err
+    svc.playlistItems.return_value.insert.assert_not_called()
