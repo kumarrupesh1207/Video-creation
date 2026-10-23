@@ -194,7 +194,8 @@ class ImageSwitchboard:
             raise RuntimeError("[ImageSwitchboard] No providers were configured.")
 
         self._write_job_metadata(job_id, last_result, attempts)
-        raise RuntimeError("[ImageSwitchboard] All image providers failed.")
+        reasons = "; ".join(f"{a.get('provider')}: {str(a.get('error', a.get('status')))[:160]}" for a in attempts)
+        raise RuntimeError(f"[ImageSwitchboard] All image providers failed. {reasons}")
 
     def _lookup_cached_asset(
         self,

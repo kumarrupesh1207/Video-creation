@@ -219,62 +219,129 @@ def _comfy_up(cfg: dict) -> bool:
         return False
 
 
-def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode):
-    """Local ComfyUI first: ONE character reference image, then every panel via IP-Adapter on it (same seed + sheet text).
-    NIM (switchboard) is the fallback when ComfyUI is down or fails; consistency may drop there."""
+def _negative(cfg: dict) -> str:
+    base = cfg.get("providers", {}).get("local_comfyui", {}).get("negative_prompt", "lowres, bad anatomy, bad hands, extra fingers, deformed")
+    return f"{base}, {NO_TEXT_NEG}"  # the image model must not draw its own bubbles/gibberish text
+
+
+_SOFTEN = [(r"\b(blood\w*|gore|gory)\b", "crimson light"), (r"\b(kill\w*|murder\w*|stab\w*|impal\w*|decapitat\w*|slaughter\w*)\b", "defeat"),
+           (r"\b(slash\w*|slice\w*|cut)\b", "swing at"), (r"\b(wound\w*|injur\w*|bleed\w*)\b", "weary"),
+           (r"\b(corpse\w*|dead|death|dying|die)\b", "fallen"), (r"\b(scream\w*|agony|torture\w*)\b", "shout"),
+           (r"\b(gun|rifle|shoot\w*)\b", "energy beam"), (r"\b(sexy|nude|naked|seductive)\b", "elegant")]
+
+
+def soften_prompt(prompt: str, level: int = 1) -> str:
+    """Rewrite violent/risky wording so NIM's safety filter accepts the panel (level 2 adds a family-friendly suffix)."""
+    for pat, repl in _SOFTEN:
+        prompt = re.sub(pat, repl, prompt, flags=re.I)
+    return prompt + (", wholesome, safe for all ages, dramatic heroic pose, no violence" if level >= 2 else ", non-violent dramatic action")
+
+
+def _comfy_panels(cfg, sheet, panels, first, seed, job, neg, ref_path=None):
+    """ComfyUI panels [first:] conditioned on ONE reference image via IP-Adapter. Returns (images, timings, ref_path)."""
+    import time as _t
+
+    from backend.app.providers.local_comfyui import LocalComfyUIProvider
+
+    ccfg = cfg.get("comic", {})
+    prov, steps = LocalComfyUIProvider(cfg), int(ccfg.get("steps", 20))
+    res = list(ccfg.get("comfy_resolution", [512, 896]))
+    floor, mult = int(ccfg.get("comfy_timeout_sec", 1800)), float(ccfg.get("timeout_multiplier", 3))
+    weight = float(cfg.get("providers", {}).get("local_comfyui", {}).get("reference_weight", 0.4))
+    images, timings = [], []
+    if ref_path is None:
+        t0 = _t.time()
+        ref_prompt = (f"{research.COMIC_STYLE}, {sheet[0]['name']}: {sheet[0]['description']}, upper body, looking at viewer, "
+                      "simple plain background, character reference, vibrant colors, clean lineart")
+        ref = prov.generate_with_params(ref_prompt, "anime", res, f"{job}_ref", negative_prompt=neg, seed=seed, steps=steps,
+                                        timeout=max(floor, 3600))  # first image: no measurement yet -> generous
+        ref_path = ref.output_path
+        timings.append(round(_t.time() - t0, 1))
+    for i in range(first, len(panels)):
+        t0 = _t.time()
+        limit = int(max(floor, mult * sorted(timings)[len(timings) // 2])) if timings else max(floor, 3600)
+        r = prov.generate_with_reference(ref_path, research.panel_prompt(panels[i], sheet), "anime", res, f"{job}_p{i}",
+                                         negative_prompt=neg, seed=seed, steps=steps, weight=weight, timeout=limit)
+        images.append(Path(r.output_path))
+        timings.append(round(_t.time() - t0, 1))
+    return images, timings, ref_path
+
+
+def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode=None):
+    """Panel images. image_mode (config comic.image_mode): "nim" (default: Flux via NIM; ComfyUI+IP-Adapter only if NIM
+    fails/is capped), "auto"/"comfy" (ComfyUI first; "comfy" never touches NIM). Every fallback is explicit and logged."""
     import time as _t
 
     sheet, panels = comic["character_sheet"], comic["panels"]
-    images, timings, note = [], [], ""
-    base_neg = cfg.get("providers", {}).get("local_comfyui", {}).get("negative_prompt", "lowres, bad anatomy, bad hands, extra fingers, deformed")
-    neg = f"{base_neg}, {NO_TEXT_NEG}"  # the image model must not draw its own bubbles/gibberish text
-    if image_mode in ("auto", "comfy") and _comfy_up(cfg):
-        try:
-            from backend.app.providers.local_comfyui import LocalComfyUIProvider
+    mode = image_mode or cfg.get("comic", {}).get("image_mode", "nim")
+    neg, cost_dir = _negative(cfg), Path(cfg.get("cost_dir", COST_DIR))
+    cap_reel = int(cfg.get("comic", {}).get("max_nim_credits_per_reel", 8))
+    cap_day = int(cfg.get("providers", {}).get("nvidia_nim", {}).get("max_credits_per_day", 10))
 
-            ccfg = cfg.get("comic", {})
-            prov, steps = LocalComfyUIProvider(cfg), int(ccfg.get("steps", 20))
-            res = list(cfg.get("comic", {}).get("comfy_resolution", [512, 896]))
-            t0 = _t.time()
-            ref_prompt = (f"{research.COMIC_STYLE}, {sheet[0]['name']}: {sheet[0]['description']}, full body, standing, "
-                          "simple plain background, character reference, vibrant colors, clean lineart")
-            floor, mult = int(ccfg.get("comfy_timeout_sec", 1800)), float(ccfg.get("timeout_multiplier", 3))
-            ref = prov.generate_with_params(ref_prompt, "anime", res, f"{job}_ref", negative_prompt=neg, seed=seed, steps=steps,
-                                            timeout=max(floor, 3600))  # first image: no measurement yet -> generous
-            timings.append(round(_t.time() - t0, 1))
-            for i, p in enumerate(panels):
+    def nim_panels(images, timings, start=0):  # fills the lists in place so finished panels survive a mid-run failure
+        saved = getattr(switchboard, "fallback_order", None)
+        if saved is not None:
+            switchboard.fallback_order = ["nvidia_nim"]  # NIM only here: the ComfyUI fallback below uses the reference
+        try:
+            for i in range(start, len(panels)):
+                if len(images) >= cap_reel:
+                    raise RuntimeError(f"comic.max_nim_credits_per_reel={cap_reel} reached")
+                if credits_today("nvidia_nim", cost_dir) >= cap_day:
+                    raise RuntimeError(f"daily NIM cap {cap_day} credits reached")
                 t0 = _t.time()
-                limit = int(max(floor, mult * sorted(timings)[len(timings) // 2]))  # 3x the measured median, never below the floor
-                r = prov.generate_with_reference(ref.output_path, research.panel_prompt(p, sheet), "anime", res, f"{job}_p{i}",
-                                                 negative_prompt=neg, seed=seed, steps=steps, timeout=limit)
+                prompt = research.panel_prompt(panels[i], sheet)
+                for attempt in range(3):  # CONTENT_FILTERED -> retry with softened wording (each call may cost a credit)
+                    try:
+                        r = switchboard.generate(prompt, "anime", list(nim_res), f"{job}_p{i}_{attempt}" if attempt else f"{job}_p{i}",
+                                                 negative_prompt=neg, seed=seed)
+                    except Exception as exc:  # noqa: BLE001
+                        log_credits("nvidia_nim", 1, cost_dir)
+                        if "CONTENT_FILTERED" in str(exc) and attempt < 2:
+                            prompt = soften_prompt(prompt, attempt + 1)
+                            print(f"[comic] panel {i}: NIM safety filter, retrying with softened prompt (attempt {attempt + 2})")
+                            continue
+                        raise
+                    break
+                if getattr(r, "provider", "") == "nvidia_nim" and getattr(r, "latency_ms", 1):  # cache hits cost nothing
+                    log_credits("nvidia_nim", 1, cost_dir)
                 images.append(Path(r.output_path))
                 timings.append(round(_t.time() - t0, 1))
+        finally:
+            if saved is not None:
+                switchboard.fallback_order = saved
+
+    if mode == "nim":
+        images, timings = [], []
+        try:
+            nim_panels(images, timings)
+            return images, timings, "NIM (Flux), consistent via fixed seed + character sheet text", "nim"
+        except Exception as exc:  # noqa: BLE001 - quota/credit/API failure -> ComfyUI for the REMAINING panels
+            why = f"NIM failed after {len(images)}/{len(panels)} panels ({str(exc)[:120]})"
+            print(f"[comic] FALLBACK to ComfyUI IP-Adapter: {why}")
+            ref = images[0] if images else None
+            more, t2, _ = _comfy_panels(cfg, sheet, panels, len(images), seed, job, neg, ref_path=ref)
+            return (images + more, timings + t2, f"{why}; remaining panels via ComfyUI character reference + IP-Adapter "
+                    "(look may differ from the NIM panels)", "nim+comfy_fallback")
+    if mode in ("auto", "comfy") and _comfy_up(cfg):
+        try:
+            images, timings, _ = _comfy_panels(cfg, sheet, panels, 0, seed, job, neg)
             return images, timings, "ComfyUI character reference + IP-Adapter (consistent look)", "comfy_ipadapter"
-        except Exception as exc:  # noqa: BLE001 - fall back to NIM (unless the caller demanded ComfyUI)
-            if image_mode == "comfy":
+        except Exception as exc:  # noqa: BLE001
+            if mode == "comfy":
                 raise
             note = f"ComfyUI failed ({str(exc)[:80]}); "
-            images, timings = [], []
-    elif image_mode == "comfy":
+    elif mode == "comfy":
         raise RuntimeError("image_mode=comfy but ComfyUI is not reachable")
-    # --- NIM fallback: explicit, capped, logged (never silent). Default cap 0 credits per comic reel.
+    else:
+        note = ""
+    # auto mode: ComfyUI unavailable -> NIM, explicit and capped
     need = len(panels)
-    cost_dir = Path(cfg.get("cost_dir", COST_DIR))
-    cap_reel = int(cfg.get("comic", {}).get("max_nim_credits_per_reel", 0))
-    cap_day = int(cfg.get("providers", {}).get("nvidia_nim", {}).get("max_credits_per_day", 10))
-    if need > cap_reel:
-        raise RuntimeError(f"{note}NIM fallback would use {need} credits but comic.max_nim_credits_per_reel={cap_reel}; "
-                           "start ComfyUI or raise the cap")
-    if credits_today("nvidia_nim", cost_dir) + need > cap_day:
-        raise RuntimeError(f"{note}NIM fallback blocked: daily cap {cap_day} credits (used {credits_today('nvidia_nim', cost_dir)})")
-    print(f"[comic] FALLBACK to NIM for {need} panels ({note.strip() or 'ComfyUI not reachable'}); credits used today "
-          f"{credits_today('nvidia_nim', cost_dir)} / {cap_day}")
-    for i, p in enumerate(panels):
-        t0 = _t.time()
-        r = switchboard.generate(research.panel_prompt(p, sheet), "anime", list(nim_res), f"{job}_p{i}", negative_prompt=neg, seed=seed)
-        images.append(Path(r.output_path))
-        timings.append(round(_t.time() - t0, 1))
-    log_credits("nvidia_nim", need, cost_dir)
+    if need > cap_reel or credits_today("nvidia_nim", cost_dir) + need > cap_day:
+        raise RuntimeError(f"{note}NIM fallback would use {need} credits (reel cap {cap_reel}, daily cap {cap_day}, used today "
+                           f"{credits_today('nvidia_nim', cost_dir)}); start ComfyUI or raise the cap")
+    print(f"[comic] FALLBACK to NIM for {need} panels ({note.strip() or 'ComfyUI not reachable'})")
+    images, timings = [], []
+    nim_panels(images, timings)
     return (images, timings, f"{note or 'ComfyUI not reachable; '}NIM fallback used {need} credits: character consistency may drop "
             "between panels", "nim_fallback")
 
@@ -282,7 +349,7 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode):
 def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None = None, language: str = "English",
                     panels: int = 6, voice: str = "en-US-AvaNeural", comic: dict | None = None, switchboard=None,
                     music: bool = True, series_dir: Path | None = None, resolution: tuple[int, int] = (576, 1024),
-                    client=None, image_mode: str = "auto") -> dict:
+                    client=None, image_mode: str | None = None) -> dict:
     """Research (series-aware) -> panel images (NIM -> local ComfyUI anime) -> render -> validate -> sidecar -> save series state.
 
     Returns {"video", "sidecar", "title", "caption", "part", "source", "seconds"}. Raises on validation failure."""

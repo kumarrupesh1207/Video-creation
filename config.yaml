@@ -49,7 +49,8 @@ comic:                             # aurora/comic.py image settings (ComfyUI fir
   comfy_resolution: [512, 896]
   comfy_timeout_sec: 1800          # per-image floor; later panels get max(floor, 3 x median of the images so far)
   timeout_multiplier: 3
-  max_nim_credits_per_reel: 0      # NIM fallback is OFF for comic reels unless raised (it spends credits)
+  image_mode: nim                  # nim (default) | auto (ComfyUI first) | comfy (ComfyUI only)
+  max_nim_credits_per_reel: 8      # NIM credits one comic reel may use (panels per reel)
 
 motion:
   liveportrait:
@@ -123,13 +124,14 @@ providers:
       cinematic: "black-forest-labs/flux.2-klein-4b"
     timeout: 60
     quota: 80
-    max_credits_per_day: 10          # hard daily cap for automatic fallbacks (comic)
+    max_credits_per_day: 30          # hard daily cap on NIM credits for comic reels (3 reels x ~7 images); the real balance is not readable from the API
   local_comfyui:
     cfg: 5.5
     steps: 25
     sampler_name: "dpmpp_2m"
     scheduler: "karras"
     anime_checkpoint: "Counterfeit-V2.5_fp16.safetensors"   # used when style == anime (CreativeML OpenRAIL-M)
+    reference_weight: 0.4            # IP-Adapter strength for comic panels (0.7 copied the reference pose into every panel)
     default_resolution: [512, 768]   # used when the request gives none
     refine:                          # optional hires-fix style 2nd pass (slow on CPU)
       enabled: false
@@ -235,3 +237,5 @@ autopilot:
       reels_per_day: 3
       motion: ai            # free Kaggle AI motion; falls back to camera motion
       voice: en-US-AvaNeural   # young adult female, natural
+      format: comic         # motion-comic series (aurora/comic.py); omit for plain image reels
+      panels: 6

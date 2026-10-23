@@ -71,6 +71,9 @@ def get_ideas(channel: dict, n: int, research=None, sleep=time.sleep, retries: i
     from aurora import load_env
 
     load_env()
+    if channel.get("format") == "comic":  # one idea per reel; aurora.comic researches the actual story + series continuity
+        return [{"topic": channel.get("niche", "an original anime story"), "title": channel["name"], "description": "",
+                 "hashtags": ["#anime", "#animeshorts", "#originalstory", "#shorts"], "ai_disclosure": True} for _ in range(n)]
     err = "no ideas"
     for attempt in range(retries):
         try:
@@ -102,6 +105,19 @@ def render_idea(cfg: dict, switchboard, channel: dict, idea: dict) -> dict:
         captions=True, motion=channel.get("motion", "camera"), no_llm=False, voice=channel.get("voice"),
         voice_engine=None, voice_gender=None, speaker_wav=None, voiceover_text=idea.get("voiceover"))
     out_dir = ROOT / "outputs" / "final" / channel["name"] / datetime.now().date().isoformat()
+    if channel.get("format") == "comic":  # motion comic: image panels + voice + music + series state
+        import json as _json
+
+        from aurora.comic import make_comic_reel
+
+        res = make_comic_reel(channel["name"], idea["topic"], ROOT / "outputs" / "final" / channel["name"] / "comic", cfg=cfg,
+                              language=LANGS.get(str(channel.get("language", "en")).lower(), "English"),
+                              panels=int(channel.get("panels", 6)), voice=channel.get("voice", "en-US-AvaNeural"),
+                              switchboard=switchboard)
+        side = _json.loads(Path(res["sidecar"]).read_text(encoding="utf-8"))
+        idea.update(series=side["series"]["title"], part=side["part"], description=side["caption"],
+                    hook=None)  # compose_meta -> "<Series> – Part N"
+        return side
     if not idea.get("image_prompt"):  # topics.txt stub: let autorun's own LLM step write the prompt
         return autorun.process_topic(cfg, switchboard, idea["topic"], a, out_dir)
     text = {"image_prompt": idea["image_prompt"] + autorun.QUALITY_SUFFIX, "caption": idea.get("hook") or idea["title"],

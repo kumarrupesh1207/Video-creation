@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import math
 import os
@@ -52,6 +53,19 @@ class NvidiaNIMProvider(ImageProvider):
         if endpoint_mode == "direct_model":
             return f"{root}/{model_path}"
         return root
+
+    @staticmethod
+    def _record_headers(resp) -> None:
+        """Save quota/credit/rate-limit headers of the latest call (never auth) to outputs/costs/nim_last_headers.json."""
+        try:
+            keep = {k: v for k, v in resp.headers.items()
+                    if any(t in k.lower() for t in ("ratelimit", "credit", "quota", "retry-after", "nvcf", "usage"))}
+            out = Path("outputs") / "costs" / "nim_last_headers.json"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps({"status": resp.status_code, "time": time.strftime("%Y-%m-%d %H:%M:%S"), "headers": keep},
+                                      indent=2), encoding="utf-8")
+        except Exception:  # noqa: BLE001 - diagnostics only
+            pass
 
     def generate(self, prompt: str, style: str, resolution: list[int], job_id: str) -> ImageResult:
         return self.generate_with_params(prompt, style, resolution, job_id)
@@ -149,7 +163,9 @@ class NvidiaNIMProvider(ImageProvider):
             headers=headers,
             timeout=timeout,
         )
-        resp.raise_for_status()
+        self._record_headers(resp)
+        if resp.status_code >= 400:  # keep the API's own words (quota / credits / rate limit)
+            raise requests.HTTPError(f"[NVIDIA NIM] HTTP {resp.status_code}: {resp.text[:300]}", response=resp)
         job_root = Path(self.config.get("paths", {}).get("base_output", "outputs")) / job_id
         image_dir = job_root / "images"
         image_dir.mkdir(parents=True, exist_ok=True)

@@ -17,7 +17,7 @@ def test_panel_prompt_embeds_character_sheet_verbatim():
     sheet = [{"name": "Ren", "description": "boy, silver hair, blue eyes, black coat"},
              {"name": "Mira", "description": "woman, crimson ponytail, gold armor"}]
     p = research.panel_prompt({"shot": "action", "characters": ["Mira"], "image_prompt": "slashes a sword"}, sheet)
-    assert "cel-shaded anime comic panel" in p and "crimson ponytail, gold armor" in p and "silver hair" not in p
+    assert "cel-shaded anime" in p and "comic panel" not in p and "crimson ponytail, gold armor" in p and "silver hair" not in p
     assert "action shot" in p and "slashes a sword" in p
 
 
@@ -87,47 +87,6 @@ def test_story_finishes_then_new_story_and_end_card_rule(workspace_tmp_path):
     assert p3["series"]["part"] == 1  # finished story -> a new one starts
 
 
-def test_panel_images_use_comfy_reference_then_fall_back_to_nim(workspace_tmp_path, monkeypatch):
-    from backend.app.providers import local_comfyui as lc
-
-    spec = research.research_comic("c", "a swordsman", panels=5, cfg={}, series_dir=workspace_tmp_path)["comic"]
-    calls, timeouts = [], []
-
-    class FakeProv:
-        def __init__(self, cfg):
-            pass
-
-        def generate_with_params(self, prompt, style, res, job, negative_prompt=None, seed=None, steps=None, timeout=None):
-            calls.append(("ref", seed, steps))
-            return SimpleNamespace(output_path=str(workspace_tmp_path / "ref.png"))
-
-        def generate_with_reference(self, ref, prompt, style, res, job, negative_prompt=None, seed=None, steps=None, timeout=None):
-            assert "speech bubble" in negative_prompt
-            timeouts.append(timeout)
-            calls.append(("panel", ref, seed))
-            return SimpleNamespace(output_path=str(workspace_tmp_path / f"{job}.png"))
-
-    class Board:
-        def generate(self, prompt, style, res, job, negative_prompt="", seed=None):
-            assert "speech bubble" in negative_prompt
-            calls.append(("nim", seed))
-            return SimpleNamespace(output_path=str(workspace_tmp_path / f"{job}.png"))
-
-    monkeypatch.setattr(lc, "LocalComfyUIProvider", FakeProv)
-    monkeypatch.setattr(comic, "_comfy_up", lambda cfg: True)
-    imgs, timings, note, mode = comic._panel_images({}, Board(), spec, 77, "j", (576, 1024), "auto")
-    assert mode == "comfy_ipadapter" and len(imgs) == 5 and len(timings) == 6
-    assert calls[0][0] == "ref" and all(c[0] == "panel" and c[2] == 77 for c in calls[1:])
-    assert all(c[1] == str(workspace_tmp_path / "ref.png") for c in calls[1:])  # every panel conditioned on one reference
-    calls.clear()
-    monkeypatch.setattr(comic, "_comfy_up", lambda cfg: False)
-    assert all(t and t >= 1800 for t in timeouts)  # per-image timeout = max(floor, 3 x median so far)
-    cfg = {"comic": {"max_nim_credits_per_reel": 10}, "cost_dir": str(workspace_tmp_path / "costs")}
-    imgs, timings, note, mode = comic._panel_images(cfg, Board(), spec, 77, "j", (576, 1024), "auto")
-    assert mode == "nim_fallback" and "consistency may drop" in note and "5 credits" in note and [c[0] for c in calls] == ["nim"] * 5
-    from aurora.costs import credits_today
-
-    assert credits_today("nvidia_nim", workspace_tmp_path / "costs") == 5  # fallback is logged, never silent
 
 
 @needs_ffmpeg
@@ -180,16 +139,120 @@ def test_explicit_comfy_mode_does_not_fall_back_to_nim(workspace_tmp_path, monke
         comic._panel_images({}, SimpleNamespace(generate=lambda *a, **k: pytest.fail("NIM must not be called")), spec, 1, "j", (576, 1024), "comfy")
 
 
-def test_nim_fallback_is_off_by_default_and_daily_capped(workspace_tmp_path, monkeypatch):
-    spec = research.research_comic("c", "a swordsman", panels=5, cfg={}, series_dir=workspace_tmp_path)["comic"]
-    board = SimpleNamespace(generate=lambda *a, **k: pytest.fail("NIM must not be called"))
-    monkeypatch.setattr(comic, "_comfy_up", lambda cfg: False)
-    with pytest.raises(RuntimeError, match="max_nim_credits_per_reel=0"):  # default cap 0 -> explicit failure, no spend
-        comic._panel_images({"cost_dir": str(workspace_tmp_path / "c")}, board, spec, 1, "j", (576, 1024), "auto")
-    from aurora.costs import log_credits
 
-    log_credits("nvidia_nim", 8, workspace_tmp_path / "c")
-    cfg = {"comic": {"max_nim_credits_per_reel": 10}, "providers": {"nvidia_nim": {"max_credits_per_day": 10}},
-           "cost_dir": str(workspace_tmp_path / "c")}
-    with pytest.raises(RuntimeError, match="daily cap"):  # 8 used + 5 needed > 10
-        comic._panel_images(cfg, board, spec, 1, "j", (576, 1024), "auto")
+class _Prov:
+    """Fake LocalComfyUIProvider recording the reference + weight every panel is conditioned on."""
+
+    calls = []
+
+    def __init__(self, cfg):
+        pass
+
+    def generate_with_params(self, prompt, style, res, job, negative_prompt=None, seed=None, steps=None, timeout=None):
+        _Prov.calls.append(("ref", seed, timeout))
+        return SimpleNamespace(output_path=f"{job}.png")
+
+    def generate_with_reference(self, ref, prompt, style, res, job, negative_prompt=None, seed=None, steps=None, weight=None, timeout=None):
+        assert "speech bubble" in negative_prompt
+        _Prov.calls.append(("panel", ref, weight, timeout))
+        return SimpleNamespace(output_path=f"{job}.png")
+
+
+class _Board:
+    def __init__(self, tmp, fail_at=None):
+        self.tmp, self.fail_at, self.n, self.fallback_order = tmp, fail_at, 0, ["nvidia_nim", "local_comfyui"]
+        self.orders = []
+
+    def generate(self, prompt, style, res, job, negative_prompt="", seed=None):
+        assert "speech bubble" in negative_prompt and "no text" in prompt
+        self.orders.append(list(self.fallback_order))
+        if self.fail_at is not None and self.n == self.fail_at:
+            raise RuntimeError("HTTP 402: insufficient credits")
+        self.n += 1
+        return SimpleNamespace(output_path=str(self.tmp / f"{job}.jpg"), provider="nvidia_nim", latency_ms=900)
+
+
+def _spec(tmp, panels=5):
+    return research.research_comic("c", "a swordsman", panels=panels, cfg={}, series_dir=tmp)["comic"]
+
+
+def test_nim_is_the_default_image_source_and_credits_are_logged(workspace_tmp_path):
+    from aurora.costs import credits_today
+
+    board = _Board(workspace_tmp_path)
+    cfg = {"cost_dir": str(workspace_tmp_path / "costs")}
+    imgs, timings, note, mode = comic._panel_images(cfg, board, _spec(workspace_tmp_path), 7, "j", (576, 1024))
+    assert mode == "nim" and len(imgs) == 5 and all(o == ["nvidia_nim"] for o in board.orders)  # NIM only, no silent ComfyUI
+    assert board.fallback_order == ["nvidia_nim", "local_comfyui"]  # restored afterwards
+    assert credits_today("nvidia_nim", workspace_tmp_path / "costs") == 5
+
+
+def test_nim_failure_continues_on_comfy_ip_adapter_at_low_weight(workspace_tmp_path, monkeypatch, capsys):
+    from backend.app.providers import local_comfyui as lc
+
+    _Prov.calls = []
+    monkeypatch.setattr(lc, "LocalComfyUIProvider", _Prov)
+    board = _Board(workspace_tmp_path, fail_at=2)  # quota runs out on the 3rd panel
+    cfg = {"cost_dir": str(workspace_tmp_path / "costs"), "providers": {"local_comfyui": {"reference_weight": 0.4}}}
+    imgs, timings, note, mode = comic._panel_images(cfg, board, _spec(workspace_tmp_path), 7, "j", (576, 1024))
+    assert mode == "nim+comfy_fallback" and len(imgs) == 5 and "NIM failed after 2/5" in note and "insufficient credits" in note
+    panels = [c for c in _Prov.calls if c[0] == "panel"]
+    assert len(panels) == 3 and all(str(c[1]) == str(workspace_tmp_path / "j_p0.jpg") and c[2] == 0.4 for c in panels)  # 1st NIM panel = reference
+    assert not [c for c in _Prov.calls if c[0] == "ref"]
+    assert "FALLBACK to ComfyUI" in capsys.readouterr().out  # never silent
+
+
+def test_daily_cap_sends_remaining_panels_to_comfy(workspace_tmp_path, monkeypatch):
+    from aurora.costs import log_credits
+    from backend.app.providers import local_comfyui as lc
+
+    _Prov.calls = []
+    monkeypatch.setattr(lc, "LocalComfyUIProvider", _Prov)
+    log_credits("nvidia_nim", 10, workspace_tmp_path / "costs")  # today's cap already used
+    board = _Board(workspace_tmp_path)
+    cfg = {"cost_dir": str(workspace_tmp_path / "costs")}
+    imgs, timings, note, mode = comic._panel_images(cfg, board, _spec(workspace_tmp_path), 7, "j", (576, 1024))
+    assert mode == "nim+comfy_fallback" and "daily NIM cap" in note and board.n == 0
+    assert len([c for c in _Prov.calls if c[0] == "ref"]) == 1 and len(imgs) == 5
+
+
+def test_comfy_modes_and_auto_fallback_caps(workspace_tmp_path, monkeypatch):
+    from backend.app.providers import local_comfyui as lc
+
+    _Prov.calls = []
+    monkeypatch.setattr(lc, "LocalComfyUIProvider", _Prov)
+    monkeypatch.setattr(comic, "_comfy_up", lambda cfg: True)
+    spec = _spec(workspace_tmp_path)
+    cfg = {"cost_dir": str(workspace_tmp_path / "costs")}
+    board = SimpleNamespace(generate=lambda *a, **k: pytest.fail("NIM must not be called"))
+    imgs, timings, note, mode = comic._panel_images(cfg, board, spec, 7, "j", (576, 1024), "comfy")
+    assert mode == "comfy_ipadapter" and len(timings) == 6
+    assert all(c[3] >= 1800 for c in _Prov.calls if c[0] == "panel")  # per-image timeout >= floor
+    monkeypatch.setattr(comic, "_comfy_up", lambda cfg: False)
+    with pytest.raises(RuntimeError, match="not reachable"):  # explicit comfy never falls back to NIM
+        comic._panel_images(cfg, board, spec, 7, "j", (576, 1024), "comfy")
+    small = {"cost_dir": str(workspace_tmp_path / "costs"), "comic": {"max_nim_credits_per_reel": 3}}
+    with pytest.raises(RuntimeError, match="reel cap 3"):  # auto + ComfyUI down: NIM fallback is capped
+        comic._panel_images(small, board, spec, 7, "j", (576, 1024), "auto")
+
+
+def test_soften_prompt_and_filtered_panel_is_retried(workspace_tmp_path):
+    out = comic.soften_prompt("hero slashes a monster, blood everywhere, the dying beast", 2)
+    assert "blood" not in out and "slash" not in out and "dying" not in out and "safe for all ages" in out
+
+    class FlakyBoard(_Board):
+        def generate(self, prompt, style, res, job, negative_prompt="", seed=None):
+            if self.n == 0 and "non-violent" not in prompt:
+                self.n += 0
+                raise RuntimeError("[ImageSwitchboard] All image providers failed. nvidia_nim: [NVIDIA NIM] Generation blocked: CONTENT_FILTERED")
+            return super().generate(prompt, style, res, job, negative_prompt, seed)
+
+    spec = _spec(workspace_tmp_path)
+    spec["panels"][0]["image_prompt"] = "hero slashes a monster, blood everywhere"
+    board = FlakyBoard(workspace_tmp_path)
+    cfg = {"cost_dir": str(workspace_tmp_path / "costs")}
+    imgs, timings, note, mode = comic._panel_images(cfg, board, spec, 7, "j", (576, 1024))
+    assert mode == "nim" and len(imgs) == 5  # panel 0 succeeded on the softened retry
+    from aurora.costs import credits_today
+
+    assert credits_today("nvidia_nim", workspace_tmp_path / "costs") == 6  # the filtered attempt is counted too
