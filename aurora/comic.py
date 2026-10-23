@@ -83,8 +83,8 @@ def fit_text(draw, text: str, max_w: int, max_h: int, hi: int, lo: int):
         words = words[:-1]
 
 
-def make_overlay(path: Path, narration: str = "", bubble: str = "", title: str = "", subtitle: str = "", border: bool = True,
-                 speaker_x: int | None = None, layout: "comic_layout.Layout | None" = None) -> Path:
+def _overlay_bands(path: Path, narration: str = "", bubble: str = "", title: str = "", subtitle: str = "", border: bool = True,
+                   speaker_x: int | None = None, layout: "comic_layout.Layout | None" = None) -> Path:
     """Transparent 1080x1920 PNG with text ONLY in the reserved bands: narration box (top band), speech bubble (dialogue
     band, tail pointing up into the art toward speaker_x), or title/subtitle cards (top / dialogue band). The art window,
     the bottom safe zone and the right strip stay free of text."""
@@ -137,6 +137,102 @@ def make_overlay(path: Path, narration: str = "", bubble: str = "", title: str =
                 y += lh2
     img.save(path)
     return path
+
+
+def _place_text(d, text: str, occ, blocked, hi: int, lo: int, widths, pad_x: int, pad_y: int):
+    """Try font sizes hi..lo and wrap widths (wide -> narrow boxes) and keep the best-scoring placement: overlap with the
+    characters (head/upper body weighted) + a small penalty per font step and per narrowing, so readable text beats a tiny
+    box squeezed into a gap. Text is never cut off: fonts shrink first, then boxes get narrower."""
+    best = None
+    for si, size in enumerate(range(hi, lo - 1, -4)):
+        f = _font(size, text)
+        for wi, max_w in enumerate(widths):
+            lines = _balanced(d, text, f, max_w)
+            lh = int(size * 1.28)
+            tw = int(max(d.textlength(l, font=f) for l in lines))
+            bw, bh = tw + 2 * pad_x, len(lines) * lh + 2 * pad_y
+            if bw > comic_layout.SAFE[2] - comic_layout.SAFE[0] or bh > comic_layout.SAFE[3] - comic_layout.SAFE[1]:
+                continue
+            x, y, cost = comic_layout.best_spot(occ, bw, bh, blocked)
+            score = cost + 0.03 * si + 0.01 * wi
+            if best is None or score < best[0]:
+                best = (score, cost, f, lines, lh, x, y, bw, bh)
+    return best[2:], best[1]
+
+
+def _overlay_free(path: Path, narration: str, bubble: str, title: str, subtitle: str, border: bool, occ, head, L) -> Path:
+    """Full-bleed art: narration box and speech bubble go where the characters are NOT (occupancy from the segmentation mask
+    + faces over the whole Ken-Burns move), inside the platform-UI safe zones; the tail points at the speaker's head."""
+    import numpy as np
+
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    if border:
+        d.rectangle([18, 18, W - 18, H - 18], outline=(255, 255, 255, 255), width=9)
+    if occ is None:
+        occ = np.zeros((H // comic_layout.CELL, W // comic_layout.CELL), np.float32)
+    S = comic_layout.SAFE
+    blocked, narr_box = [], None
+    if narration:
+        (f, lines, lh, x0, y0, bw, bh), cost = _place_text(d, narration, occ, blocked, 54, 30, (880, 700, 560, 440, 340), 28, 22)
+        narr_box = (x0, y0, x0 + bw, y0 + bh)
+        d.rectangle(list(narr_box), fill=(255, 243, 196, 255), outline=(20, 20, 20, 255), width=5)
+        for k, l in enumerate(lines):
+            d.text((x0 + 28, y0 + 22 + k * lh), l, font=f, fill=(20, 20, 20, 255))
+        blocked.append(narr_box)
+    if bubble:
+        (f, lines, lh, x0, y0, bw, bh), cost = _place_text(d, bubble, occ, blocked, 54, 30, (760, 600, 480, 380, 300), 46, 28)
+        # tail: from the bubble edge toward the speaker's head, stopping before it reaches the character
+        cx, cy = x0 + bw / 2, y0 + bh / 2
+        tail = None
+        if head:
+            dx, dy = head[0] - cx, head[1] - cy
+            dist = max((dx * dx + dy * dy) ** 0.5, 1.0)
+            ux, uy = dx / dist, dy / dist
+            edge = 1.0 / (((ux / (bw / 2)) ** 2 + (uy / (bh / 2)) ** 2) ** 0.5)
+            base = (cx + ux * (edge - 8), cy + uy * (edge - 8))
+            L_t = 0.0
+            while L_t < 110:
+                px, py = base[0] + ux * (L_t + 8), base[1] + uy * (L_t + 8)
+                gx, gy = int(px // comic_layout.CELL), int(py // comic_layout.CELL)
+                if not (0 <= gx < occ.shape[1] and 0 <= gy < occ.shape[0]) or occ[gy, gx] > 0.5 or L_t + 8 >= dist - edge:
+                    break
+                L_t += 8
+            L_t = max(L_t, 34.0) if dist - edge > 40 else 0.0
+            if L_t:
+                tip = (base[0] + ux * L_t, base[1] + uy * L_t)
+                nx, ny = -uy * 24, ux * 24
+                tail = [(base[0] + nx, base[1] + ny), tip, (base[0] - nx, base[1] - ny)]
+        d.rounded_rectangle([x0, y0, x0 + bw, y0 + bh], radius=min(bh // 2, 56), fill=(255, 255, 255, 255), outline=(20, 20, 20, 255), width=6)
+        if tail:
+            d.polygon(tail, fill=(255, 255, 255, 255))
+            d.line([tail[0], tail[1], tail[2]], fill=(20, 20, 20, 255), width=6)
+            d.line([tail[0], tail[2]], fill=(255, 255, 255, 255), width=9)
+        for k, l in enumerate(lines):
+            d.text((x0 + (bw - d.textlength(l, font=f)) / 2, y0 + 28 + k * lh), l, font=f, fill=(20, 20, 20, 255))
+    if title:  # cover / end card over the (dimmed) art, centred in the safe area
+        f, lines, lh = fit_text(d, title, S[2] - S[0] - 20, 400, 110, 56)
+        y = 700
+        for l in lines:
+            d.text((S[0] + (S[2] - S[0] - d.textlength(l, font=f)) / 2, y), l, font=f, fill=(255, 255, 255, 255), stroke_width=7, stroke_fill=(0, 0, 0, 255))
+            y += lh
+        if subtitle:
+            f2, lines2, lh2 = fit_text(d, subtitle, S[2] - S[0] - 20, 200, 70, 36)
+            for l in lines2:
+                d.text((S[0] + (S[2] - S[0] - d.textlength(l, font=f2)) / 2, y + 30), l, font=f2, fill=(255, 214, 80, 255), stroke_width=6, stroke_fill=(0, 0, 0, 255))
+                y += lh2
+    img.save(path)
+    return path
+
+
+def make_overlay(path: Path, narration: str = "", bubble: str = "", title: str = "", subtitle: str = "", border: bool = True,
+                 speaker_x: int | None = None, layout: "comic_layout.Layout | None" = None, occ=None, head=None) -> Path:
+    """Text overlay PNG. Default: full-bleed art with segmentation-aware placement (`occ`, `head`); layout.bands=True keeps
+    the reserved-band layout."""
+    L = layout or comic_layout.Layout()
+    if L.bands:
+        return _overlay_bands(path, narration, bubble, title, subtitle, border, speaker_x, L)
+    return _overlay_free(path, narration, bubble, title, subtitle, border, occ, head, L)
 
 
 def _zoompan(motion: str, frames: int) -> str:
@@ -237,7 +333,9 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
     voices: list[tuple[Path | None, float]] = []  # (voice file, start seconds)
     notes, t = [], 0.0
 
-    def fitted(img, name):  # art-window-shaped crop of the image, subject-aware (heads/hoods stay in frame)
+    def fitted(img, name):  # bands mode only: art-window-shaped crop (full-bleed uses the whole image)
+        if not L.bands:
+            return Path(img)
         try:
             return comic_layout.art_crop(Path(img), work / f"art_{name}.png", W, L.art_h)
         except Exception as exc:  # noqa: BLE001 - never block a render on the crop
@@ -256,15 +354,24 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
         notes.append(note)
         secs = max((_duration(vfile) if vfile else 3.0) + PAD, PANEL_MIN_S)
         motion = "punch" if p.get("action") else MOTIONS[i % len(MOTIONS)]
-        sx = None
-        if layout_aware and p.get("bubble"):  # face detection only picks the bubble tail's side; if it misses -> centre
+        sx, occ, head = None, None, None
+        if layout_aware and not L.bands:  # full-bleed: where are the characters over the whole move? (mask + faces)
+            try:
+                with Image.open(img) as im0:
+                    iw, ih = im0.size
+                faces_img = comic_layout.detect_faces(Path(img))
+                occ = comic_layout.occupancy_over_motion(comic_layout.foreground_mask(Path(img)), faces_img, iw, ih, motion)
+                head = comic_layout.head_point(occ, comic_layout.faces_over_motion(faces_img, iw, ih, motion) if faces_img else None)
+            except Exception as exc:  # noqa: BLE001 - placement is best effort; defaults still keep text in the safe zones
+                notes.append(f"panel {i}: placement analysis skipped ({str(exc)[:60]})")
+        if layout_aware and L.bands and p.get("bubble"):  # face detection only picks the bubble tail's side; if it misses -> centre
             try:
                 with Image.open(img) as im0:
                     iw, ih = im0.size
                 sx = comic_layout.speaker_x(comic_layout.detect_faces(Path(img)), iw, ih, W, L.art_h)
             except Exception as exc:  # noqa: BLE001
                 notes.append(f"panel {i}: face detection skipped ({str(exc)[:60]})")
-        ov = make_overlay(work / f"ov_{i}.png", narration=p["narration"], bubble=p.get("bubble", ""), speaker_x=sx, layout=L)
+        ov = make_overlay(work / f"ov_{i}.png", narration=p["narration"], bubble=p.get("bubble", ""), speaker_x=sx, layout=L, occ=occ, head=head)
         clips.append((render_clip(ffmpeg, fitted(img, str(i)), ov, secs, motion, work / f"clip_{i}.mp4", layout=L), secs))
         voices.append((vfile, t + 0.05))
         t += secs - XF

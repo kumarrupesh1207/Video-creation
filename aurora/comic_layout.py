@@ -136,23 +136,28 @@ def place_bubble(bw: int, bh: int, faces: list[Box], blocked: list[Box] = (), ta
 
 
 class Layout:
-    """Reserved bands of the 1080x1920 frame. Text lives ONLY in the top/dialogue bands, never on the art:
-    top band (narration) | art window (image + Ken Burns) | dialogue band (speech bubble) | empty bottom safe zone
-    (platform UI) and an empty right strip. Sizes come from config comic.layout."""
+    """Frame geometry. Default (bands=False): FULL-BLEED 9:16 art, text placed on free background by segmentation.
+    Opt-in bands=True (config comic.layout.bands): reserved bands: top band (narration) | art window | dialogue band |
+    empty bottom safe zone and right strip."""
 
-    def __init__(self, top_h: int = 330, art_h: int = 1170, dialogue_h: int = 190, right_safe: int = 120, margin: int = 60):
-        self.top_h, self.art_h, self.dialogue_h, self.right_safe, self.margin = (int(top_h), int(art_h), int(dialogue_h),
-                                                                                  int(right_safe), int(margin))
+    def __init__(self, top_h: int = 330, art_h: int = 1170, dialogue_h: int = 190, right_safe: int = 120, margin: int = 60,
+                 bands: bool = False):
+        self.bands = bool(bands)
+        self.right_safe, self.margin = int(right_safe), int(margin)
+        if self.bands:
+            self.top_h, self.art_h, self.dialogue_h = int(top_h), int(art_h), int(dialogue_h)
+        else:
+            self.top_h, self.art_h, self.dialogue_h = 0, H, 0
         self.art_y = self.top_h
         self.art_bottom = self.art_y + self.art_h
         self.dial_top = self.art_bottom
-        self.dial_bottom = self.dial_top + self.dialogue_h  # everything below stays empty (Shorts/Reels UI covers it)
+        self.dial_bottom = self.dial_top + self.dialogue_h
         self.text_right = W - self.right_safe
         self.canvas_w, self.canvas_h = int(W * 1.5), int(self.art_h * 1.5)  # zoompan canvas (1.5x the art window)
 
     @classmethod
     def from_cfg(cls, d: dict | None) -> "Layout":
-        return cls(**{k: v for k, v in (d or {}).items() if k in ("top_h", "art_h", "dialogue_h", "right_safe", "margin")})
+        return cls(**{k: v for k, v in (d or {}).items() if k in ("top_h", "art_h", "dialogue_h", "right_safe", "margin", "bands")})
 
 
 def speaker_x(faces_img: list[Box], img_w: int, img_h: int, win_w: int = W, win_h: int = 1170) -> int | None:
@@ -212,3 +217,108 @@ def art_crop(image_path: Path, out_path: Path, win_w: int = W, win_h: int = 1170
             box = (x0, 0, x0 + cw, ih)
         im.crop(box).save(out_path)
     return out_path
+
+
+# ------------------------------------------------------------------ segmentation-based placement (full-bleed art)
+CELL = 10  # occupancy grid cell in frame pixels -> 108 x 192
+SAFE = (40, 40, 950, 1574)  # x0, y0, x1, y1: keep text out of the right ~12% and bottom ~18% (platform UI) and the edges
+_session: dict = {}
+
+
+def foreground_mask(image_path: Path):
+    """Character foreground mask (float32 HxW 0..1) via rembg's `isnet-anime` (CPU; model downloaded once by rembg).
+    None when rembg/the model is unavailable: callers then fall back to face boxes only."""
+    try:
+        import numpy as np
+        from PIL import Image
+        from rembg import new_session, remove
+
+        if "s" not in _session:
+            _session["s"] = new_session("isnet-anime")
+        with Image.open(image_path) as im:
+            m = remove(im.convert("RGB"), session=_session["s"], only_mask=True)
+        return np.asarray(m, dtype="float32") / 255.0
+    except Exception:  # noqa: BLE001 - segmentation is an enhancement, never a requirement
+        return None
+
+
+def occupancy_over_motion(mask, faces_img: list[Box], img_w: int, img_h: int, motion: str,
+                          samples=(0.0, 0.25, 0.5, 0.75, 1.0)):
+    """Union, over the Ken-Burns move, of 'something important is here' in the final frame, as a (192 x 108) 0/1 grid:
+    the character mask (if any) warped into frame coordinates at several moments, plus every face box."""
+    import cv2
+    import numpy as np
+
+    gw, gh = W // CELL, H // CELL
+    occ = np.zeros((gh, gw), np.float32)
+    sc = max(CANVAS_W / img_w, CANVAS_H / img_h)
+    ox, oy = (img_w * sc - CANVAS_W) / 2, (img_h * sc - CANVAS_H) / 2
+    soft = cv2.blur(mask.astype("float32"), (11, 11)) if mask is not None else None
+    for t in samples:
+        x0, y0, z = window(motion, t)
+        k = z * W / CANVAS_W
+        if soft is not None:
+            a = sc * k / CELL
+            M = np.float32([[a, 0, (-ox - x0) * k / CELL], [0, a, (-oy - y0) * k / CELL]])
+            layer = cv2.warpAffine(soft, M, (gw, gh), flags=cv2.INTER_LINEAR, borderValue=0)
+            occ = np.maximum(occ, (layer > 0.35).astype(np.float32))
+        for f in faces_img:
+            fb = to_frame(to_canvas(f, img_w, img_h), motion, t)
+            x1, y1, x2, y2 = (int(max(fb[0] / CELL - 1, 0)), int(max(fb[1] / CELL - 1, 0)),
+                              int(min(fb[2] / CELL + 1, gw)), int(min(fb[3] / CELL + 1, gh)))
+            if x2 > x1 and y2 > y1:
+                occ[y1:y2, x1:x2] = 1.0
+    return cv2.dilate(occ, np.ones((3, 3), np.uint8))  # 1-cell (10 px) breathing room around everything
+
+
+def head_band(occ):
+    """Rows of the grid covering the top ~35% of the occupied area (head / upper body): overlapping these is penalised hardest."""
+    import numpy as np
+
+    rows = np.where(occ.max(axis=1) > 0)[0]
+    out = np.zeros_like(occ)
+    if len(rows):
+        top, h = rows[0], rows[-1] - rows[0] + 1
+        out[top: top + max(2, int(h * 0.35))] = occ[top: top + max(2, int(h * 0.35))]
+    return out
+
+
+def head_point(occ, faces_frame: list[Box] | None = None) -> tuple[int, int] | None:
+    """Where the speaker's head is, in frame px: the largest face box when there is one, else the centroid of the head band."""
+    import numpy as np
+
+    if faces_frame:
+        f = max(faces_frame, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+        return int((f[0] + f[2]) / 2), int(f[1] + (f[3] - f[1]) * 0.7)
+    hb = head_band(occ)
+    ys, xs = np.where(hb > 0)
+    if len(xs) == 0:
+        return None
+    return int(xs.mean() * CELL), int(ys.mean() * CELL)
+
+
+def best_spot(occ, w_px: int, h_px: int, blocked: list[Box] = (), safe=SAFE) -> tuple[int, int, float]:
+    """Top-left (x, y) px inside the safe area minimising overlap with occupied cells (head/upper body counts 3x).
+    Zero overlap wins; ties prefer the top, then the sides. Returns (x, y, cost) with cost = occupied fraction of the box (head/upper body weighted 3x)."""
+    import cv2
+    import numpy as np
+
+    o = occ.copy()
+    for b in blocked:  # another text box counts as occupied
+        o[max(int(b[1] // CELL), 0): int(b[3] // CELL) + 1, max(int(b[0] // CELL), 0): int(b[2] // CELL) + 1] = 1.0
+    ii, hh = cv2.integral(o), cv2.integral(head_band(occ))
+    gh, gw = o.shape
+    bw, bh = max(1, -(-w_px // CELL)), max(1, -(-h_px // CELL))
+    cx0, cy0, cx1, cy1 = safe[0] // CELL, safe[1] // CELL, safe[2] // CELL, safe[3] // CELL
+    best, best_key = (cx0 * CELL, cy0 * CELL, 1.0), (2, 9.9, 0.0)
+    area = float(bw * bh)
+    for cy in range(cy0, max(cy0, cy1 - bh) + 1, 2):
+        for cx in range(cx0, max(cx0, cx1 - bw) + 1, 2):
+            s = ii[cy + bh, cx + bw] - ii[cy, cx + bw] - ii[cy + bh, cx] + ii[cy, cx]
+            hs = hh[cy + bh, cx + bw] - hh[cy, cx + bw] - hh[cy + bh, cx] + hh[cy, cx]
+            cost = (s + 3.0 * hs) / area
+            pref = cy * 0.01 + min(cx - cx0, cx1 - bw - cx) * 0.004  # top first, then the sides
+            key = (0, 0.0, pref) if cost <= 0.0 else (1, cost, pref)
+            if key < best_key:
+                best_key, best = key, (cx * CELL, cy * CELL, float(cost))
+    return best

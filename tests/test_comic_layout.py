@@ -55,11 +55,11 @@ def _alpha_bbox(ov, box):
 
 
 def test_text_stays_in_its_bands_and_off_art_and_safe_zones(workspace_tmp_path):
-    lay = L.Layout()
+    lay = L.Layout(bands=True)
     long_nar = "Sparks of raw Aether collide as the two forces lock in a desperate, final dance across the shattered sky above the ruins."
     long_bub = "You will not take this light from me, no matter how many shadows you send against it tonight!"
     for sx in (None, 150, 540, 930):
-        ov = Image.open(comic.make_overlay(workspace_tmp_path / "o.png", narration=long_nar, bubble=long_bub, speaker_x=sx))
+        ov = Image.open(comic.make_overlay(workspace_tmp_path / "o.png", narration=long_nar, bubble=long_bub, speaker_x=sx, layout=lay))
         assert ov.size == (1080, 1920)
         # nothing at all in the bottom safe zone
         assert _alpha_bbox(ov, (0, lay.dial_bottom, 1080, 1920)) is None
@@ -74,8 +74,8 @@ def test_text_stays_in_its_bands_and_off_art_and_safe_zones(workspace_tmp_path):
         bb = _alpha_bbox(ov, (14, lay.art_bottom + 1, 1066, 1920))
         assert bb and bb[3] + lay.art_bottom <= lay.dial_bottom and bb[0] + 14 >= lay.margin - 4 and bb[2] + 14 <= lay.text_right
     # the tail leans toward the speaker side
-    left = Image.open(comic.make_overlay(workspace_tmp_path / "l.png", bubble="Hi there", speaker_x=150))
-    right = Image.open(comic.make_overlay(workspace_tmp_path / "r.png", bubble="Hi there", speaker_x=900))
+    left = Image.open(comic.make_overlay(workspace_tmp_path / "l.png", bubble="Hi there", speaker_x=150, layout=lay))
+    right = Image.open(comic.make_overlay(workspace_tmp_path / "r.png", bubble="Hi there", speaker_x=900, layout=lay))
     tl = _alpha_bbox(left, (20, lay.art_bottom - 74, 1060, lay.art_bottom - 45))
     tr = _alpha_bbox(right, (20, lay.art_bottom - 74, 1060, lay.art_bottom - 45))
     assert tl and tr and tl[0] < 500 < tr[0]
@@ -92,7 +92,7 @@ def test_fit_text_shrinks_never_cuts_off_and_avoids_orphans():
 
 
 def test_layout_config_keys():
-    lay = L.Layout.from_cfg({"top_h": 300, "art_h": 1200, "dialogue_h": 200, "right_safe": 140, "unknown": 1})
+    lay = L.Layout.from_cfg({"top_h": 300, "art_h": 1200, "dialogue_h": 200, "right_safe": 140, "bands": True, "unknown": 1})
     assert (lay.art_y, lay.art_bottom, lay.dial_bottom, lay.text_right) == (300, 1500, 1700, 940)
 
 
@@ -123,3 +123,81 @@ def test_art_crop_keeps_the_subject_head_in_frame(workspace_tmp_path, monkeypatc
     sq = Image.new("RGB", (1080, 1170), (5, 5, 5))
     sq.save(workspace_tmp_path / "sq.png")
     assert Image.open(CL.art_crop(workspace_tmp_path / "sq.png", workspace_tmp_path / "s.png")).size == (1080, 1170)
+
+
+# ---------------------------------------------------------------- segmentation-based placement (full-bleed art)
+import numpy as np  # noqa: E402
+
+
+def _blob_occ(box_px):
+    """Occupancy grid (192 x 108) with one character blob (frame px box x0,y0,x1,y1)."""
+    occ = np.zeros((L.H // L.CELL, L.W // L.CELL), np.float32)
+    x0, y0, x1, y1 = (int(v // L.CELL) for v in box_px)
+    occ[y0:y1, x0:x1] = 1.0
+    return occ
+
+
+def test_best_spot_zero_overlap_prefers_top_and_stays_in_safe_zone():
+    occ = _blob_occ((300, 500, 800, 1500))  # a character in the middle/lower body
+    x, y, cost = L.best_spot(occ, 600, 220)
+    assert cost == 0.0
+    box = (x, y, x + 600, y + 220)
+    assert L.overlap(box, (300, 500, 800, 1500)) == 0
+    sx0, sy0, sx1, sy1 = L.SAFE
+    assert sx0 <= x and x + 600 <= sx1 and sy0 <= y and y + 220 <= sy1  # never in the right 12% / bottom 18% / edge margins
+    assert y < 300  # preferred the top background strip
+
+
+def test_best_spot_avoids_head_when_no_clean_area_exists():
+    occ = _blob_occ((40, 40, 1040, 1700))  # character fills the frame: nothing is free
+    occ[:, :] = 1.0
+    occ[150:190, 10:100] = 0.0  # ...except one small hole low down (the body, not the head band)
+    x, y, cost = L.best_spot(occ, 300, 120, safe=(40, 40, 950, 1574))
+    assert cost > 0  # overlap is unavoidable here; just make sure it picks a legal in-bounds spot
+    assert 40 <= x <= 950 - 300 and 40 <= y <= 1574 - 120
+
+
+def test_head_band_and_head_point():
+    occ = _blob_occ((400, 300, 700, 1400))
+    hb = L.head_band(occ)
+    rows = np.where(hb.max(axis=1) > 0)[0]
+    assert rows.min() * L.CELL == 300 and rows.max() * L.CELL < 300 + 0.4 * 1100  # only the top ~35% (head / upper body)
+    hx, hy = L.head_point(occ)
+    assert 400 <= hx <= 700 and 300 <= hy <= 700
+
+
+def test_occupancy_follows_the_ken_burns_move_and_includes_faces():
+    mask = np.zeros((1024, 576), np.float32)
+    mask[200:700, 150:420] = 1.0  # character mask in image coords
+    still = L.occupancy_over_motion(mask, [], 576, 1024, "zoom_out", samples=(1.0,))  # zoom 1.0 -> whole canvas visible
+    moving = L.occupancy_over_motion(mask, [], 576, 1024, "zoom_in")
+    assert still.sum() > 0 and moving.sum() >= still.sum()  # the union over a zoom-in covers at least the static footprint
+    only_face = L.occupancy_over_motion(None, [(200.0, 100.0, 380.0, 300.0)], 576, 1024, "pan_left")
+    assert only_face.sum() > 0
+
+
+def test_free_overlay_keeps_text_off_the_character_and_in_the_safe_zone(workspace_tmp_path):
+    lay = L.Layout()  # full-bleed default
+    assert not lay.bands and lay.art_h == 1920
+    char = (330.0, 450.0, 760.0, 1450.0)
+    occ = _blob_occ(char)
+    head = L.head_point(occ)
+    long_nar = "Sparks of raw Aether collide as the two forces lock in a desperate final dance above the ruins."
+    ov = Image.open(comic.make_overlay(workspace_tmp_path / "f.png", narration=long_nar, bubble="You will not take this light!",
+                                       layout=lay, occ=occ, head=head))
+    a = ov.getchannel("A")
+    inside = a.crop((int(char[0]) + 12, int(char[1]) + 12, int(char[2]) - 12, int(char[3]) - 12))
+    # only the (short) bubble tail may reach toward the character's head; the boxes themselves never overlap it
+    assert (inside.getbbox() is None) or (inside.getbbox()[2] - inside.getbbox()[0]) < 90
+    assert a.crop((951, 40, 1040, 1880)).getbbox() is None  # right ~12% stays empty (platform UI); the thin frame line is further out
+    assert a.crop((40, 1575, 1040, 1880)).getbbox() is None  # bottom ~18% empty
+    assert a.crop((60, 40, 950, 1574)).getbbox() is not None  # ...but the text boxes were drawn
+
+
+def test_free_overlay_shrinks_text_to_fit_a_crowded_frame(workspace_tmp_path):
+    occ = np.zeros((L.H // L.CELL, L.W // L.CELL), np.float32)
+    occ[:, 45:100] = 1.0  # character covers most of the width; only a narrow strip on the left stays free
+    ov = Image.open(comic.make_overlay(workspace_tmp_path / "c.png", narration="A fairly long narration line that needs shrinking.",
+                                       layout=L.Layout(), occ=occ, head=(540, 400)))
+    box = ov.getchannel("A").crop((30, 30, 950, 1574)).getbbox()
+    assert box and box[2] + 30 <= 45 * L.CELL + 10  # the narration box narrowed to fit the free strip (no overlap with the character)
