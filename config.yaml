@@ -132,7 +132,7 @@ providers:
       cinematic: "black-forest-labs/flux.2-klein-4b"
     timeout: 60
     quota: 80
-    max_credits_per_day: 34          # hard daily cap on NIM credits for comic reels (3 reels x ~7 images); the real balance is not readable from the API
+    max_credits_per_day: 40          # hard daily cap on NIM credits for comic reels (3 reels x ~7 images); the real balance is not readable from the API
   local_comfyui:
     cfg: 5.5
     steps: 25

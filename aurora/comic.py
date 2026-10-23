@@ -537,8 +537,9 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode=None):
                 prompt = research.panel_prompt(panels[i], sheet)
                 for attempt in range(3):  # CONTENT_FILTERED -> retry with softened wording (each call may cost a credit)
                     try:
+                        # NIM's filter judges the OUTPUT image: a fixed seed reproduces the same blocked image, so retries get a new seed
                         r = switchboard.generate(prompt, "anime", list(nim_res), f"{job}_p{i}_{attempt}" if attempt else f"{job}_p{i}",
-                                                 negative_prompt=neg, seed=seed)
+                                                 negative_prompt=neg, seed=seed + attempt * 7919)
                     except Exception as exc:  # noqa: BLE001
                         log_credits("nvidia_nim", 1, cost_dir)
                         if "CONTENT_FILTERED" in str(exc) and attempt < 2:

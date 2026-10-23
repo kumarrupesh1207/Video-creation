@@ -235,7 +235,10 @@ def test_soften_prompt_and_filtered_panel_is_retried(workspace_tmp_path):
     assert "blood" not in out and "slash" not in out and "dying" not in out and "safe for all ages" in out
 
     class FlakyBoard(_Board):
+        seeds = []
+
         def generate(self, prompt, style, res, job, negative_prompt="", seed=None):
+            FlakyBoard.seeds.append(seed)
             if self.n == 0 and "non-violent" not in prompt:
                 self.n += 0
                 raise RuntimeError("[ImageSwitchboard] All image providers failed. nvidia_nim: [NVIDIA NIM] Generation blocked: CONTENT_FILTERED")
@@ -247,6 +250,7 @@ def test_soften_prompt_and_filtered_panel_is_retried(workspace_tmp_path):
     cfg = {"cost_dir": str(workspace_tmp_path / "costs")}
     imgs, timings, note, mode = comic._panel_images(cfg, board, spec, 7, "j", (576, 1024))
     assert mode == "nim" and len(imgs) == 5  # panel 0 succeeded on the softened retry
+    assert FlakyBoard.seeds[0] != FlakyBoard.seeds[1]  # the retry used a NEW seed (a fixed seed reproduces the same blocked image)
     from aurora.costs import credits_today
 
     assert credits_today("nvidia_nim", workspace_tmp_path / "costs") == 6  # the filtered attempt is counted too
