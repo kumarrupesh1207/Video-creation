@@ -9,6 +9,7 @@ Cover card first, "To be continued... Part N+1" end card last. Voice: per-panel 
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -519,7 +520,7 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode=None):
     mode = image_mode or cfg.get("comic", {}).get("image_mode", "nim")
     neg, cost_dir = _negative(cfg), Path(cfg.get("cost_dir", COST_DIR))
     cap_reel = int(cfg.get("comic", {}).get("max_nim_credits_per_reel", 8))
-    cap_day = int(cfg.get("providers", {}).get("nvidia_nim", {}).get("max_credits_per_day", 10))
+    cap_day = int(os.environ.get("AURORA_NIM_DAILY_CAP") or cfg.get("providers", {}).get("nvidia_nim", {}).get("max_credits_per_day", 10))  # env = explicit one-off override
 
     retries_left = [2]
 

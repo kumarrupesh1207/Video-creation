@@ -167,7 +167,7 @@ def save_series(channel: str, comic: dict, series_dir: Path = SERIES_DIR) -> dic
 
 # Words NVIDIA NIM's filter rejects (CONTENT_FILTERED) although they are harmless: "violet" is blocked (looks like "violent"),
 # "purple" passes. Found by bisecting a blocked prompt; extend this list when a new false positive is confirmed.
-NIM_SAFE_WORDS = [(r"violet(s)?", "purple")]
+NIM_SAFE_WORDS = [(r"(?<![A-Za-z])violets?(?![A-Za-z])", "purple")]  # lookarounds = word boundaries
 
 
 def nim_safe(text: str) -> str:
