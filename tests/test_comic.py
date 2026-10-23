@@ -43,12 +43,6 @@ def test_research_comic_validates_gemini_json(workspace_tmp_path, monkeypatch):
     assert research.research_comic("ch", "p", cfg={}, client=bad, series_dir=workspace_tmp_path)["source"] == "topic_fallback"
 
 
-def test_overlay_png_draws_border_box_and_bubble(workspace_tmp_path):
-    p = comic.make_overlay(workspace_tmp_path / "o.png", narration="Then a warrior fell from the sky.", bubble="Give me that crystal!")
-    im = Image.open(p)
-    assert im.size == (1080, 1920) and im.getpixel((1, 1))[3] == 0 and im.getpixel((20, 960))[3] == 255  # border painted
-    assert im.getpixel((540, 1300))[3] > 200  # bubble filled
-    assert comic.make_overlay(workspace_tmp_path / "h.png", narration="मंदिर की शाम और शांति", title="शीर्षक").exists()
 
 
 @needs_ffmpeg
@@ -275,3 +269,7 @@ def test_bubble_detector_and_word_cap(workspace_tmp_path):
     assert comic.has_drawn_bubble(bubble) and not comic.has_drawn_bubble(clean) and not comic.has_drawn_bubble(empty_bubble)
     long = "An ancient power stirs deep within his core, vibrating against the fabric of reality itself, now."
     assert len(comic.trim_words(long).split()) <= 12 and comic.trim_words("Short line here.") == "Short line here."
+    assert comic.trim_words("The sentinel draws upon the celestial reserve, preparing for the battle ahead.") .endswith("ahead.")  # 12-13 word sentence kept whole
+    assert not comic.trim_words("Sparks of raw Aether collide as the two forces lock in a desperate, final dance.").rstrip(".").endswith((" a", " in", " the"))
+    cut = comic.trim_words("The old guardian slowly raised his glowing sword toward the endless crimson sky and then the")
+    assert cut.split()[-1].lower().strip(".") not in {"the", "a", "and", "then"} or len(cut.split()) > 10

@@ -133,3 +133,33 @@ def place_bubble(bw: int, bh: int, faces: list[Box], blocked: list[Box] = (), ta
         f = min(faces, key=lambda f: abs((f[0] + f[2]) / 2 - (x + bw / 2)) + abs((f[1] + f[3]) / 2 - (y + bh)))
         target = (int((f[0] + f[2]) / 2), int(f[1] + (f[3] - f[1]) * 0.78))
     return int(x), int(y), target
+
+
+class Layout:
+    """Reserved bands of the 1080x1920 frame. Text lives ONLY in the top/dialogue bands, never on the art:
+    top band (narration) | art window (image + Ken Burns) | dialogue band (speech bubble) | empty bottom safe zone
+    (platform UI) and an empty right strip. Sizes come from config comic.layout."""
+
+    def __init__(self, top_h: int = 330, art_h: int = 1170, dialogue_h: int = 190, right_safe: int = 120, margin: int = 60):
+        self.top_h, self.art_h, self.dialogue_h, self.right_safe, self.margin = (int(top_h), int(art_h), int(dialogue_h),
+                                                                                  int(right_safe), int(margin))
+        self.art_y = self.top_h
+        self.art_bottom = self.art_y + self.art_h
+        self.dial_top = self.art_bottom
+        self.dial_bottom = self.dial_top + self.dialogue_h  # everything below stays empty (Shorts/Reels UI covers it)
+        self.text_right = W - self.right_safe
+        self.canvas_w, self.canvas_h = int(W * 1.5), int(self.art_h * 1.5)  # zoompan canvas (1.5x the art window)
+
+    @classmethod
+    def from_cfg(cls, d: dict | None) -> "Layout":
+        return cls(**{k: v for k, v in (d or {}).items() if k in ("top_h", "art_h", "dialogue_h", "right_safe", "margin")})
+
+
+def speaker_x(faces_img: list[Box], img_w: int, img_h: int, win_w: int = W, win_h: int = 1170) -> int | None:
+    """x (in the art window) of the largest detected face, for the bubble tail side; None when nothing was detected."""
+    if not faces_img:
+        return None
+    f = max(faces_img, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+    s = max(win_w / img_w, win_h / img_h)  # cover-fit into the art window
+    ox = (img_w * s - win_w) / 2
+    return int(min(max((f[0] + f[2]) / 2 * s - ox, 120), win_w - 120))

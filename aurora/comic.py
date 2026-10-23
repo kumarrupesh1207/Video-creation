@@ -55,69 +55,86 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_w: int) -> list[str]:
     return lines + ([cur] if cur else [])
 
 
-def _text_block(draw, text, font, max_w, line_gap=10):
+def _balanced(draw, text, font, max_w) -> list[str]:
+    """Greedy wrap, then try slightly narrower widths so the last line is never a lonely single word."""
     lines = _wrap(draw, text, font, max_w)
-    h = sum(font.getbbox(l)[3] - font.getbbox(l)[1] + line_gap for l in lines)
-    w = max((draw.textlength(l, font=font) for l in lines), default=0)
-    return lines, int(w), int(h)
+    if len(lines) >= 2 and len(lines[-1].split()) == 1:
+        for w in range(int(max_w * 0.95), int(max_w * 0.5), -15):
+            alt = _wrap(draw, text, font, w)
+            if len(alt) == len(lines) and len(alt[-1].split()) >= 2:
+                return alt
+    return lines
+
+
+def fit_text(draw, text: str, max_w: int, max_h: int, hi: int, lo: int):
+    """Largest font (hi..lo) whose wrapped, balanced text fits max_w x max_h. If even `lo` does not fit, the text is
+    shortened with an ellipsis (never cut off at an edge). Returns (font, lines, line_height)."""
+    words = text.split()
+    while True:
+        cur = " ".join(words) + ("…" if len(words) < len(text.split()) else "")
+        for size in range(hi, lo - 1, -2):
+            f = _font(size, cur)
+            lines = _balanced(draw, cur, f, max_w)
+            lh = int(size * 1.28)
+            if len(lines) * lh <= max_h and all(draw.textlength(l, font=f) <= max_w for l in lines):
+                return f, lines, lh
+        if len(words) <= 2:
+            return f, lines, lh
+        words = words[:-1]
 
 
 def make_overlay(path: Path, narration: str = "", bubble: str = "", title: str = "", subtitle: str = "", border: bool = True,
-                 faces: list | None = None) -> Path:
-    """Transparent 1080x1920 PNG: panel border, narration box (top), speech bubble (lower), or title-card text."""
+                 speaker_x: int | None = None, layout: "comic_layout.Layout | None" = None) -> Path:
+    """Transparent 1080x1920 PNG with text ONLY in the reserved bands: narration box (top band), speech bubble (dialogue
+    band, tail pointing up into the art toward speaker_x), or title/subtitle cards (top / dialogue band). The art window,
+    the bottom safe zone and the right strip stay free of text."""
+    L = layout or comic_layout.Layout()
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     if border:
-        d.rectangle([18, 18, W - 18, H - 18], outline=(255, 255, 255, 255), width=9)
+        d.rectangle([6, L.art_y, W - 6, L.art_bottom - 1], outline=(255, 255, 255, 255), width=6)
+    xl, xr = L.margin, L.text_right
     if narration:
-        f = _font(50, narration)
-        lines, tw, th = _text_block(d, narration, f, 880)
-        x0, y0 = comic_layout.place_narration(tw + 56, th + 44, faces) if faces else (60, 70)  # top or bottom edge, off the faces
-        narr_box = (x0, y0, x0 + tw + 56, y0 + th + 44)
-        d.rectangle([x0, y0, x0 + tw + 56, y0 + th + 44], fill=(255, 243, 196, 245), outline=(20, 20, 20, 255), width=5)
-        y = y0 + 22
-        for l in lines:
-            d.text((x0 + 28, y), l, font=f, fill=(20, 20, 20, 255))
-            y += f.getbbox(l)[3] - f.getbbox(l)[1] + 10
+        pad = 28
+        f, lines, lh = fit_text(d, narration, xr - xl - 2 * pad, L.top_h - 2 * 40 - 2 * pad, 54, 32)
+        tw = int(max(d.textlength(l, font=f) for l in lines))
+        bw, bh = tw + 2 * pad, len(lines) * lh + 2 * pad
+        x0, y0 = xl, (L.top_h - bh) // 2
+        d.rectangle([x0, y0, x0 + bw, y0 + bh], fill=(255, 243, 196, 255), outline=(20, 20, 20, 255), width=5)
+        for k, l in enumerate(lines):
+            d.text((x0 + pad, y0 + pad + k * lh), l, font=f, fill=(20, 20, 20, 255))
     if bubble:
-        f = _font(58, bubble)
-        lines, tw, th = _text_block(d, bubble, f, 700)
-        bw, bh = tw + 120, th + 90
-        if faces:
-            x0, y0, target = comic_layout.place_bubble(bw, bh, faces, blocked=[narr_box] if narration else [])
-        else:
-            x0, y0, target = (W - bw) // 2, 1180, None
-        d.ellipse([x0, y0, x0 + bw, y0 + bh], fill=(255, 255, 255, 250), outline=(20, 20, 20, 255), width=6)
-        tail = [(x0 + bw * 0.30, y0 + bh - 12), (x0 + bw * 0.22, y0 + bh + 95), (x0 + bw * 0.45, y0 + bh - 6)]
-        if target:  # tail leaves the bubble edge facing the speaker and stops short of the face (never over it)
-            cx, cy = x0 + bw / 2, y0 + bh / 2
-            dx, dy = target[0] - cx, target[1] - cy
-            dist = max((dx * dx + dy * dy) ** 0.5, 1.0)
-            ux, uy = dx / dist, dy / dist
-            edge = 1.0 / (((ux / (bw / 2)) ** 2 + (uy / (bh / 2)) ** 2) ** 0.5)  # ellipse radius along (ux, uy)
-            base = (cx + ux * (edge - 6), cy + uy * (edge - 6))
-            L = max(45.0, min(110.0, dist - edge - 50))
-            tip = (base[0] + ux * L, base[1] + uy * L)
-            px, py = -uy * 24, ux * 24
-            tail = [(base[0] + px, base[1] + py), tip, (base[0] - px, base[1] - py)]
-        d.polygon(tail, fill=(255, 255, 255, 250))
+        px, py = 50, 22
+        f, lines, lh = fit_text(d, bubble, xr - xl - 2 * px, L.dialogue_h - 2 * py - 10, 52, 30)
+        tw = int(max(d.textlength(l, font=f) for l in lines))
+        bw, bh = tw + 2 * px, len(lines) * lh + 2 * py
+        x0 = xl + (xr - xl - bw) // 2
+        y0 = L.dial_top + (L.dialogue_h - bh) // 2 + 6
+        sx = min(max(speaker_x if speaker_x is not None else W // 2, x0 + 70), x0 + bw - 70)  # tail base stays on the bubble
+        tip_x = min(max(speaker_x if speaker_x is not None else W // 2, xl + 10), xr - 10)
+        tip = (tip_x, L.art_bottom - 75)  # up into the art window, toward the speaker's side
+        tail = [(sx - 26, y0 + 4), tip, (sx + 26, y0 + 4)]
+        d.rounded_rectangle([x0, y0, x0 + bw, y0 + bh], radius=min(bh // 2, 60), fill=(255, 255, 255, 255),
+                            outline=(20, 20, 20, 255), width=6)
+        d.polygon(tail, fill=(255, 255, 255, 255))
         d.line([tail[0], tail[1], tail[2]], fill=(20, 20, 20, 255), width=6)
-        d.line([(tail[0][0] + 2, tail[0][1] + 1), (tail[2][0] - 2, tail[2][1] + 1)], fill=(255, 255, 255, 255), width=10)
-        y = y0 + 45
+        d.line([(sx - 22, y0 + 3), (sx + 22, y0 + 3)], fill=(255, 255, 255, 255), width=9)  # open the bubble outline under the tail
+        for k, l in enumerate(lines):
+            d.text((x0 + (bw - d.textlength(l, font=f)) / 2, y0 + py + k * lh), l, font=f, fill=(20, 20, 20, 255))
+    if title:  # cover / end card: big title in the top band, subtitle in the dialogue band
+        f, lines, lh = fit_text(d, title, xr - xl, L.top_h - 2 * 40, 110, 56)
+        y = (L.top_h - len(lines) * lh) // 2
         for l in lines:
-            d.text((x0 + (bw - d.textlength(l, font=f)) / 2, y), l, font=f, fill=(20, 20, 20, 255))  # centred in the bubble
-            y += f.getbbox(l)[3] - f.getbbox(l)[1] + 10
-    if title:
-        ft, fs = _font(112, title), _font(70, subtitle)
-        lines, tw, th = _text_block(d, title, ft, 900, 18)
-        y = 820 - th // 2
-        for l in lines:
-            d.text(((W - d.textlength(l, font=ft)) / 2, y), l, font=ft, fill=(255, 255, 255, 255), stroke_width=8, stroke_fill=(0, 0, 0, 255))
-            y += ft.getbbox(l)[3] - ft.getbbox(l)[1] + 18
+            d.text((xl + (xr - xl - d.textlength(l, font=f)) / 2, y), l, font=f, fill=(255, 255, 255, 255),
+                   stroke_width=7, stroke_fill=(0, 0, 0, 255))
+            y += lh
         if subtitle:
-            for l in _wrap(d, subtitle, fs, 900):
-                d.text(((W - d.textlength(l, font=fs)) / 2, y + 30), l, font=fs, fill=(255, 214, 80, 255), stroke_width=6, stroke_fill=(0, 0, 0, 255))
-                y += fs.getbbox(l)[3] - fs.getbbox(l)[1] + 12
+            f2, lines2, lh2 = fit_text(d, subtitle, xr - xl, L.dialogue_h - 40, 70, 36)
+            y = L.dial_top + (L.dialogue_h - len(lines2) * lh2) // 2
+            for l in lines2:
+                d.text((xl + (xr - xl - d.textlength(l, font=f2)) / 2, y), l, font=f2, fill=(255, 214, 80, 255),
+                       stroke_width=6, stroke_fill=(0, 0, 0, 255))
+                y += lh2
     img.save(path)
     return path
 
@@ -139,25 +156,39 @@ def _run(cmd: list[str], timeout: int = 900) -> None:
         raise RuntimeError("ffmpeg failed: " + " | ".join(proc.stderr.strip().splitlines()[-4:]))
 
 
-def render_clip(ffmpeg: str, image: Path, overlay: Path, seconds: float, motion: str, out: Path, dim: bool = False) -> Path:
+def render_clip(ffmpeg: str, image: Path, overlay: Path, seconds: float, motion: str, out: Path, dim: bool = False,
+                layout: "comic_layout.Layout | None" = None) -> Path:
+    """Image + Ken Burns inside the art window only; dark bands elsewhere (text is drawn there by the overlay)."""
+    L = layout or comic_layout.Layout()
     frames = max(2, round(seconds * FPS))
-    vf = (f"[0:v]scale=1620:2880:force_original_aspect_ratio=increase,crop=1620:2880,"
-          f"zoompan={_zoompan(motion, frames)}:d={frames}:s={W}x{H}:fps={FPS},"
-          f"noise=alls=7:allf=t,eq=saturation=1.08{',eq=brightness=-0.28' if dim else ''}[v];"
+    vf = (f"[0:v]scale={L.canvas_w}:{L.canvas_h}:force_original_aspect_ratio=increase,crop={L.canvas_w}:{L.canvas_h},"
+          f"zoompan={_zoompan(motion, frames)}:d={frames}:s={W}x{L.art_h}:fps={FPS},"
+          f"noise=alls=7:allf=t,eq=saturation=1.08{',eq=brightness=-0.28' if dim else ''}[art];"
+          f"color=c=0x15151f:s={W}x{H}:r={FPS}[bg];[bg][art]overlay=0:{L.art_y}:shortest=1[v];"
           f"[v][1:v]overlay=0:0,format=yuv420p[o]")
     _run([ffmpeg, "-y", "-v", "error", "-loop", "1", "-i", str(image), "-loop", "1", "-i", str(overlay), "-filter_complex", vf,
           "-map", "[o]", "-frames:v", str(frames), "-r", str(FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "17", str(out)])
     return out
 
 
+_DANGLING = {"a", "an", "the", "in", "of", "and", "to", "with", "as", "at", "on", "for", "but", "or", "by", "from", "into", "its", "his", "her", "their"}
+
+
 def trim_words(text: str, n: int = MAX_NARRATION_WORDS) -> str:
-    """At most n words, cut at the last sentence/clause end inside the limit when there is one."""
+    """Keep the narration short (reels stay ~30 s) without cutting it mid-phrase: a complete sentence up to n+1 words is kept;
+    longer text is cut at the last sentence/clause end inside n words, else at n words minus any dangling word (a, the, in...)."""
     words = text.split()
-    if len(words) <= n:
+    if len(words) <= n + 1:
         return text.strip()
     cut = " ".join(words[:n])
     m = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "), cut.rfind(", "))
-    return (cut[:m + 1] if m > len(cut) // 2 else cut).rstrip(",;: ") + ("" if cut.rstrip().endswith((".", "!", "?")) else ".")
+    if m > len(cut) // 2:
+        return cut[:m + 1].rstrip(",;: ") + ("" if cut[m] in ".!?" else ".")
+    ws = cut.split()
+    while len(ws) > 3 and ws[-1].lower().strip(",.;:") in _DANGLING:
+        ws.pop()
+    out = " ".join(ws).rstrip(",;: ")
+    return out + ("" if out.endswith((".", "!", "?")) else ".")
 
 
 def has_drawn_bubble(path: Path) -> bool:
@@ -196,17 +227,18 @@ def _duration(path: Path) -> float:
 
 
 def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, work: Path, voice: str = "en-US-AvaNeural",
-                 music: bool = True, language: str = "English", layout_aware: bool = True) -> dict:
+                 music: bool = True, language: str = "English", layout_aware: bool = True, layout: dict | None = None) -> dict:
     """Panels (+images) -> final mp4. Returns {"seconds", "voice_notes", "music"}."""
     work.mkdir(parents=True, exist_ok=True)
     panels, series = comic["panels"], comic["series"]
     part = series["part"]
+    L = comic_layout.Layout.from_cfg(layout)
     clips: list[tuple[Path, float]] = []  # (clip, seconds)
     voices: list[tuple[Path | None, float]] = []  # (voice file, start seconds)
     notes, t = [], 0.0
 
-    cover = render_clip(ffmpeg, images[0], make_overlay(work / "ov_cover.png", title=series["title"], subtitle=f"PART {part}"),
-                        COVER_S, "zoom_in", work / "clip_cover.mp4", dim=True)
+    cover = render_clip(ffmpeg, images[0], make_overlay(work / "ov_cover.png", title=series["title"], subtitle=f"PART {part}", layout=L),
+                        COVER_S, "zoom_in", work / "clip_cover.mp4", dim=True, layout=L)
     clips.append((cover, COVER_S))
     voices.append((None, 0.0))
     t += COVER_S - XF
@@ -217,22 +249,22 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
         notes.append(note)
         secs = max((_duration(vfile) if vfile else 3.0) + PAD, PANEL_MIN_S)
         motion = "punch" if p.get("action") else MOTIONS[i % len(MOTIONS)]
-        faces = None
-        if layout_aware:
+        sx = None
+        if layout_aware and p.get("bubble"):  # face detection only picks the bubble tail's side; if it misses -> centre
             try:
                 with Image.open(img) as im0:
                     iw, ih = im0.size
-                faces = comic_layout.faces_over_motion(comic_layout.detect_faces(Path(img)), iw, ih, motion)
-            except Exception as exc:  # noqa: BLE001 - layout is best effort; fall back to the fixed layout
+                sx = comic_layout.speaker_x(comic_layout.detect_faces(Path(img)), iw, ih, W, L.art_h)
+            except Exception as exc:  # noqa: BLE001
                 notes.append(f"panel {i}: face detection skipped ({str(exc)[:60]})")
-        ov = make_overlay(work / f"ov_{i}.png", narration=p["narration"], bubble=p.get("bubble", ""), faces=faces)
-        clips.append((render_clip(ffmpeg, img, ov, secs, motion, work / f"clip_{i}.mp4"), secs))
+        ov = make_overlay(work / f"ov_{i}.png", narration=p["narration"], bubble=p.get("bubble", ""), speaker_x=sx, layout=L)
+        clips.append((render_clip(ffmpeg, img, ov, secs, motion, work / f"clip_{i}.mp4", layout=L), secs))
         voices.append((vfile, t + 0.05))
         t += secs - XF
     final = part >= int(series.get("total_parts", 1))
     end_ov = make_overlay(work / "ov_end.png", title="The End" if final else "To be continued...",
-                          subtitle="" if final else f"Part {part + 1} coming soon")
-    clips.append((render_clip(ffmpeg, images[-1], end_ov, END_S, "zoom_out", work / "clip_end.mp4", dim=True), END_S))
+                          subtitle="" if final else f"Part {part + 1} coming soon", layout=L)
+    clips.append((render_clip(ffmpeg, images[-1], end_ov, END_S, "zoom_out", work / "clip_end.mp4", dim=True, layout=L), END_S))
     total = sum(s for _, s in clips) - XF * (len(clips) - 1)
 
     # video: xfade chain; audio: per-panel voices placed on the timeline, music ducked under them
@@ -458,7 +490,8 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
     out_dir.mkdir(parents=True, exist_ok=True)
     mp4 = out_dir / f"{slug}.mp4"
     ffmpeg = FFmpegKenBurns().ffmpeg
-    info = render_comic(ffmpeg, comic, images, mp4, ROOT / "outputs" / "comic_work" / slug, voice, music, language)
+    info = render_comic(ffmpeg, comic, images, mp4, ROOT / "outputs" / "comic_work" / slug, voice, music, language,
+                        layout=cfg.get("comic", {}).get("layout"))
     rep = validate_video(mp4, W, H, fps=FPS, require_audio=True, deep=True)
     if not rep.ok:
         raise RuntimeError(f"comic reel failed validation: {rep.errors}")

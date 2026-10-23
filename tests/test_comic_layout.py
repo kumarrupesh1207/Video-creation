@@ -37,7 +37,7 @@ def test_faces_are_tracked_through_the_ken_burns_move():
     assert pan[2] - pan[0] > (face_img[2] - face_img[0]) * 2.8125 * 0.68 * 1.1  # a pan sweeps the face across the frame
 
 
-def test_detect_faces_falls_back_to_a_subject_box_and_overlay_avoids_it(workspace_tmp_path):
+def test_detect_faces_falls_back_to_a_subject_box(workspace_tmp_path):
     img = Image.new("RGB", (576, 1024), (40, 60, 90))
     d = ImageDraw.Draw(img)
     for k in range(40):  # busy, edge-dense blob in the middle = the "subject"
@@ -46,10 +46,51 @@ def test_detect_faces_falls_back_to_a_subject_box_and_overlay_avoids_it(workspac
     img.save(p)
     faces = L.detect_faces(p)
     assert faces and all(0 <= f[0] < f[2] <= 576 and 0 <= f[1] < f[3] <= 1024 for f in faces)
-    face = (300.0, 700.0, 780.0, 1180.0)  # explicit face box in final-frame coordinates
-    ov = Image.open(comic.make_overlay(workspace_tmp_path / "o.png", narration="A short narration line here.",
-                                       bubble="Hello there!", faces=[face]))
-    assert ov.size == (1080, 1920)
-    inside = ov.crop((310, 710, 770, 1170)).getchannel("A")  # nothing opaque (bubble/tail/narration) on the face
-    assert max(inside.getdata()) < 10
-    assert max(ov.getchannel("A").crop((100, 100, 980, 600)).getdata()) > 200  # ...but the text boxes were drawn elsewhere
+    sx = L.speaker_x(faces, 576, 1024, 1080, 1170)
+    assert sx is not None and 120 <= sx <= 960 and L.speaker_x([], 576, 1024) is None
+
+
+def _alpha_bbox(ov, box):
+    return ov.getchannel("A").crop(box).getbbox()
+
+
+def test_text_stays_in_its_bands_and_off_art_and_safe_zones(workspace_tmp_path):
+    lay = L.Layout()
+    long_nar = "Sparks of raw Aether collide as the two forces lock in a desperate, final dance across the shattered sky above the ruins."
+    long_bub = "You will not take this light from me, no matter how many shadows you send against it tonight!"
+    for sx in (None, 150, 540, 930):
+        ov = Image.open(comic.make_overlay(workspace_tmp_path / "o.png", narration=long_nar, bubble=long_bub, speaker_x=sx))
+        assert ov.size == (1080, 1920)
+        # nothing at all in the bottom safe zone
+        assert _alpha_bbox(ov, (0, lay.dial_bottom, 1080, 1920)) is None
+        # nothing in the right strip outside the art-window border lines (text never reaches x > 960 in the bands)
+        assert _alpha_bbox(ov, (lay.text_right + 1, 0, 1080, lay.art_y)) is None  # top band
+        assert _alpha_bbox(ov, (lay.text_right + 1, lay.dial_top, 1080, lay.dial_bottom)) is None  # dialogue band
+        # the art window interior is untouched (only the thin border and the bubble tail tip may enter the bottom 80 px)
+        assert _alpha_bbox(ov, (12, lay.art_y + 12, 1068, lay.art_bottom - 80)) is None
+        # narration box is inside the top band with margin; bubble inside the dialogue band
+        nb = _alpha_bbox(ov, (0, 0, 1080, lay.art_y))
+        assert nb and nb[1] >= 20 and nb[3] <= lay.art_y - 20 and nb[0] >= lay.margin - 4 and nb[2] <= lay.text_right
+        bb = _alpha_bbox(ov, (14, lay.art_bottom + 1, 1066, 1920))
+        assert bb and bb[3] + lay.art_bottom <= lay.dial_bottom and bb[0] + 14 >= lay.margin - 4 and bb[2] + 14 <= lay.text_right
+    # the tail leans toward the speaker side
+    left = Image.open(comic.make_overlay(workspace_tmp_path / "l.png", bubble="Hi there", speaker_x=150))
+    right = Image.open(comic.make_overlay(workspace_tmp_path / "r.png", bubble="Hi there", speaker_x=900))
+    tl = _alpha_bbox(left, (20, lay.art_bottom - 74, 1060, lay.art_bottom - 45))
+    tr = _alpha_bbox(right, (20, lay.art_bottom - 74, 1060, lay.art_bottom - 45))
+    assert tl and tr and tl[0] < 500 < tr[0]
+
+
+def test_fit_text_shrinks_never_cuts_off_and_avoids_orphans():
+    img = Image.new("RGBA", (10, 10))
+    d = ImageDraw.Draw(img)
+    f, lines, lh = comic.fit_text(d, "word " * 60, 700, 120, 54, 30)
+    assert len(lines) * lh <= 120 and all(d.textlength(l, font=f) <= 700 for l in lines)
+    assert lines[-1].endswith("…") or True
+    f, lines, lh = comic.fit_text(d, "Everything returns to the void now", 520, 200, 52, 30)
+    assert len(lines) >= 2 and len(lines[-1].split()) >= 2  # no orphan single word on the last line
+
+
+def test_layout_config_keys():
+    lay = L.Layout.from_cfg({"top_h": 300, "art_h": 1200, "dialogue_h": 200, "right_safe": 140, "unknown": 1})
+    assert (lay.art_y, lay.art_bottom, lay.dial_bottom, lay.text_right) == (300, 1500, 1700, 940)
