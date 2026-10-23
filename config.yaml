@@ -257,4 +257,5 @@ autopilot:
       motion: ai
       voice: en-US-AvaNeural
       format: comic
+      seo: true             # SEO-researched title/description/tags (aurora/publish/seo.py); falls back to plain metadata
       panels: 6             # cast: assets/characters/shinobi (copy of main's locked cast, Kaelen)

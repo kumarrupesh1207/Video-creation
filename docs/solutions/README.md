@@ -10,3 +10,4 @@ One line per solved problem. Update an existing note instead of adding a duplica
 - [comic-text-on-faces.md](comic-text-on-faces.md) — text on characters: full-bleed art + rembg isnet-anime segmentation placement (bands layout kept behind a flag).
 - [nim-violet-content-filter.md](nim-violet-content-filter.md) — harmless prompts blocked as CONTENT_FILTERED: NIM word filter rejects "violet" -> rewritten to purple.
 - [comic-locked-cast.md](comic-locked-cast.md) — new stories redesigned the hero -> permanent cast files per channel, verbatim in every prompt, new side characters saved after first appearance.
+- [youtube-scopes-quota-windows.md](youtube-scopes-quota-windows.md) — optional analytics scope keeps uploads working, quota budget defers instead of 403, SRT uploaded from memory (Windows file lock).

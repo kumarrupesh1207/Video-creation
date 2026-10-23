@@ -89,3 +89,25 @@ If an idea carries `series`, `part`, `hook`, `series_hashtags` (comic format), t
 - Scopes now include `youtube.force-ssl` (playlists). An old token is not usable: uploads stay queued and log "re-run auth". Run `python -m aurora.publish.youtube auth --channel shinobi` while signed in to the Google account that owns @ShinobiMindset1 (Brand-account channels: pick the channel in the chooser). After consent the tool reads `channels.list(mine=true)`; a different channel deletes the token and exits with "WRONG CHANNEL". Uploads re-check the handle every time and refuse on mismatch.
 - Series videos (title "<Series> – Part N") are added to a playlist named after the series; created on first use, public only when the video is public (else private, upgraded to public when a public video joins). Ids are cached in `outputs/publish_state/<channel>_playlists.json`; adding is idempotent. A playlist failure never un-publishes the video (`playlist_error` on the item).
 - One-off publish (kill-switch stays false): `python -m aurora.autopilot publish-one <queue_id> --privacy private --i-confirm`. Refuses without `--i-confirm`; never re-uploads a published item; the item is marked published/failed like normal.
+
+## YouTube manager (plan: docs/plans/youtube-manager.md, approved)
+Modules: `publish/seo.py` (competitor search + Gemini title options + best pick + description with hook/recap/keywords/chapters/hashtags/AI note),
+`publish/comments.py`, `publish/analytics.py`, `publish/quota.py`; captions/thumbnails/playlist order/branding helpers live in `publish/youtube.py`.
+- **SEO** is on per channel with `seo: true` (shinobi). search.list costs 100 units; no Gemini key or any failure keeps the plain title (nothing is invented).
+- **After each upload** (publish-due and publish-one): SRT captions if the sidecar has `captions_srt` (path or SRT text), thumbnail only for videos of 3 min or more (`thumbnail` path in the sidecar; Shorts use an auto frame), series playlist with the part at position part-1. Each step fails on its own and is recorded on the queue item (`captions_error`, `thumbnail_error`, `playlist_error`); the video stays published.
+- **Quota budget**: `outputs/publish_state/quota_<date>.json`, safety limit 9000 of 10000 units per Pacific day. An upload that does not fit is deferred, not failed. Costs: upload 1600, captions 400, search 100, thumbnail/playlist/comment writes 50.
+- **Comments** (`autopilot comments [--channel]`): spam goes to heldForReview, other comments get a reply DRAFT. Nothing is posted until you approve: `comment-approve <id> --channel shinobi [--reply "text"]`, then the next `comments` run sends approved replies once. Links are stripped from replies.
+- **Branding**: `youtube.draft_branding()` writes text for you to review in `outputs/publish_state/<channel>_branding_draft.json`; `apply_branding()` is never called automatically.
+- **Analytics**: `autopilot weekly-report` writes `outputs/publish_state/reports/<channel>_<date>.md/.json` (views, watch minutes, average % viewed, subscribers, top 5, one insight) and `<channel>_winners.json`; research can read it with `aurora.publish.analytics.load_winners(channel)`. Needs the extra scope `yt-analytics.readonly`: run `python -m aurora.publish.youtube auth --channel <name>` once more (uploads keep working on old tokens meanwhile). Impressions and click-through rate are not available through any API.
+- `autopilot approvals [--channel]` prints everything waiting for you (queue items, comment drafts, latest report) as JSON; this is what the Approvals tab shows.
+
+### Approvals tab spec (Frontend / server.py)
+Use `aurora.autopilot.approvals_summary(queue, channels)`, `aurora.publish.comments` and `aurora.publish.analytics`.
+| API | Behaviour |
+|---|---|
+| `GET /api/approvals?channel=` | `approvals_summary(...)`: `{queue: [...], comment_drafts: {channel: [{id, author, text, reply, video_id}]}, weekly_report: {channel: {...}}}` |
+| `POST /api/publish/{id}/veto` / `approve` | as in the queue spec above |
+| `POST /api/comments/{channel}/{comment_id}/approve` `{reply?}` | `comments.approve(channel, id, reply)` (user may edit the text) |
+| `POST /api/comments/{channel}/{comment_id}/reject` | `comments.reject(channel, id)` |
+| `GET /api/reports/{channel}/latest` | `analytics.latest_report(channel)`; Markdown at `outputs/publish_state/reports/*.md` |
+Phone layout: three sections (Videos waiting: preview + Stop/Approve; Comment replies: comment, editable draft, Send/Skip; Weekly report: 4 numbers + top 3 + insight). Sending approved replies and the report are done by the scheduled `comments` / `weekly-report` runs, or add a "Send now" button that calls `run_comments`.

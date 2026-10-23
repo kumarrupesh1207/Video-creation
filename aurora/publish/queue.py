@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 QUEUE_PATH = ROOT / "outputs" / "publish_queue.json"
 IST = timezone(timedelta(hours=5, minutes=30), "IST")
 DEFAULTS = {"enabled": False, "approval": "veto", "veto_hours": 6.0, "slots": ["19:00"], "timezone": "Asia/Kolkata", "max_attempts": 3}
+EXTRA_KEYS = ("captions_srt", "thumbnail", "duration_secs", "part", "chapters")  # render outputs the publisher uses
 ACTIVE = {"pending_approval", "scheduled", "publishing", "published"}  # statuses that block re-enqueueing a sha
 _lock = threading.RLock()
 
@@ -123,6 +124,7 @@ class PublishQueue:
                 "title": (meta.get("title") or path.stem)[:100], "description": meta.get("description", ""),
                 "tags": list(meta.get("tags", [])), "ai_disclosure": bool(meta.get("ai_disclosure", True)),
                 "privacy": meta.get("privacy", "public"), "approval": mode, "series": meta.get("series"),
+                **{k: meta[k] for k in EXTRA_KEYS if meta.get(k) is not None},
                 "status": "pending_approval" if mode == "manual" else "scheduled",
                 "publish_at": self.next_slot(channel, now, taken).isoformat(), "created_at": now.isoformat(),
                 "attempts": 0, "video_id": None, "error": None, "stats": None,

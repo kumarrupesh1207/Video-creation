@@ -1,0 +1,4 @@
+# YouTube API: optional scopes, quota budget, Windows file locks
+**Problem:** adding the analytics scope to the required scope list would have broken uploads on every existing token; a 1600-unit upload can silently exhaust the 10k daily quota; captions built from a temp file crashed on Windows (`MediaFileUpload` keeps the file open).
+**Fix:** required scopes (upload, readonly, force-ssl) vs optional (`yt-analytics.readonly` via `get_credentials(need=...)`); `auth` always asks for all. Every quota-costing call goes through `QuotaBudget.spend()` (9000/10000 safety limit, Pacific day) and defers instead of failing. SRT text is uploaded from memory (`MediaIoBaseUpload`), never via a temp file.
+**Rule:** a new API scope is optional until the user has re-consented; budget before calling, not after the 403.

@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly",
           "https://www.googleapis.com/auth/youtube.force-ssl"]  # force-ssl: playlists
 TOKEN_DIR = ROOT / "outputs" / "tokens"  # outputs/ is git-ignored
+ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"  # optional: needs one extra consent
+AUTH_SCOPES = SCOPES + [ANALYTICS_SCOPE]  # what `auth` asks for
 STATE_DIR = ROOT / "outputs" / "publish_state"
 RETRY_STATUS = {500, 502, 503, 504}
 QUOTA_REASONS = {"quotaExceeded", "uploadLimitExceeded", "dailyLimitExceeded", "rateLimitExceeded"}
@@ -40,7 +42,8 @@ def token_path(channel: str) -> Path:
     return TOKEN_DIR / f"youtube_{re.sub(r'[^A-Za-z0-9_-]+', '_', channel)}.json"
 
 
-def get_credentials(channel: str, interactive: bool = False):
+def get_credentials(channel: str, interactive: bool = False, need: tuple[str, ...] = ()):
+    """Credentials with at least SCOPES (+ `need`). Analytics etc. pass need=; uploads keep working on older tokens."""
     from google.auth.exceptions import RefreshError
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
@@ -53,10 +56,11 @@ def get_credentials(channel: str, interactive: bool = False):
             granted = set(json.loads(tp.read_text(encoding="utf-8")).get("scopes") or [])
         except ValueError:
             granted = set()
-        if set(SCOPES) <= granted:
-            creds = Credentials.from_authorized_user_file(str(tp), SCOPES)
+        required = set(SCOPES) | set(need)
+        if required <= granted:
+            creds = Credentials.from_authorized_user_file(str(tp), sorted(granted))
         elif not interactive:  # token made before a scope was added (e.g. force-ssl for playlists)
-            raise AuthRequired(f"token for '{channel}' lacks scopes {sorted(set(SCOPES) - granted)}; {reauth}")
+            raise AuthRequired(f"token for '{channel}' lacks scopes {sorted(required - granted)}; {reauth}")
     if creds and creds.valid:
         return creds
     if creds and creds.expired and creds.refresh_token:
@@ -76,7 +80,7 @@ def get_credentials(channel: str, interactive: bool = False):
         secret = os.environ.get("YOUTUBE_CLIENT_SECRET", "")
         if not secret or not Path(secret).exists():
             raise AuthRequired("set YOUTUBE_CLIENT_SECRET in .env to the path of client_secret.json")
-        creds = InstalledAppFlow.from_client_secrets_file(secret, SCOPES).run_local_server(port=0, prompt="consent")
+        creds = InstalledAppFlow.from_client_secrets_file(secret, AUTH_SCOPES).run_local_server(port=0, prompt="consent")
     tp.parent.mkdir(parents=True, exist_ok=True)
     tp.write_text(creds.to_json(), encoding="utf-8")
     return creds
@@ -171,7 +175,8 @@ def _save_cache(sf: Path, cache: dict) -> None:
     os.replace(tmp, sf)
 
 
-def ensure_playlist(service, channel: str, title: str, video_privacy: str = "public", state_dir: Path = STATE_DIR) -> str:
+def ensure_playlist(service, channel: str, title: str, video_privacy: str = "public", state_dir: Path = STATE_DIR,
+                    description: str | None = None) -> str:
     """Find or create the playlist `title`; public only when the video is public, otherwise private."""
     sf = _state_file(channel, state_dir)
     try:
@@ -199,7 +204,7 @@ def ensure_playlist(service, channel: str, title: str, video_privacy: str = "pub
             break
     if pid is None:
         pid = service.playlists().insert(part="snippet,status", body={
-            "snippet": {"title": title, "description": f"{title} - AI-generated series."},
+            "snippet": {"title": title, "description": description or f"{title} - AI-generated series."},
             "status": {"privacyStatus": want}}).execute()["id"]
     cache[title] = {"id": pid, "privacy": privacy}
     _save_cache(sf, cache)
@@ -207,14 +212,87 @@ def ensure_playlist(service, channel: str, title: str, video_privacy: str = "pub
 
 
 def add_to_series_playlist(service, channel: str, series: str, video_id: str, video_privacy: str = "public",
-                           state_dir: Path = STATE_DIR) -> str:
-    """Add the video to its series playlist unless it is already there; returns the playlist id."""
-    pid = ensure_playlist(service, channel, series, video_privacy, state_dir)
+                           state_dir: Path = STATE_DIR, description: str | None = None, part: int | None = None,
+                           budget=None) -> str:
+    """Add the video to its series playlist unless already there, at position part-1 (parts stay in order)."""
+    pid = ensure_playlist(service, channel, series, video_privacy, state_dir, description)
+    if budget:
+        budget.spend("playlistItems.list")
     have = service.playlistItems().list(part="id", playlistId=pid, videoId=video_id, maxResults=1).execute().get("items", [])
-    if not have:
-        service.playlistItems().insert(part="snippet", body={"snippet": {
-            "playlistId": pid, "resourceId": {"kind": "youtube#video", "videoId": video_id}}}).execute()
+    if have:
+        return pid
+    snippet = {"playlistId": pid, "resourceId": {"kind": "youtube#video", "videoId": video_id}}
+    if part and part > 0:
+        if budget:
+            budget.spend("playlistItems.list")
+        total = service.playlistItems().list(part="id", playlistId=pid, maxResults=1).execute().get("pageInfo", {}).get("totalResults", 0)
+        snippet["position"] = min(part - 1, int(total))  # never beyond the end
+    if budget:
+        budget.spend("playlistItems.insert")
+    service.playlistItems().insert(part="snippet", body={"snippet": snippet}).execute()
     return pid
+
+
+# ---- captions, thumbnails, branding ----------------------------------------------------
+def _fmt_ts(t: float) -> str:
+    ms = int(round(t * 1000))
+    return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
+
+
+def srt_from_cues(cues: list[dict]) -> str:
+    """cues: [{"start": s, "end": s, "text": str}] -> SRT text."""
+    blocks = [f"{i}\n{_fmt_ts(c['start'])} --> {_fmt_ts(c['end'])}\n{c['text'].strip()}\n"
+              for i, c in enumerate(cues, 1) if c.get("text", "").strip()]
+    return "\n".join(blocks)
+
+
+def upload_captions(service, video_id: str, srt: str | Path, language: str = "en", name: str = "English",
+                    budget=None) -> str:
+    """captions.insert from an SRT file path (or SRT text). Returns the caption track id."""
+    import io
+
+    from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
+
+    if "-->" in str(srt):  # SRT text; an in-memory body avoids Windows temp-file locks
+        media = MediaIoBaseUpload(io.BytesIO(str(srt).encode("utf-8")), mimetype="application/octet-stream")
+    else:
+        media = MediaFileUpload(str(srt), mimetype="application/octet-stream")
+    if budget:
+        budget.spend("captions.insert")
+    r = service.captions().insert(part="snippet", body={"snippet": {
+        "videoId": video_id, "language": language, "name": name, "isDraft": False}}, media_body=media).execute()
+    return r["id"]
+
+
+def set_thumbnail(service, video_id: str, image: str | Path, budget=None) -> None:
+    """thumbnails.set (<=2 MB PNG/JPG, 16:9). Needs the channel phone-verified once in Studio."""
+    from googleapiclient.http import MediaFileUpload
+
+    p = Path(image)
+    if p.stat().st_size > 2 * 1024 * 1024:
+        raise ValueError(f"thumbnail {p.name} is over 2 MB")
+    if budget:
+        budget.spend("thumbnails.set")
+    service.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(
+        str(p), mimetype="image/png" if p.suffix.lower() == ".png" else "image/jpeg")).execute()
+
+
+def draft_branding(channel: str, description: str, keywords: list[str], state_dir: Path = STATE_DIR) -> Path:
+    """Write channel-description/keywords text for the USER to review. Nothing is applied to YouTube."""
+    sf = Path(state_dir) / f"{re.sub(r'[^A-Za-z0-9_-]+', '_', channel)}_branding_draft.json"
+    _save_cache(sf, {"description": description[:1000], "keywords": [k.strip() for k in keywords if k.strip()][:15],
+                     "status": "draft - apply with youtube.apply_branding(...) only after the user approves"})
+    return sf
+
+
+def apply_branding(service, channel_id: str, description: str, keywords: list[str], budget=None) -> None:
+    """channels.update brandingSettings (merges into the current settings). Call ONLY after the user approved the draft."""
+    cur = service.channels().list(part="brandingSettings", id=channel_id).execute()["items"][0]["brandingSettings"]
+    cur.setdefault("channel", {}).update(description=description,
+                                         keywords=" ".join(f'"{k}"' if " " in k else k for k in keywords))
+    if budget:
+        budget.spend("channels.update")
+    service.channels().update(part="brandingSettings", body={"id": channel_id, "brandingSettings": cur}).execute()
 
 
 def fetch_stats(service, video_ids: list[str]) -> dict[str, dict]:
