@@ -36,6 +36,7 @@ class LocalComfyUIProvider(ImageProvider):
         steps: int | None = None,
         cfg_scale: float | None = None,
         refine: bool | None = None,
+        timeout: int | None = None,
     ) -> ImageResult:
         start = time.time()
         cfg = copy.deepcopy(self.config)
@@ -118,6 +119,7 @@ class LocalComfyUIProvider(ImageProvider):
         outputs = orch.run_workflow(
             img_wf,
             workflow_overrides,
+            timeout=timeout,
         )
         if not outputs:
             raise RuntimeError("[LocalComfyUI] No image outputs were returned.")
@@ -262,6 +264,7 @@ class LocalComfyUIProvider(ImageProvider):
         weight: float | None = None,
         steps: int | None = None,
         cfg_scale: float | None = None,
+        timeout: int | None = None,
     ) -> ImageResult:
         """Text-to-image conditioned on a reference image via IP-Adapter (character/outfit consistency across panels)."""
         from aurora.monitoring.media_validator import validate_image
@@ -308,7 +311,7 @@ class LocalComfyUIProvider(ImageProvider):
         if style == "anime" and lc_cfg.get("anime_checkpoint"):
             overrides["4"] = {"ckpt_name": lc_cfg["anime_checkpoint"]}
         orch = ComfyOrchestrator(cfg)
-        outputs = orch.run_workflow(img_wf, overrides)
+        outputs = orch.run_workflow(img_wf, overrides, timeout=timeout)
         if not outputs:
             raise RuntimeError("[LocalComfyUI] reference render returned no image outputs.")
         image_path = Path(outputs[0])

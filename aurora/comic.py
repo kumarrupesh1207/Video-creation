@@ -19,6 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from aurora import research
 from aurora.audio import generate_music, mix_audio, synthesize_voiceover
+from aurora.costs import COST_DIR, credits_today, log_credits
 from aurora.monitoring.media_validator import _ffprobe, validate_video
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -231,17 +232,21 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode):
         try:
             from backend.app.providers.local_comfyui import LocalComfyUIProvider
 
-            prov, steps = LocalComfyUIProvider(cfg), int(cfg.get("comic", {}).get("steps", 20))
+            ccfg = cfg.get("comic", {})
+            prov, steps = LocalComfyUIProvider(cfg), int(ccfg.get("steps", 20))
             res = list(cfg.get("comic", {}).get("comfy_resolution", [512, 896]))
             t0 = _t.time()
             ref_prompt = (f"{research.COMIC_STYLE}, {sheet[0]['name']}: {sheet[0]['description']}, full body, standing, "
                           "simple plain background, character reference, vibrant colors, clean lineart")
-            ref = prov.generate_with_params(ref_prompt, "anime", res, f"{job}_ref", negative_prompt=neg, seed=seed, steps=steps)
+            floor, mult = int(ccfg.get("comfy_timeout_sec", 1800)), float(ccfg.get("timeout_multiplier", 3))
+            ref = prov.generate_with_params(ref_prompt, "anime", res, f"{job}_ref", negative_prompt=neg, seed=seed, steps=steps,
+                                            timeout=max(floor, 3600))  # first image: no measurement yet -> generous
             timings.append(round(_t.time() - t0, 1))
             for i, p in enumerate(panels):
                 t0 = _t.time()
+                limit = int(max(floor, mult * sorted(timings)[len(timings) // 2]))  # 3x the measured median, never below the floor
                 r = prov.generate_with_reference(ref.output_path, research.panel_prompt(p, sheet), "anime", res, f"{job}_p{i}",
-                                                 negative_prompt=neg, seed=seed, steps=steps)
+                                                 negative_prompt=neg, seed=seed, steps=steps, timeout=limit)
                 images.append(Path(r.output_path))
                 timings.append(round(_t.time() - t0, 1))
             return images, timings, "ComfyUI character reference + IP-Adapter (consistent look)", "comfy_ipadapter"
@@ -252,12 +257,26 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode):
             images, timings = [], []
     elif image_mode == "comfy":
         raise RuntimeError("image_mode=comfy but ComfyUI is not reachable")
+    # --- NIM fallback: explicit, capped, logged (never silent). Default cap 0 credits per comic reel.
+    need = len(panels)
+    cost_dir = Path(cfg.get("cost_dir", COST_DIR))
+    cap_reel = int(cfg.get("comic", {}).get("max_nim_credits_per_reel", 0))
+    cap_day = int(cfg.get("providers", {}).get("nvidia_nim", {}).get("max_credits_per_day", 10))
+    if need > cap_reel:
+        raise RuntimeError(f"{note}NIM fallback would use {need} credits but comic.max_nim_credits_per_reel={cap_reel}; "
+                           "start ComfyUI or raise the cap")
+    if credits_today("nvidia_nim", cost_dir) + need > cap_day:
+        raise RuntimeError(f"{note}NIM fallback blocked: daily cap {cap_day} credits (used {credits_today('nvidia_nim', cost_dir)})")
+    print(f"[comic] FALLBACK to NIM for {need} panels ({note.strip() or 'ComfyUI not reachable'}); credits used today "
+          f"{credits_today('nvidia_nim', cost_dir)} / {cap_day}")
     for i, p in enumerate(panels):
         t0 = _t.time()
         r = switchboard.generate(research.panel_prompt(p, sheet), "anime", list(nim_res), f"{job}_p{i}", negative_prompt=neg, seed=seed)
         images.append(Path(r.output_path))
         timings.append(round(_t.time() - t0, 1))
-    return images, timings, note + "NIM fallback: character consistency may drop between panels", "nim_fallback"
+    log_credits("nvidia_nim", need, cost_dir)
+    return (images, timings, f"{note or 'ComfyUI not reachable; '}NIM fallback used {need} credits: character consistency may drop "
+            "between panels", "nim_fallback")
 
 
 def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None = None, language: str = "English",

@@ -49,3 +49,26 @@ def check_budget(estimate_usd: float, monthly_budget_inr: float, usd_inr: float 
         raise BudgetExceeded(
             f"budget cap: spent ${spent:.2f} + this call ${estimate_usd:.2f} > monthly budget "
             f"Rs {monthly_budget_inr:g} (${budget_usd:.2f}). Raise motion.i2v.google.monthly_budget_inr to allow it.")
+
+
+def _credit_path(provider: str, cost_dir: Path) -> Path:
+    return Path(cost_dir) / f"{provider}-credits.json"
+
+
+def credits_today(provider: str, cost_dir: Path = COST_DIR) -> int:
+    try:
+        return int(json.loads(_credit_path(provider, cost_dir).read_text(encoding="utf-8")).get(f"{datetime.now():%Y-%m-%d}", 0))
+    except (OSError, ValueError):
+        return 0
+
+
+def log_credits(provider: str, n: int, cost_dir: Path = COST_DIR) -> None:
+    p = _credit_path(provider, cost_dir)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    day = f"{datetime.now():%Y-%m-%d}"
+    data[day] = int(data.get(day, 0)) + int(n)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, indent=2), encoding="utf-8")

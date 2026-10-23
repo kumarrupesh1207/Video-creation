@@ -47,6 +47,9 @@ research:                          # aurora/research.py (Gemini text, free tier;
 comic:                             # aurora/comic.py image settings (ComfyUI first, NIM fallback)
   steps: 20
   comfy_resolution: [512, 896]
+  comfy_timeout_sec: 1800          # per-image floor; later panels get max(floor, 3 x median of the images so far)
+  timeout_multiplier: 3
+  max_nim_credits_per_reel: 0      # NIM fallback is OFF for comic reels unless raised (it spends credits)
 
 motion:
   liveportrait:
@@ -120,6 +123,7 @@ providers:
       cinematic: "black-forest-labs/flux.2-klein-4b"
     timeout: 60
     quota: 80
+    max_credits_per_day: 10          # hard daily cap for automatic fallbacks (comic)
   local_comfyui:
     cfg: 5.5
     steps: 25
@@ -217,7 +221,8 @@ vram:
 # ── Autopilot (research → create → veto window → publish) ──────────────
 autopilot:
   publish:
-    approval: veto          # auto-publish after veto_hours unless stopped
+    enabled: false          # GLOBAL KILL-SWITCH: nothing uploads while false (even without --dry-run). Set true only when told to go.
+    approval: veto         # auto-publish after veto_hours unless stopped
     veto_hours: 6
     slots: ["12:30", "18:30", "21:00"]   # IST; one reel per slot
     timezone: Asia/Kolkata

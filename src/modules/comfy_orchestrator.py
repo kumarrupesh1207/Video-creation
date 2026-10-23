@@ -56,7 +56,7 @@ class ComfyOrchestrator:
     # Public API
     # ──────────────────────────────────────────────────────────────────────────
     def run_workflow(self, workflow_path: str, overrides: dict = None,
-                     timeout: int = 900) -> list:
+                     timeout: int | None = None) -> list:
         """
         Load a workflow JSON, apply overrides, queue it, and return
         the list of downloaded output Paths.
@@ -66,13 +66,13 @@ class ComfyOrchestrator:
                      Default 900s (15 min) — covers CPU-mode SD 1.5 generation.
                      For GPU: typically 30-120s per image.
         """
-        if Path(workflow_path).name.startswith(("image_gen", "img2img")):  # CPU image workflows (incl. IP-Adapter variants)
-            timeout = max(timeout, 3600)
+        if timeout is None:  # default: 900 s, 3600 s for the slow CPU image workflows (incl. IP-Adapter variants)
+            timeout = 3600 if Path(workflow_path).name.startswith(("image_gen", "img2img")) else 900
         return self._execute(workflow_path, overrides, timeout)
 
     # Alias for backward compat
     def queue_prompt(self, workflow_path: str, overrides: dict = None,
-                     timeout: int = 900) -> list:
+                     timeout: int | None = None) -> list:
         return self.run_workflow(workflow_path, overrides, timeout)
 
     def free_vram(self) -> None:

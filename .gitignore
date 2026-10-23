@@ -27,3 +27,4 @@ assets/music/**/*.flac
 assets/voices/*.wav
 assets/voices/*.mp3
 .venv-tts/
+.venv-parler/

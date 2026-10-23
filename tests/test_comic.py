@@ -91,18 +91,19 @@ def test_panel_images_use_comfy_reference_then_fall_back_to_nim(workspace_tmp_pa
     from backend.app.providers import local_comfyui as lc
 
     spec = research.research_comic("c", "a swordsman", panels=5, cfg={}, series_dir=workspace_tmp_path)["comic"]
-    calls = []
+    calls, timeouts = [], []
 
     class FakeProv:
         def __init__(self, cfg):
             pass
 
-        def generate_with_params(self, prompt, style, res, job, negative_prompt=None, seed=None, steps=None):
+        def generate_with_params(self, prompt, style, res, job, negative_prompt=None, seed=None, steps=None, timeout=None):
             calls.append(("ref", seed, steps))
             return SimpleNamespace(output_path=str(workspace_tmp_path / "ref.png"))
 
-        def generate_with_reference(self, ref, prompt, style, res, job, negative_prompt=None, seed=None, steps=None):
+        def generate_with_reference(self, ref, prompt, style, res, job, negative_prompt=None, seed=None, steps=None, timeout=None):
             assert "speech bubble" in negative_prompt
+            timeouts.append(timeout)
             calls.append(("panel", ref, seed))
             return SimpleNamespace(output_path=str(workspace_tmp_path / f"{job}.png"))
 
@@ -120,8 +121,13 @@ def test_panel_images_use_comfy_reference_then_fall_back_to_nim(workspace_tmp_pa
     assert all(c[1] == str(workspace_tmp_path / "ref.png") for c in calls[1:])  # every panel conditioned on one reference
     calls.clear()
     monkeypatch.setattr(comic, "_comfy_up", lambda cfg: False)
-    imgs, timings, note, mode = comic._panel_images({}, Board(), spec, 77, "j", (576, 1024), "auto")
-    assert mode == "nim_fallback" and "consistency may drop" in note and [c[0] for c in calls] == ["nim"] * 5
+    assert all(t and t >= 1800 for t in timeouts)  # per-image timeout = max(floor, 3 x median so far)
+    cfg = {"comic": {"max_nim_credits_per_reel": 10}, "cost_dir": str(workspace_tmp_path / "costs")}
+    imgs, timings, note, mode = comic._panel_images(cfg, Board(), spec, 77, "j", (576, 1024), "auto")
+    assert mode == "nim_fallback" and "consistency may drop" in note and "5 credits" in note and [c[0] for c in calls] == ["nim"] * 5
+    from aurora.costs import credits_today
+
+    assert credits_today("nvidia_nim", workspace_tmp_path / "costs") == 5  # fallback is logged, never silent
 
 
 @needs_ffmpeg
@@ -172,3 +178,18 @@ def test_explicit_comfy_mode_does_not_fall_back_to_nim(workspace_tmp_path, monke
     monkeypatch.setattr(comic, "_comfy_up", lambda cfg: True)
     with pytest.raises(RuntimeError, match="timed out"):
         comic._panel_images({}, SimpleNamespace(generate=lambda *a, **k: pytest.fail("NIM must not be called")), spec, 1, "j", (576, 1024), "comfy")
+
+
+def test_nim_fallback_is_off_by_default_and_daily_capped(workspace_tmp_path, monkeypatch):
+    spec = research.research_comic("c", "a swordsman", panels=5, cfg={}, series_dir=workspace_tmp_path)["comic"]
+    board = SimpleNamespace(generate=lambda *a, **k: pytest.fail("NIM must not be called"))
+    monkeypatch.setattr(comic, "_comfy_up", lambda cfg: False)
+    with pytest.raises(RuntimeError, match="max_nim_credits_per_reel=0"):  # default cap 0 -> explicit failure, no spend
+        comic._panel_images({"cost_dir": str(workspace_tmp_path / "c")}, board, spec, 1, "j", (576, 1024), "auto")
+    from aurora.costs import log_credits
+
+    log_credits("nvidia_nim", 8, workspace_tmp_path / "c")
+    cfg = {"comic": {"max_nim_credits_per_reel": 10}, "providers": {"nvidia_nim": {"max_credits_per_day": 10}},
+           "cost_dir": str(workspace_tmp_path / "c")}
+    with pytest.raises(RuntimeError, match="daily cap"):  # 8 used + 5 needed > 10
+        comic._panel_images(cfg, board, spec, 1, "j", (576, 1024), "auto")
