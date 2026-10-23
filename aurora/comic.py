@@ -535,14 +535,14 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode=None):
                     raise RuntimeError(f"daily NIM cap {cap_day} credits reached")
                 t0 = _t.time()
                 prompt = research.panel_prompt(panels[i], sheet)
-                for attempt in range(3):  # CONTENT_FILTERED -> retry with softened wording (each call may cost a credit)
+                for attempt in range(2):  # CONTENT_FILTERED -> at most ONE retry (softened wording, new seed); each call may cost a credit
                     try:
                         # NIM's filter judges the OUTPUT image: a fixed seed reproduces the same blocked image, so retries get a new seed
                         r = switchboard.generate(prompt, "anime", list(nim_res), f"{job}_p{i}_{attempt}" if attempt else f"{job}_p{i}",
                                                  negative_prompt=neg, seed=seed + attempt * 7919)
                     except Exception as exc:  # noqa: BLE001
                         log_credits("nvidia_nim", 1, cost_dir)
-                        if "CONTENT_FILTERED" in str(exc) and attempt < 2:
+                        if "CONTENT_FILTERED" in str(exc) and attempt < 1:
                             prompt = soften_prompt(prompt, attempt + 1)
                             print(f"[comic] panel {i}: NIM safety filter, retrying with softened prompt (attempt {attempt + 2}); "
                                   f"prompt was: {prompt[:300]}")
