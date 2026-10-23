@@ -163,3 +163,52 @@ def speaker_x(faces_img: list[Box], img_w: int, img_h: int, win_w: int = W, win_
     s = max(win_w / img_w, win_h / img_h)  # cover-fit into the art window
     ox = (img_w * s - win_w) / 2
     return int(min(max((f[0] + f[2]) / 2 * s - ox, 120), win_w - 120))
+
+
+def subject_top_fraction(image_path: Path) -> float:
+    """Where the subject starts (0 = top edge, 1 = bottom): first row band with real edge/texture energy. Used when no face
+    is found (hooded / masked / dark subjects) so the head or hood is kept in the crop instead of a centre crop."""
+    import cv2
+    import numpy as np
+
+    img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        return 0.0
+    img = cv2.resize(img, (200, int(200 * img.shape[0] / img.shape[1])))
+    rows = cv2.Canny(cv2.GaussianBlur(img, (5, 5), 0), 50, 140).mean(axis=1)
+    rows = np.convolve(rows, np.ones(7) / 7, mode="same")
+    hot = np.where(rows >= max(rows.max() * 0.35, 1e-6))[0]
+    return float(hot[0] / len(rows)) if len(hot) else 0.0
+
+
+def art_crop(image_path: Path, out_path: Path, win_w: int = W, win_h: int = 1170) -> Path:
+    """Crop `image_path` to the art window's aspect, choosing the window by SUBJECT (head/hood in frame), not the centre:
+    top of the face box minus headroom when a face is found, else the subject's top edge. No-op copy when the aspect already fits."""
+    from PIL import Image
+
+    with Image.open(image_path) as im:
+        im = im.convert("RGB")
+        iw, ih = im.size
+        want = win_w / win_h
+        if abs(iw / ih - want) / want < 0.03:
+            im.save(out_path)
+            return out_path
+        if iw / ih < want:  # taller than the window (the usual 9:16 image): choose the vertical window
+            ch = int(round(iw / want))
+            faces = detect_faces(Path(image_path))
+            if faces:
+                top = min(f[1] for f in faces)
+                bottom = max(f[3] for f in faces)
+                y0 = top - 0.28 * ch  # headroom above the face
+                if bottom - top > 0.6 * ch:  # very large face: just keep the top part
+                    y0 = top - 0.1 * ch
+            else:
+                y0 = subject_top_fraction(Path(image_path)) * ih - 0.05 * ch
+            y0 = int(min(max(y0, 0), ih - ch))
+            box = (0, y0, iw, y0 + ch)
+        else:  # wider than the window: centre horizontally (rare)
+            cw = int(round(ih * want))
+            x0 = (iw - cw) // 2
+            box = (x0, 0, x0 + cw, ih)
+        im.crop(box).save(out_path)
+    return out_path

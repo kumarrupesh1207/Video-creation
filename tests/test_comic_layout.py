@@ -94,3 +94,32 @@ def test_fit_text_shrinks_never_cuts_off_and_avoids_orphans():
 def test_layout_config_keys():
     lay = L.Layout.from_cfg({"top_h": 300, "art_h": 1200, "dialogue_h": 200, "right_safe": 140, "unknown": 1})
     assert (lay.art_y, lay.art_bottom, lay.dial_bottom, lay.text_right) == (300, 1500, 1700, 940)
+
+
+def test_art_crop_keeps_the_subject_head_in_frame(workspace_tmp_path, monkeypatch):
+    from aurora import comic_layout as CL
+
+    tall = Image.new("RGB", (576, 1024), (30, 30, 40))
+    p = workspace_tmp_path / "tall.png"
+    tall.save(p)
+    ch = round(576 / (1080 / 1170))  # crop height for the art window's aspect (= 624)
+    # a face found low in the image: the window moves down to include it, with headroom
+    monkeypatch.setattr(CL, "detect_faces", lambda path: [(200.0, 600.0, 380.0, 780.0)])
+    out = Image.open(CL.art_crop(p, workspace_tmp_path / "a.png"))
+    assert abs(out.size[0] / out.size[1] - 1080 / 1170) < 0.01
+    y0 = 600 - 0.28 * ch
+    assert 0 < y0 <= 600 - 40  # the window starts above the face top (headroom) and is not the centre crop (200)
+    # no face: top-aligned subject (hooded villain) -> the crop starts at the very top, so the hood is not cut off
+    monkeypatch.setattr(CL, "detect_faces", lambda path: [])
+    busy = Image.new("RGB", (576, 1024), (20, 20, 30))
+    d = ImageDraw.Draw(busy)
+    for k in range(60):
+        d.rectangle([150 + (k % 6) * 50, 20 + (k // 6) * 25, 175 + (k % 6) * 50, 35 + (k // 6) * 25], fill=(255, 255, 255) if k % 2 else (0, 0, 0))
+    busy.save(workspace_tmp_path / "busy.png")
+    assert CL.subject_top_fraction(workspace_tmp_path / "busy.png") < 0.1
+    out2 = Image.open(CL.art_crop(workspace_tmp_path / "busy.png", workspace_tmp_path / "b.png"))
+    assert out2.getpixel((200, 22)) != (20, 20, 30) or out2.getpixel((260, 30)) != (20, 20, 30)  # the busy top rows are inside the crop
+    # an image that already has the art aspect is passed through untouched
+    sq = Image.new("RGB", (1080, 1170), (5, 5, 5))
+    sq.save(workspace_tmp_path / "sq.png")
+    assert Image.open(CL.art_crop(workspace_tmp_path / "sq.png", workspace_tmp_path / "s.png")).size == (1080, 1170)

@@ -237,7 +237,14 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
     voices: list[tuple[Path | None, float]] = []  # (voice file, start seconds)
     notes, t = [], 0.0
 
-    cover = render_clip(ffmpeg, images[0], make_overlay(work / "ov_cover.png", title=series["title"], subtitle=f"PART {part}", layout=L),
+    def fitted(img, name):  # art-window-shaped crop of the image, subject-aware (heads/hoods stay in frame)
+        try:
+            return comic_layout.art_crop(Path(img), work / f"art_{name}.png", W, L.art_h)
+        except Exception as exc:  # noqa: BLE001 - never block a render on the crop
+            notes.append(f"art crop skipped for {name}: {str(exc)[:60]}")
+            return Path(img)
+
+    cover = render_clip(ffmpeg, fitted(images[0], "cover"), make_overlay(work / "ov_cover.png", title=series["title"], subtitle=f"PART {part}", layout=L),
                         COVER_S, "zoom_in", work / "clip_cover.mp4", dim=True, layout=L)
     clips.append((cover, COVER_S))
     voices.append((None, 0.0))
@@ -258,13 +265,13 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
             except Exception as exc:  # noqa: BLE001
                 notes.append(f"panel {i}: face detection skipped ({str(exc)[:60]})")
         ov = make_overlay(work / f"ov_{i}.png", narration=p["narration"], bubble=p.get("bubble", ""), speaker_x=sx, layout=L)
-        clips.append((render_clip(ffmpeg, img, ov, secs, motion, work / f"clip_{i}.mp4", layout=L), secs))
+        clips.append((render_clip(ffmpeg, fitted(img, str(i)), ov, secs, motion, work / f"clip_{i}.mp4", layout=L), secs))
         voices.append((vfile, t + 0.05))
         t += secs - XF
     final = part >= int(series.get("total_parts", 1))
     end_ov = make_overlay(work / "ov_end.png", title="The End" if final else "To be continued...",
                           subtitle="" if final else f"Part {part + 1} coming soon", layout=L)
-    clips.append((render_clip(ffmpeg, images[-1], end_ov, END_S, "zoom_out", work / "clip_end.mp4", dim=True, layout=L), END_S))
+    clips.append((render_clip(ffmpeg, fitted(images[-1], "end"), end_ov, END_S, "zoom_out", work / "clip_end.mp4", dim=True, layout=L), END_S))
     total = sum(s for _, s in clips) - XF * (len(clips) - 1)
 
     # video: xfade chain; audio: per-panel voices placed on the timeline, music ducked under them
@@ -461,7 +468,7 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode=None):
 
 def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None = None, language: str = "English",
                     panels: int = 6, voice: str = "en-US-AvaNeural", comic: dict | None = None, switchboard=None,
-                    music: bool = True, series_dir: Path | None = None, resolution: tuple[int, int] = (576, 1024),
+                    music: bool = True, series_dir: Path | None = None, resolution: tuple[int, int] | None = None,
                     client=None, image_mode: str | None = None) -> dict:
     """Research (series-aware) -> panel images (NIM -> local ComfyUI anime) -> render -> validate -> sidecar -> save series state.
 
@@ -485,6 +492,7 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
     part = comic["series"]["part"]
     slug = re.sub(r"[^a-z0-9]+", "-", f"{channel}-part{part}-{comic['series']['title']}".lower()).strip("-")[:60]
     job = f"comic_{datetime.now():%Y%m%d_%H%M%S}_{slug[:24]}"
+    resolution = tuple(resolution or cfg.get("comic", {}).get("nim_resolution", [1024, 1088]))  # ~ the art window's shape
     images, timings, img_note, mode_used = _panel_images(cfg, switchboard, comic, seed, job, resolution, image_mode)
     out_dir = Path(out_dir) / date.today().isoformat()
     out_dir.mkdir(parents=True, exist_ok=True)

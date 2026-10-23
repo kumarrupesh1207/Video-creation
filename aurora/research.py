@@ -169,7 +169,7 @@ def panel_prompt(panel: dict, sheet: list[dict]) -> str:
     """Final image prompt: style + the FIXED character descriptions for this panel + shot + scene."""
     names = {n.lower() for n in panel.get("characters", [])}
     chars = [c for c in sheet if not names or c["name"].lower() in names] or sheet[:1]
-    return ("cel-shaded anime illustration, one single full-bleed scene, " + ", ".join(f"{c['name']}: {c['description']}" for c in chars)
+    return ("cel-shaded anime illustration, single panel, one single full-bleed scene, " + ", ".join(f"{c['name']}: {c['description']}" for c in chars)
             + f", {panel.get('shot', 'medium')} shot, {panel['image_prompt']}, vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no frame, no text, no letters, no words, no captions, no signature, no watermark, no speech bubbles, no sound effect lettering, wordless illustration, no speech balloons")
 
 

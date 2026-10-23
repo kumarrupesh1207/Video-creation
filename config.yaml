@@ -46,7 +46,8 @@ research:                          # aurora/research.py (Gemini text, free tier;
 
 comic:                             # aurora/comic.py image settings (ComfyUI first, NIM fallback)
   steps: 20
-  comfy_resolution: [512, 896]
+  comfy_resolution: [640, 704]     # ~ the art window's shape (1080x1170), SD1.5-friendly
+  nim_resolution: [1024, 1088]     # NIM maps it to its nearest supported size (1024x1024): almost no crop in the art window
   layout:                          # reserved bands of the 1080x1920 frame; text is never drawn on the art
     top_h: 330                     # narration band (y 0-330)
     art_h: 1170                    # image + Ken Burns window (y 330-1500)
