@@ -165,12 +165,34 @@ def save_series(channel: str, comic: dict, series_dir: Path = SERIES_DIR) -> dic
     return state
 
 
-def panel_prompt(panel: dict, sheet: list[dict]) -> str:
-    """Final image prompt: style + the FIXED character descriptions for this panel + shot + scene."""
+PROMPT_SUFFIX = (", composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), "
+                 "single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, "
+                 "no speech bubbles, wordless, vibrant colors, clean lineart, original characters")
+MAX_PROMPT_CHARS = 780  # NIM rejects prompts over 800 characters (HTTP 422 string_too_long)
+
+
+def _cut(text: str, n: int) -> str:
+    """Shorten to <= n chars at the last comma/space, keeping whole phrases."""
+    if len(text) <= n:
+        return text
+    cut = text[:n]
+    i = max(cut.rfind(","), cut.rfind(" "))
+    return (cut[:i] if i > n // 2 else cut).rstrip(" ,;")
+
+
+def panel_prompt(panel: dict, sheet: list[dict], max_chars: int = MAX_PROMPT_CHARS) -> str:
+    """Final image prompt: style + the FIXED character descriptions for this panel + shot + scene + composition/no-text suffix.
+    Kept under max_chars (NIM limit): character descriptions and the scene are shortened first; the suffix and shot never are."""
     names = {n.lower() for n in panel.get("characters", [])}
     chars = [c for c in sheet if not names or c["name"].lower() in names] or sheet[:1]
-    return ("cel-shaded anime illustration, single panel, one single full-bleed scene, " + ", ".join(f"{c['name']}: {c['description']}" for c in chars)
-            + f", {panel.get('shot', 'medium')} shot, {panel['image_prompt']}, composition: leave clear empty space (sky or background) in the upper third of the frame for text, character placed in the lower two thirds, vibrant colors, clean lineart, original characters, single full-frame illustration, no panel borders, no frame, no text, no letters, no words, no captions, no signature, no watermark, no speech bubbles, no sound effect lettering, wordless illustration, no speech balloons")
+    head = "cel-shaded anime illustration, single panel, "
+    shot = f", {panel.get('shot', 'medium')} shot, "
+    for desc_n, scene_n in ((10_000, 10_000), (170, 260), (120, 200), (80, 150), (50, 100)):
+        who = ", ".join(f"{c['name']}: {_cut(c['description'], desc_n)}" for c in chars)
+        text = head + who + shot + _cut(panel["image_prompt"], scene_n) + PROMPT_SUFFIX
+        if len(text) <= max_chars:
+            return text
+    return text[:max_chars]
 
 
 COMIC_PROMPT = (

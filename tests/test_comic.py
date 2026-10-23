@@ -273,3 +273,14 @@ def test_bubble_detector_and_word_cap(workspace_tmp_path):
     assert not comic.trim_words("Sparks of raw Aether collide as the two forces lock in a desperate, final dance.").rstrip(".").endswith((" a", " in", " the"))
     cut = comic.trim_words("The old guardian slowly raised his glowing sword toward the endless crimson sky and then the")
     assert cut.split()[-1].lower().strip(".") not in {"the", "a", "and", "then"} or len(cut.split()) > 10
+
+
+def test_panel_and_softened_prompts_stay_under_nims_800_char_limit():
+    sheet = [{"name": "Kaelen", "description": "Young male warrior with spiky white hair, glowing cyan eyes, dark blue tactical tunic, long cape " * 3},
+             {"name": "Stalker", "description": "faceless entity in swirling purple mist, tattered obsidian robes, floating chains " * 3}]
+    panel = {"shot": "action", "characters": ["Kaelen", "Stalker"], "image_prompt": "they collide above a ruined floating city, blood and sparks " * 6}
+    p = research.panel_prompt(panel, sheet)
+    assert len(p) <= 780 and "no text" in p and "action shot" in p and "upper third" in p
+    soft = comic.soften_prompt(p, 2)
+    assert len(soft) <= 800 and "blood" not in soft and soft.endswith("no violence")
+    assert len(research.panel_prompt({"shot": "wide", "image_prompt": "a quiet rooftop"}, sheet[:1])) < 780

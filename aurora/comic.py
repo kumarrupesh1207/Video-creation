@@ -139,7 +139,10 @@ def _overlay_bands(path: Path, narration: str = "", bubble: str = "", title: str
     return path
 
 
-def _place_text(d, text: str, occ, blocked, hi: int, lo: int, widths, pad_x: int, pad_y: int, hz=None):
+CLEAN_COST = 0.05  # a placement costlier than this (any head/other-box overlap, or >5% body) triggers the fallback layout
+
+
+def _place_text(d, text: str, occ, blocked, hi: int, lo: int, widths, pad_x: int, pad_y: int, hz=None, safe=None):
     """Try font sizes hi..lo and wrap widths (wide -> narrow boxes) and keep the best-scoring placement: overlap with the
     characters (head/upper body weighted) + a small penalty per font step and per narrowing, so readable text beats a tiny
     box squeezed into a gap. Text is never cut off: fonts shrink first, then boxes get narrower."""
@@ -151,9 +154,10 @@ def _place_text(d, text: str, occ, blocked, hi: int, lo: int, widths, pad_x: int
             lh = int(size * 1.28)
             tw = int(max(d.textlength(l, font=f) for l in lines))
             bw, bh = tw + 2 * pad_x, len(lines) * lh + 2 * pad_y
-            if bw > comic_layout.SAFE[2] - comic_layout.SAFE[0] or bh > comic_layout.SAFE[3] - comic_layout.SAFE[1]:
+            sf = safe or comic_layout.SAFE
+            if bw > sf[2] - sf[0] or bh > sf[3] - sf[1]:
                 continue
-            x, y, cost = comic_layout.best_spot(occ, bw, bh, blocked, head=hz)
+            x, y, cost = comic_layout.best_spot(occ, bw, bh, blocked, head=hz, **({'safe': safe} if safe else {}))
             score = cost + 0.03 * si + 0.01 * wi
             if best is None or score < best[0]:
                 best = (score, cost, f, lines, lh, x, y, bw, bh)
@@ -175,13 +179,38 @@ def _overlay_free(path: Path, narration: str, bubble: str, title: str, subtitle:
     blocked, narr_box = [], None
     if narration:
         (f, lines, lh, x0, y0, bw, bh), cost = _place_text(d, narration, occ, blocked, 54, 30, (880, 700, 560, 440, 340), 28, 22, head_zone)
-        narr_box = (x0, y0, x0 + bw, y0 + bh)
-        d.rectangle(list(narr_box), fill=(255, 243, 196, 255), outline=(20, 20, 20, 255), width=5)
-        for k, l in enumerate(lines):
-            d.text((x0 + 28, y0 + 22 + k * lh), l, font=f, fill=(20, 20, 20, 255))
+        if cost > CLEAN_COST:  # no clean region: slim semi-transparent strip pinned to the very top edge, at most 2 lines
+            for size in range(46, 29, -2):
+                f = _font(size, narration)
+                lines, lh = _balanced(d, narration, f, comic_layout.SAFE[2] - 60), int(size * 1.28)
+                if len(lines) <= 2:
+                    break
+            bh = len(lines) * lh + 20
+            narr_box = (0, 0, W, bh)
+            d.rectangle(list(narr_box), fill=(255, 243, 196, 215))
+            for k, l in enumerate(lines):
+                d.text((40, 10 + k * lh), l, font=f, fill=(20, 20, 20, 255))
+        else:
+            narr_box = (x0, y0, x0 + bw, y0 + bh)
+            d.rectangle(list(narr_box), fill=(255, 243, 196, 255), outline=(20, 20, 20, 255), width=5)
+            for k, l in enumerate(lines):
+                d.text((x0 + 28, y0 + 22 + k * lh), l, font=f, fill=(20, 20, 20, 255))
         blocked.append(narr_box)
     if bubble:
-        (f, lines, lh, x0, y0, bw, bh), cost = _place_text(d, bubble, occ, blocked, 54, 30, (760, 600, 480, 380, 300), 46, 28, head_zone)
+        placed = _place_text(d, bubble, occ, blocked, 54, 30, (760, 600, 480, 380, 300), 46, 28, head_zone)
+        (f, lines, lh, x0, y0, bw, bh), cost = placed
+        if cost > CLEAN_COST:
+            S0 = comic_layout.SAFE
+            if head:  # (a) the side opposite the head's x, at the head's height, only if it is clean background there
+                side = (540, 40, S0[2], S0[3]) if head[0] < 540 else (S0[0], 40, 540, S0[3])
+                near = (side[0], max(head[1] - 160, 40), side[2], min(head[1] + 260, S0[3]))
+                alt = _place_text(d, bubble, occ, blocked, 54, 30, (480, 380, 300), 46, 28, head_zone, safe=near)
+                if alt[1] <= 0.0:
+                    placed = alt
+            if placed[1] > CLEAN_COST:  # (b) just above the platform-UI safe zone at the bottom (lower robe, never the head)
+                placed = _place_text(d, bubble, occ, blocked, 54, 30, (760, 600, 480, 380, 300), 46, 28, head_zone,
+                                     safe=(S0[0], S0[3] - 230, S0[2], S0[3]))
+            (f, lines, lh, x0, y0, bw, bh), cost = placed
         # tail: from the bubble edge toward the speaker's head, stopping before it reaches the character
         cx, cy = x0 + bw / 2, y0 + bh / 2
         tail = None
@@ -447,7 +476,8 @@ def soften_prompt(prompt: str, level: int = 1) -> str:
     """Rewrite violent/risky wording so NIM's safety filter accepts the panel (level 2 adds a family-friendly suffix)."""
     for pat, repl in _SOFTEN:
         prompt = re.sub(pat, repl, prompt, flags=re.I)
-    return prompt + (", wholesome, safe for all ages, dramatic heroic pose, no violence" if level >= 2 else ", non-violent dramatic action")
+    extra = ", wholesome, safe for all ages, dramatic heroic pose, no violence" if level >= 2 else ", non-violent dramatic action"
+    return research._cut(prompt, 795 - len(extra)) + extra  # NIM rejects prompts over 800 characters
 
 
 def _comfy_panels(cfg, sheet, panels, first, seed, job, neg, ref_path=None):
@@ -527,7 +557,7 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode=None):
                     if drawn and retries_left[0] > 0:  # at most 2 extra (counted) regenerations per reel
                         retries_left[0] -= 1
                         print(f"[comic] panel {i}: image-drawn speech bubble detected, regenerating once with a new seed")
-                        r2 = switchboard.generate(prompt + ", wordless illustration, clean art, no speech balloons, no lettering",
+                        r2 = switchboard.generate(research._cut(prompt, 795 - 70) + ", wordless illustration, clean art, no speech balloons, no lettering",
                                                   "anime", list(nim_res), f"{job}_p{i}_retry", negative_prompt=neg, seed=seed + 1000 + i)
                         log_credits("nvidia_nim", 1, cost_dir)
                         r = r2

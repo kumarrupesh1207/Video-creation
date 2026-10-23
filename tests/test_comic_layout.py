@@ -235,3 +235,20 @@ def test_second_text_box_never_overlaps_the_first_even_over_body_cells():
     first = (60, 100, 700, 300)
     x, y, cost = L.best_spot(occ, 500, 150, blocked=[first], head=np.zeros_like(occ))
     assert L.overlap((x, y, x + 500, y + 150), first) == 0
+
+
+def test_fallback_layout_when_no_clean_region(workspace_tmp_path):
+    occ = np.zeros((L.H // L.CELL, L.W // L.CELL), np.float32)
+    occ[2:170, 5:100] = 1.0  # a character filling the frame from the very top down to y 1700 ...
+    head = np.zeros_like(occ)
+    head[2:60, 5:100] = 1.0  # ... with the head zone = its top part (y 20-600), nothing clean anywhere
+    ov = Image.open(comic.make_overlay(workspace_tmp_path / "fb.png", narration="Victory remains an impossible dream as the ground beneath the hero begins.",
+                                       bubble="Everything returns to the void.", layout=L.Layout(), occ=occ, head=(540, 450), head_zone=head))
+    a = ov.getchannel("A")
+    strip = a.crop((0, 0, 1080, 60)).getbbox()
+    assert strip and strip[0] <= 5 and strip[2] >= 1075  # narration = a strip pinned to the very top edge, full width
+    assert a.crop((40, 0, 1040, 200)).getbbox()[3] <= 160  # slim: at most 2 lines
+    assert a.crop((40, 160, 1040, 600)).getbbox() is None  # nothing else on the head zone (only the slim strip at the top edge)
+    bub = a.crop((40, L.SAFE[3] - 235, 1040, L.SAFE[3] + 2)).getbbox()
+    assert bub  # the bubble sits just above the bottom safe zone ...
+    assert a.crop((40, L.SAFE[3] + 4, 1040, 1880)).getbbox() is None  # ... and never inside it
