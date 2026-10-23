@@ -242,15 +242,17 @@ def foreground_mask(image_path: Path):
         return None
 
 
-def occupancy_over_motion(mask, faces_img: list[Box], img_w: int, img_h: int, motion: str,
-                          samples=(0.0, 0.25, 0.5, 0.75, 1.0)):
-    """Union, over the Ken-Burns move, of 'something important is here' in the final frame, as a (192 x 108) 0/1 grid:
-    the character mask (if any) warped into frame coordinates at several moments, plus every face box."""
+def occupancy_and_head(mask, faces_img: list[Box], img_w: int, img_h: int, motion: str,
+                       samples=(0.0, 0.25, 0.5, 0.75, 1.0)):
+    """Over the whole Ken-Burns move, in the final frame as (192 x 108) 0/1 grids: `occ` = where the characters are (mask,
+    low threshold + 2-cell dilation so a weak mask on a dark figure still counts, plus face boxes) and `head` = the HEAD ZONE
+    (top ~30% of the largest mask component, and every face box, each with a 2-cell margin). Text must never touch `head`."""
     import cv2
     import numpy as np
 
     gw, gh = W // CELL, H // CELL
     occ = np.zeros((gh, gw), np.float32)
+    head = np.zeros((gh, gw), np.float32)
     sc = max(CANVAS_W / img_w, CANVAS_H / img_h)
     ox, oy = (img_w * sc - CANVAS_W) / 2, (img_h * sc - CANVAS_H) / 2
     soft = cv2.blur(mask.astype("float32"), (11, 11)) if mask is not None else None
@@ -261,14 +263,28 @@ def occupancy_over_motion(mask, faces_img: list[Box], img_w: int, img_h: int, mo
             a = sc * k / CELL
             M = np.float32([[a, 0, (-ox - x0) * k / CELL], [0, a, (-oy - y0) * k / CELL]])
             layer = cv2.warpAffine(soft, M, (gw, gh), flags=cv2.INTER_LINEAR, borderValue=0)
-            occ = np.maximum(occ, (layer > 0.35).astype(np.float32))
+            occ = np.maximum(occ, (layer > 0.15).astype(np.float32))
+            n, lab, st, _ = cv2.connectedComponentsWithStats((layer > 0.12).astype(np.uint8), 8)
+            if n > 1:
+                k_big = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))
+                bx, by, bw, bh = st[k_big, 0], st[k_big, 1], st[k_big, 2], st[k_big, 3]
+                head[by: by + max(3, int(bh * 0.30)), bx: bx + bw] = 1.0
         for f in faces_img:
             fb = to_frame(to_canvas(f, img_w, img_h), motion, t)
-            x1, y1, x2, y2 = (int(max(fb[0] / CELL - 1, 0)), int(max(fb[1] / CELL - 1, 0)),
+            x1, y1, x2, y2 = (int(max(fb[0] / CELL, 0)), int(max(fb[1] / CELL, 0)),
                               int(min(fb[2] / CELL + 1, gw)), int(min(fb[3] / CELL + 1, gh)))
             if x2 > x1 and y2 > y1:
                 occ[y1:y2, x1:x2] = 1.0
-    return cv2.dilate(occ, np.ones((3, 3), np.uint8))  # 1-cell (10 px) breathing room around everything
+                head[y1:y2, x1:x2] = 1.0
+    k5 = np.ones((5, 5), np.uint8)
+    head = cv2.dilate(head, k5)  # 2-cell (20 px) margin around the head zone
+    return np.maximum(cv2.dilate(occ, k5), head), head
+
+
+def occupancy_over_motion(mask, faces_img: list[Box], img_w: int, img_h: int, motion: str,
+                          samples=(0.0, 0.25, 0.5, 0.75, 1.0)):
+    """Just the occupancy grid of occupancy_and_head() (kept for callers that do not need the head zone)."""
+    return occupancy_and_head(mask, faces_img, img_w, img_h, motion, samples)[0]
 
 
 def head_band(occ):
@@ -283,30 +299,32 @@ def head_band(occ):
     return out
 
 
-def head_point(occ, faces_frame: list[Box] | None = None) -> tuple[int, int] | None:
+def head_point(occ, faces_frame: list[Box] | None = None, head_zone=None) -> tuple[int, int] | None:
     """Where the speaker's head is, in frame px: the largest face box when there is one, else the centroid of the head band."""
     import numpy as np
 
     if faces_frame:
         f = max(faces_frame, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
         return int((f[0] + f[2]) / 2), int(f[1] + (f[3] - f[1]) * 0.7)
-    hb = head_band(occ)
+    hb = head_zone if head_zone is not None else head_band(occ)
     ys, xs = np.where(hb > 0)
     if len(xs) == 0:
         return None
     return int(xs.mean() * CELL), int(ys.mean() * CELL)
 
 
-def best_spot(occ, w_px: int, h_px: int, blocked: list[Box] = (), safe=SAFE) -> tuple[int, int, float]:
-    """Top-left (x, y) px inside the safe area minimising overlap with occupied cells (head/upper body counts 3x).
+def best_spot(occ, w_px: int, h_px: int, blocked: list[Box] = (), safe=SAFE, head=None) -> tuple[int, int, float]:
+    """Top-left (x, y) px inside the safe area minimising overlap with occupied cells (any head-zone overlap is worse than any body overlap).
     Zero overlap wins; ties prefer the top, then the sides. Returns (x, y, cost) with cost = occupied fraction of the box (head/upper body weighted 3x)."""
     import cv2
     import numpy as np
 
     o = occ.copy()
-    for b in blocked:  # another text box counts as occupied
-        o[max(int(b[1] // CELL), 0): int(b[3] // CELL) + 1, max(int(b[0] // CELL), 0): int(b[2] // CELL) + 1] = 1.0
-    ii, hh = cv2.integral(o), cv2.integral(head_band(occ))
+    blk = np.zeros_like(occ)
+    for b in blocked:  # another text box: a HARD no-go like the head zone (it may sit on body cells, so track it separately)
+        blk[max(int(b[1] // CELL) - 1, 0): int(b[3] // CELL) + 2, max(int(b[0] // CELL) - 1, 0): int(b[2] // CELL) + 2] = 1.0
+    ii, hh = cv2.integral(o), cv2.integral(head if head is not None else head_band(occ))
+    bb = cv2.integral(blk)
     gh, gw = o.shape
     bw, bh = max(1, -(-w_px // CELL)), max(1, -(-h_px // CELL))
     cx0, cy0, cx1, cy1 = safe[0] // CELL, safe[1] // CELL, safe[2] // CELL, safe[3] // CELL
@@ -316,7 +334,8 @@ def best_spot(occ, w_px: int, h_px: int, blocked: list[Box] = (), safe=SAFE) -> 
         for cx in range(cx0, max(cx0, cx1 - bw) + 1, 2):
             s = ii[cy + bh, cx + bw] - ii[cy, cx + bw] - ii[cy + bh, cx] + ii[cy, cx]
             hs = hh[cy + bh, cx + bw] - hh[cy, cx + bw] - hh[cy + bh, cx] + hh[cy, cx]
-            cost = (s + 3.0 * hs) / area
+            bs = bb[cy + bh, cx + bw] - bb[cy, cx + bw] - bb[cy + bh, cx] + bb[cy, cx]
+            cost = s / area + ((5.0 + 10.0 * hs / area) if hs > 0 else 0.0) + ((6.0 + 10.0 * bs / area) if bs > 0 else 0.0)  # head / other text box: worse than ANY body overlap (<= 1)
             pref = cy * 0.01 + min(cx - cx0, cx1 - bw - cx) * 0.004  # top first, then the sides
             key = (0, 0.0, pref) if cost <= 0.0 else (1, cost, pref)
             if key < best_key:

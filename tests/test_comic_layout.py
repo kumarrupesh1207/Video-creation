@@ -201,3 +201,37 @@ def test_free_overlay_shrinks_text_to_fit_a_crowded_frame(workspace_tmp_path):
                                        layout=L.Layout(), occ=occ, head=(540, 400)))
     box = ov.getchannel("A").crop((30, 30, 950, 1574)).getbbox()
     assert box and box[2] + 30 <= 45 * L.CELL + 10  # the narration box narrowed to fit the free strip (no overlap with the character)
+
+
+def test_head_zone_is_a_hard_rule_body_overlap_beats_head_overlap():
+    occ = np.ones((L.H // L.CELL, L.W // L.CELL), np.float32)  # characters everywhere: a body overlap is unavoidable
+    head = np.zeros_like(occ)
+    head[40:75, 30:80] = 1.0  # head zone (cells) in the upper middle, y 400-750 px, x 300-800 px
+    x, y, cost = L.best_spot(occ, 500, 160, head=head)
+    box = (x, y, x + 500, y + 160)
+    assert L.overlap(box, (300, 400, 800, 750)) == 0  # never on the head, even though everything else is "body"
+    assert cost > 0  # ...and the body overlap is accepted
+    # with no way to avoid it, a head overlap costs more than any body overlap
+    occ0 = np.zeros_like(occ)
+    full_head = np.ones_like(occ)
+    assert L.best_spot(occ0, 300, 100, head=full_head)[2] > 5.0 > L.best_spot(occ, 300, 100, head=np.zeros_like(occ))[2]
+
+
+def test_occupancy_and_head_marks_top_30_percent_and_faces():
+    mask = np.zeros((1024, 576), np.float32)
+    mask[200:900, 150:420] = 1.0  # one large character
+    occ, head = L.occupancy_and_head(mask, [], 576, 1024, "zoom_out", samples=(1.0,))
+    rows = np.where(head.max(axis=1) > 0)[0]
+    occ_rows = np.where(occ.max(axis=1) > 0)[0]
+    assert rows.min() >= occ_rows.min() - 1 and (rows.max() - rows.min()) < 0.55 * (occ_rows.max() - occ_rows.min())  # only the top part
+    assert occ[head > 0].min() == 1.0  # head zone is always inside the occupancy
+    occ2, head2 = L.occupancy_and_head(None, [(200.0, 100.0, 300.0, 220.0)], 576, 1024, "pan_left")
+    assert head2.sum() > 0 and occ2.sum() >= head2.sum()  # a face box alone defines a head zone
+    assert L.head_point(occ, None, head) is not None
+
+
+def test_second_text_box_never_overlaps_the_first_even_over_body_cells():
+    occ = np.ones((L.H // L.CELL, L.W // L.CELL), np.float32)  # body everywhere: overlap with the body is "free", with the other box is not
+    first = (60, 100, 700, 300)
+    x, y, cost = L.best_spot(occ, 500, 150, blocked=[first], head=np.zeros_like(occ))
+    assert L.overlap((x, y, x + 500, y + 150), first) == 0
