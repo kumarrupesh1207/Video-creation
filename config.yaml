@@ -57,6 +57,7 @@ comic:                             # aurora/comic.py image settings (ComfyUI fir
     margin: 60
   comfy_timeout_sec: 1800          # per-image floor; later panels get max(floor, 3 x median of the images so far)
   timeout_multiplier: 3
+  cast_lock: true                  # channel casts in assets/characters/<channel>/ are reused verbatim (never a new look)
   image_mode: nim                  # nim (default) | auto (ComfyUI first) | comfy (ComfyUI only)
   max_nim_credits_per_reel: 8      # NIM credits one comic reel may use (panels per reel)
 

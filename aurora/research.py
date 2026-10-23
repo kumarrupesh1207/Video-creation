@@ -211,7 +211,7 @@ def panel_prompt(panel: dict, sheet: list[dict], max_chars: int = MAX_PROMPT_CHA
 COMIC_PROMPT = (
     "You write ORIGINAL anime-style motion-comic scripts for vertical short videos (never use existing franchises or "
     "their characters). Language of narration, speech bubbles and CTA: {language}. Series premise: {premise}. "
-    "Continuity state (JSON, may be empty; keep these characters' looks EXACTLY and continue the story): {state}. "
+    "{cast}Continuity state (JSON, may be empty; keep these characters' looks EXACTLY and continue the story): {state}. "
     "Write Part {part} with exactly {n} panels. Plan the whole story as {total_rule}. Return: series {{title, part, total_parts, recap}} (recap = one line of the story so far), "
     "character_sheet (each main character: name, a fixed visual description of hair, eyes, outfit, colours; style "
     "'{style}'), panels (each: shot close-up|wide|medium|action, characters present, image_prompt = the scene only in "
@@ -239,10 +239,13 @@ def _comic_fallback(premise: str, n: int, state: dict, note: str) -> dict:
 
 
 def research_comic(channel: str, premise: str, language: str = "English", panels: int = 6, cfg: dict | None = None,
-                   client=None, series_dir: Path = SERIES_DIR, max_parts: int | None = None) -> dict:
+                   client=None, series_dir: Path = SERIES_DIR, max_parts: int | None = None, cast_root: Path | None = None) -> dict:
     """Part N+1 of a series: {"comic": {...validated...}, "source": "gemini|topic_fallback", "note": str}."""
     cfg = cfg if cfg is not None else _settings()
     rcfg, state = cfg.get("research", {}), load_series(channel, series_dir)
+    from aurora import cast as cast_mod
+
+    cast = cast_mod.load_cast(channel, cast_root or cast_mod.CAST_ROOT) if cfg.get("comic", {}).get("cast_lock", False) else []
     max_parts = int(max_parts or rcfg.get("max_parts", 2))
     if state and int(state.get("part", 0)) >= int(state.get("total_parts", 1)):
         state = {}  # previous story is finished -> start a new one (new characters, part 1)
@@ -262,12 +265,15 @@ def research_comic(channel: str, premise: str, language: str = "English", panels
                 model=rcfg.get("model", "gemini-3.1-flash-lite"),
                 contents=COMIC_PROMPT.format(
                     language=language, premise=premise, state=json.dumps(state, ensure_ascii=False)[:3000], part=part, n=n,
+                    cast=cast_mod.prompt_text(cast),
                     style=COMIC_STYLE,
                     total_rule=(f"exactly {total} parts" if state else f"1 or 2 parts (set total_parts; at most {max_parts})"),
                     ending=("this is the FINAL part: resolve the story, no cliffhanger, cta = 'The End'" if part >= total else
                             "end on a cliffhanger and cta = 'Part " + str(part + 1) + " coming soon'")),
                 config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=Comic))
             comic = Comic.model_validate_json(resp.text)
+            if cast:  # the model may not redesign a locked character: force name + description verbatim
+                comic.character_sheet = [Character(**c) for c in cast_mod.merge_cast([c.model_dump() for c in comic.character_sheet], cast)]
             comic.series.part = part
             comic.series.total_parts = max(part, min(comic.series.total_parts, max_parts, total if state else max_parts))
             if part >= comic.series.total_parts:
@@ -276,6 +282,13 @@ def research_comic(channel: str, premise: str, language: str = "English", panels
         except Exception as exc:  # noqa: BLE001
             reason = f"Gemini failed/invalid: {str(exc)[:100]}"
     fb = _comic_fallback(premise, n, state, reason)
+    if cast:
+        fb["character_sheet"] = cast_mod.merge_cast(fb["character_sheet"], cast)
+        hero = fb["character_sheet"][0]["name"]
+        for p in fb["panels"]:  # the template's beats follow the (locked) protagonist
+            p["characters"] = [hero]
+            p["image_prompt"] = p["image_prompt"].replace(state.get("characters", [{"name": "Kaito"}])[0]["name"], hero)
+            p["narration"] = p["narration"].replace(state.get("characters", [{"name": "Kaito"}])[0]["name"], hero)
     fb["series"]["total_parts"] = total if state else min(2, max_parts)
     if part >= fb["series"]["total_parts"]:
         fb["cliffhanger"], fb["cta"] = "", "The End"

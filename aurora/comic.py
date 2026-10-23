@@ -511,7 +511,7 @@ def _comfy_panels(cfg, sheet, panels, first, seed, job, neg, ref_path=None):
     return images, timings, ref_path
 
 
-def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode=None):
+def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode=None, cast_ref=None):
     """Panel images. image_mode (config comic.image_mode): "nim" (default: Flux via NIM; ComfyUI+IP-Adapter only if NIM
     fails/is capped), "auto"/"comfy" (ComfyUI first; "comfy" never touches NIM). Every fallback is explicit and logged."""
     import time as _t
@@ -577,13 +577,13 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode=None):
         except Exception as exc:  # noqa: BLE001 - quota/credit/API failure -> ComfyUI for the REMAINING panels
             why = f"NIM failed after {len(images)}/{len(panels)} panels ({str(exc)[:120]})"
             print(f"[comic] FALLBACK to ComfyUI IP-Adapter: {why}")
-            ref = images[0] if images else None
+            ref = cast_ref or (images[0] if images else None)  # the locked hero reference beats a panel
             more, t2, _ = _comfy_panels(cfg, sheet, panels, len(images), seed, job, neg, ref_path=ref)
             return (images + more, timings + t2, f"{why}; remaining panels via ComfyUI character reference + IP-Adapter "
                     "(look may differ from the NIM panels)", "nim+comfy_fallback")
     if mode in ("auto", "comfy") and _comfy_up(cfg):
         try:
-            images, timings, _ = _comfy_panels(cfg, sheet, panels, 0, seed, job, neg)
+            images, timings, _ = _comfy_panels(cfg, sheet, panels, 0, seed, job, neg, ref_path=cast_ref)
             return images, timings, "ComfyUI character reference + IP-Adapter (consistent look)", "comfy_ipadapter"
         except Exception as exc:  # noqa: BLE001
             if mode == "comfy":
@@ -632,7 +632,11 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
     slug = re.sub(r"[^a-z0-9]+", "-", f"{channel}-part{part}-{comic['series']['title']}".lower()).strip("-")[:60]
     job = f"comic_{datetime.now():%Y%m%d_%H%M%S}_{slug[:24]}"
     resolution = tuple(resolution or cfg.get("comic", {}).get("nim_resolution", [1024, 1088]))  # ~ the art window's shape
-    images, timings, img_note, mode_used = _panel_images(cfg, switchboard, comic, seed, job, resolution, image_mode)
+    from aurora import cast as cast_mod
+
+    lock = bool(cfg.get("comic", {}).get("cast_lock", False))
+    images, timings, img_note, mode_used = _panel_images(cfg, switchboard, comic, seed, job, resolution, image_mode,
+                                                         cast_mod.reference_image(channel) if lock else None)
     out_dir = Path(out_dir) / date.today().isoformat()
     out_dir.mkdir(parents=True, exist_ok=True)
     mp4 = out_dir / f"{slug}.mp4"
@@ -649,6 +653,8 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
             "image_timings_secs": timings, "character_sheet": comic["character_sheet"],
             "panels": comic["panels"], "audio": info, "reel": {"path": str(mp4), "width": rep.width, "height": rep.height,
             "fps": rep.fps, "duration_secs": rep.duration_secs, "has_audio": rep.has_audio, "md5": rep.md5, "sha256": rep.sha256}}
+    if lock:  # characters that debuted in this reel join the permanent cast
+        side["cast"] = {"locked": [m["name"] for m in cast_mod.load_cast(channel)], "added": cast_mod.save_new_members(channel, comic, images)}
     mp4.with_suffix(".json").write_text(json.dumps(side, indent=2, ensure_ascii=False), encoding="utf-8")
     research.save_series(channel, comic, sdir)
     return {"video": str(mp4), "sidecar": str(mp4.with_suffix(".json")), "title": title, "caption": caption, "part": part,
