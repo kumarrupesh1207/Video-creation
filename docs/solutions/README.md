@@ -8,3 +8,4 @@ One line per solved problem. Update an existing note instead of adding a duplica
 - [comfy-timeout-silent-nim-fallback.md](comfy-timeout-silent-nim-fallback.md) — CPU timeout caused silent NIM spend → long timeout, no comfy→NIM fallback (65e825f).
 - [nim-credits-and-comic-images.md](nim-credits-and-comic-images.md) — NIM balance unreadable; comic images default to NIM with counted, capped credits and a logged ComfyUI fallback.
 - [comic-text-on-faces.md](comic-text-on-faces.md) — text on characters: full-bleed art + rembg isnet-anime segmentation placement (bands layout kept behind a flag).
+- [nim-violet-content-filter.md](nim-violet-content-filter.md) — harmless prompts blocked as CONTENT_FILTERED: NIM word filter rejects "violet" -> rewritten to purple.

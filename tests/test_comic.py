@@ -288,3 +288,10 @@ def test_panel_and_softened_prompts_stay_under_nims_800_char_limit():
     soft = comic.soften_prompt(p, 2)
     assert len(soft) <= 800 and "blood" not in soft and soft.endswith("no violence")
     assert len(research.panel_prompt({"shot": "wide", "image_prompt": "a quiet rooftop"}, sheet[:1])) < 780
+
+
+def test_nim_false_positive_words_are_rewritten():
+    # NIM's filter blocks "violet" (confirmed by bisecting a blocked prompt: purple passes); never send it
+    sheet = [{"name": "Kael", "description": "young man with violet eyes and a violet cape"}]
+    p = research.panel_prompt({"shot": "wide", "image_prompt": "a lone wanderer beneath a cracked Violet sky"}, sheet)
+    assert "violet" not in p.lower() and "purple eyes" in p and "purple sky" in p

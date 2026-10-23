@@ -165,6 +165,19 @@ def save_series(channel: str, comic: dict, series_dir: Path = SERIES_DIR) -> dic
     return state
 
 
+# Words NVIDIA NIM's filter rejects (CONTENT_FILTERED) although they are harmless: "violet" is blocked (looks like "violent"),
+# "purple" passes. Found by bisecting a blocked prompt; extend this list when a new false positive is confirmed.
+NIM_SAFE_WORDS = [(r"violet(s)?", "purple")]
+
+
+def nim_safe(text: str) -> str:
+    import re
+
+    for pat, repl in NIM_SAFE_WORDS:
+        text = re.sub(pat, repl, text, flags=re.I)
+    return text
+
+
 PROMPT_SUFFIX = (", composition: character in the lower two thirds, clear empty sky or background in the upper third (room for text), "
                  "single full-bleed scene, no panel borders, no frame, no text, no letters, no captions, no signature, no watermark, "
                  "no speech bubbles, wordless, vibrant colors, clean lineart, original characters")
@@ -191,8 +204,8 @@ def panel_prompt(panel: dict, sheet: list[dict], max_chars: int = MAX_PROMPT_CHA
         who = ", ".join(f"{c['name']}: {_cut(c['description'], desc_n)}" for c in chars)
         text = head + who + shot + _cut(panel["image_prompt"], scene_n) + PROMPT_SUFFIX
         if len(text) <= max_chars:
-            return text
-    return text[:max_chars]
+            return nim_safe(text)
+    return nim_safe(text[:max_chars])
 
 
 COMIC_PROMPT = (
