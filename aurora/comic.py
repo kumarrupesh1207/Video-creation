@@ -17,7 +17,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from aurora import research
+from aurora import comic_layout, research
 from aurora.audio import generate_music, mix_audio, synthesize_voiceover
 from aurora.costs import COST_DIR, credits_today, log_credits
 from aurora.monitoring.media_validator import _ffprobe, validate_video
@@ -25,6 +25,7 @@ from aurora.monitoring.media_validator import _ffprobe, validate_video
 ROOT = Path(__file__).resolve().parents[1]
 W, H, FPS, XF, PAD = 1080, 1920, 24, 0.4, 0.4
 COVER_S, END_S = 2.4, 3.0
+MAX_NARRATION_WORDS = 12  # keeps a 6-panel reel at ~28-34 s
 PANEL_MIN_S = 4.4  # hold at least this long per panel (voice is never slowed; the rest is a pause)
 NO_TEXT_NEG = "text, letters, words, speech bubble, caption, watermark, signature, logo, subtitles"
 TRANSITIONS = ["slideleft", "wipeleft", "circleopen", "slideright", "wiperight", "smoothleft"]
@@ -61,7 +62,8 @@ def _text_block(draw, text, font, max_w, line_gap=10):
     return lines, int(w), int(h)
 
 
-def make_overlay(path: Path, narration: str = "", bubble: str = "", title: str = "", subtitle: str = "", border: bool = True) -> Path:
+def make_overlay(path: Path, narration: str = "", bubble: str = "", title: str = "", subtitle: str = "", border: bool = True,
+                 faces: list | None = None) -> Path:
     """Transparent 1080x1920 PNG: panel border, narration box (top), speech bubble (lower), or title-card text."""
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -70,7 +72,8 @@ def make_overlay(path: Path, narration: str = "", bubble: str = "", title: str =
     if narration:
         f = _font(50, narration)
         lines, tw, th = _text_block(d, narration, f, 880)
-        x0, y0 = 60, 70
+        x0, y0 = comic_layout.place_narration(tw + 56, th + 44, faces) if faces else (60, 70)  # top or bottom edge, off the faces
+        narr_box = (x0, y0, x0 + tw + 56, y0 + th + 44)
         d.rectangle([x0, y0, x0 + tw + 56, y0 + th + 44], fill=(255, 243, 196, 245), outline=(20, 20, 20, 255), width=5)
         y = y0 + 22
         for l in lines:
@@ -80,15 +83,29 @@ def make_overlay(path: Path, narration: str = "", bubble: str = "", title: str =
         f = _font(58, bubble)
         lines, tw, th = _text_block(d, bubble, f, 700)
         bw, bh = tw + 120, th + 90
-        x0, y0 = (W - bw) // 2, 1180
+        if faces:
+            x0, y0, target = comic_layout.place_bubble(bw, bh, faces, blocked=[narr_box] if narration else [])
+        else:
+            x0, y0, target = (W - bw) // 2, 1180, None
         d.ellipse([x0, y0, x0 + bw, y0 + bh], fill=(255, 255, 255, 250), outline=(20, 20, 20, 255), width=6)
         tail = [(x0 + bw * 0.30, y0 + bh - 12), (x0 + bw * 0.22, y0 + bh + 95), (x0 + bw * 0.45, y0 + bh - 6)]
+        if target:  # tail leaves the bubble edge facing the speaker and stops short of the face (never over it)
+            cx, cy = x0 + bw / 2, y0 + bh / 2
+            dx, dy = target[0] - cx, target[1] - cy
+            dist = max((dx * dx + dy * dy) ** 0.5, 1.0)
+            ux, uy = dx / dist, dy / dist
+            edge = 1.0 / (((ux / (bw / 2)) ** 2 + (uy / (bh / 2)) ** 2) ** 0.5)  # ellipse radius along (ux, uy)
+            base = (cx + ux * (edge - 6), cy + uy * (edge - 6))
+            L = max(45.0, min(110.0, dist - edge - 50))
+            tip = (base[0] + ux * L, base[1] + uy * L)
+            px, py = -uy * 24, ux * 24
+            tail = [(base[0] + px, base[1] + py), tip, (base[0] - px, base[1] - py)]
         d.polygon(tail, fill=(255, 255, 255, 250))
         d.line([tail[0], tail[1], tail[2]], fill=(20, 20, 20, 255), width=6)
-        d.line([(x0 + bw * 0.31, y0 + bh - 9), (x0 + bw * 0.44, y0 + bh - 5)], fill=(255, 255, 255, 255), width=10)
+        d.line([(tail[0][0] + 2, tail[0][1] + 1), (tail[2][0] - 2, tail[2][1] + 1)], fill=(255, 255, 255, 255), width=10)
         y = y0 + 45
         for l in lines:
-            d.text(((W - d.textlength(l, font=f)) / 2, y), l, font=f, fill=(20, 20, 20, 255))
+            d.text((x0 + (bw - d.textlength(l, font=f)) / 2, y), l, font=f, fill=(20, 20, 20, 255))  # centred in the bubble
             y += f.getbbox(l)[3] - f.getbbox(l)[1] + 10
     if title:
         ft, fs = _font(112, title), _font(70, subtitle)
@@ -133,12 +150,53 @@ def render_clip(ffmpeg: str, image: Path, overlay: Path, seconds: float, motion:
     return out
 
 
+def trim_words(text: str, n: int = MAX_NARRATION_WORDS) -> str:
+    """At most n words, cut at the last sentence/clause end inside the limit when there is one."""
+    words = text.split()
+    if len(words) <= n:
+        return text.strip()
+    cut = " ".join(words[:n])
+    m = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "), cut.rfind(", "))
+    return (cut[:m + 1] if m > len(cut) // 2 else cut).rstrip(",;: ") + ("" if cut.rstrip().endswith((".", "!", "?")) else ".")
+
+
+def has_drawn_bubble(path: Path) -> bool:
+    """Cheap safety net (no OCR installed): a big near-white, rounded region with several small dark marks inside
+    (letters) is a speech bubble the image model drew by itself."""
+    import cv2
+    import numpy as np
+
+    img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        return False
+    img = cv2.resize(img, (400, int(400 * img.shape[0] / img.shape[1])))
+    area_total = img.shape[0] * img.shape[1]
+    white = cv2.morphologyEx((img > 195).astype("uint8") * 255, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(white, 8)
+    for k in range(1, n):
+        x, y, w, h, area = stats[k]
+        if not (0.004 * area_total < w * h < 0.25 * area_total) or area / float(w * h) < 0.55:
+            continue
+        roi = img[y:y + h, x:x + w]
+        mask = (labels[y:y + h, x:x + w] == k).astype("uint8")
+        cnts, _ = cv2.findContours(mask * 255, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        filled = np.zeros_like(mask)
+        cv2.drawContours(filled, cnts, -1, 1, -1)  # the bubble shape with its letters filled in
+        interior = cv2.erode(filled, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))  # drop the border / outside corners
+        dark = ((roi < 110) & (interior > 0)).astype("uint8")
+        m, _, st, _ = cv2.connectedComponentsWithStats(dark, 8)
+        marks = [s for s in st[1:] if 3 <= s[4] <= 0.02 * area_total and s[2] < w * 0.35]
+        if len(marks) >= 4:
+            return True
+    return False
+
+
 def _duration(path: Path) -> float:
     return float(_ffprobe(Path(path))["format"]["duration"])
 
 
 def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, work: Path, voice: str = "en-US-AvaNeural",
-                 music: bool = True, language: str = "English") -> dict:
+                 music: bool = True, language: str = "English", layout_aware: bool = True) -> dict:
     """Panels (+images) -> final mp4. Returns {"seconds", "voice_notes", "music"}."""
     work.mkdir(parents=True, exist_ok=True)
     panels, series = comic["panels"], comic["series"]
@@ -153,12 +211,21 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
     voices.append((None, 0.0))
     t += COVER_S - XF
     for i, (p, img) in enumerate(zip(panels, images)):
+        p = {**p, "narration": trim_words(p["narration"])}
         vfile, note = synthesize_voiceover(p["narration"], work / f"voice_{i}.wav",
                                            options={"voice_engine": "edge", "voice": voice, "language": "hi" if language.lower().startswith("hi") else "en"})
         notes.append(note)
         secs = max((_duration(vfile) if vfile else 3.0) + PAD, PANEL_MIN_S)
         motion = "punch" if p.get("action") else MOTIONS[i % len(MOTIONS)]
-        ov = make_overlay(work / f"ov_{i}.png", narration=p["narration"], bubble=p.get("bubble", ""))
+        faces = None
+        if layout_aware:
+            try:
+                with Image.open(img) as im0:
+                    iw, ih = im0.size
+                faces = comic_layout.faces_over_motion(comic_layout.detect_faces(Path(img)), iw, ih, motion)
+            except Exception as exc:  # noqa: BLE001 - layout is best effort; fall back to the fixed layout
+                notes.append(f"panel {i}: face detection skipped ({str(exc)[:60]})")
+        ov = make_overlay(work / f"ov_{i}.png", narration=p["narration"], bubble=p.get("bubble", ""), faces=faces)
         clips.append((render_clip(ffmpeg, img, ov, secs, motion, work / f"clip_{i}.mp4"), secs))
         voices.append((vfile, t + 0.05))
         t += secs - XF
@@ -203,7 +270,7 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
     else:
         cmd += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
     cmd += ["-filter_complex", ";".join(fchain), "-map", last, "-map", f"{len(clips)}:a", "-t", f"{total:.2f}", "-r", str(FPS),
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-maxrate", "8M", "-bufsize", "16M", "-pix_fmt", "yuv420p", "-af", "apad", "-c:a", "aac", "-b:a", "160k",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-maxrate", "6M", "-bufsize", "12M", "-pix_fmt", "yuv420p", "-af", "apad", "-c:a", "aac", "-b:a", "160k",
             "-movflags", "+faststart", "-shortest", str(out_mp4)]
     _run(cmd, timeout=1800)
     return {"seconds": round(total, 2), "voice_notes": notes, "music": bool(music_wav)}
@@ -278,6 +345,8 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode=None):
     cap_reel = int(cfg.get("comic", {}).get("max_nim_credits_per_reel", 8))
     cap_day = int(cfg.get("providers", {}).get("nvidia_nim", {}).get("max_credits_per_day", 10))
 
+    retries_left = [2]
+
     def nim_panels(images, timings, start=0):  # fills the lists in place so finished panels survive a mid-run failure
         saved = getattr(switchboard, "fallback_order", None)
         if saved is not None:
@@ -298,12 +367,24 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode=None):
                         log_credits("nvidia_nim", 1, cost_dir)
                         if "CONTENT_FILTERED" in str(exc) and attempt < 2:
                             prompt = soften_prompt(prompt, attempt + 1)
-                            print(f"[comic] panel {i}: NIM safety filter, retrying with softened prompt (attempt {attempt + 2})")
+                            print(f"[comic] panel {i}: NIM safety filter, retrying with softened prompt (attempt {attempt + 2}); "
+                                  f"prompt was: {prompt[:300]}")
                             continue
                         raise
                     break
                 if getattr(r, "provider", "") == "nvidia_nim" and getattr(r, "latency_ms", 1):  # cache hits cost nothing
                     log_credits("nvidia_nim", 1, cost_dir)
+                    try:
+                        drawn = has_drawn_bubble(Path(r.output_path))
+                    except Exception:  # noqa: BLE001 - the check is a best-effort net
+                        drawn = False
+                    if drawn and retries_left[0] > 0:  # at most 2 extra (counted) regenerations per reel
+                        retries_left[0] -= 1
+                        print(f"[comic] panel {i}: image-drawn speech bubble detected, regenerating once with a new seed")
+                        r2 = switchboard.generate(prompt + ", wordless illustration, clean art, no speech balloons, no lettering",
+                                                  "anime", list(nim_res), f"{job}_p{i}_retry", negative_prompt=neg, seed=seed + 1000 + i)
+                        log_credits("nvidia_nim", 1, cost_dir)
+                        r = r2
                 images.append(Path(r.output_path))
                 timings.append(round(_t.time() - t0, 1))
         finally:

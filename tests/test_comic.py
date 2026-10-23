@@ -256,3 +256,22 @@ def test_soften_prompt_and_filtered_panel_is_retried(workspace_tmp_path):
     from aurora.costs import credits_today
 
     assert credits_today("nvidia_nim", workspace_tmp_path / "costs") == 6  # the filtered attempt is counted too
+
+
+def test_bubble_detector_and_word_cap(workspace_tmp_path):
+    import cv2
+    import numpy as np
+
+    img = np.full((800, 450, 3), (90, 60, 40), np.uint8)
+    cv2.ellipse(img, (150, 120), (110, 60), 0, 0, 360, (250, 250, 250), -1)  # white speech bubble
+    for k in range(6):
+        cv2.putText(img, "KALEN"[k % 5], (65 + 30 * k, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (10, 10, 10), 3)
+    bubble, clean, empty_bubble = (workspace_tmp_path / n for n in ("b.png", "c.png", "e.png"))
+    cv2.imwrite(str(bubble), img)
+    cv2.imwrite(str(clean), np.full((800, 450, 3), (90, 60, 40), np.uint8))
+    blank = np.full((800, 450, 3), (90, 60, 40), np.uint8)
+    cv2.ellipse(blank, (150, 120), (110, 60), 0, 0, 360, (250, 250, 250), -1)  # white cloud, no letters inside
+    cv2.imwrite(str(empty_bubble), blank)
+    assert comic.has_drawn_bubble(bubble) and not comic.has_drawn_bubble(clean) and not comic.has_drawn_bubble(empty_bubble)
+    long = "An ancient power stirs deep within his core, vibrating against the fabric of reality itself, now."
+    assert len(comic.trim_words(long).split()) <= 12 and comic.trim_words("Short line here.") == "Short line here."

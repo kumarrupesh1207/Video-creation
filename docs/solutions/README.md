@@ -7,3 +7,4 @@ One line per solved problem. Update an existing note instead of adding a duplica
 - [tests-live-gemini.md](tests-live-gemini.md) — tests broke after real key in .env → conftest removes GEMINI_API_KEY (7adc20c).
 - [comfy-timeout-silent-nim-fallback.md](comfy-timeout-silent-nim-fallback.md) — CPU timeout caused silent NIM spend → long timeout, no comfy→NIM fallback (65e825f).
 - [nim-credits-and-comic-images.md](nim-credits-and-comic-images.md) — NIM balance unreadable; comic images default to NIM with counted, capped credits and a logged ComfyUI fallback.
+- [comic-text-on-faces.md](comic-text-on-faces.md) — bubbles/narration on faces -> face-aware layout, drawn-bubble detector, word cap, 6 Mbps encode.
