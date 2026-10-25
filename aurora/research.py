@@ -489,6 +489,14 @@ def chapter_parts(cfg: dict | None) -> int:
     return max(10, int(((cfg or {}).get("comic") or {}).get("chapter_parts", 10) or 10))
 
 
+def guard_text(comic: dict) -> str:
+    """All story text of a generated part (for hard-rule guards)."""
+    bits = [comic.get("hook", ""), comic.get("cliffhanger", ""), (comic.get("series") or {}).get("recap", "")]
+    for p in comic.get("panels", []):
+        bits += [p.get("image_prompt", ""), p.get("narration", ""), p.get("bubble", "")] + [ln.get("text", "") for ln in p.get("lines", [])]
+    return "\n".join(b for b in bits if b)
+
+
 HOOK_MAX = 40
 
 
@@ -570,7 +578,8 @@ def _outline_fallback(premise: str, parts: int, cast: list[dict], state: dict, n
 
 
 def research_part(channel: str, premise: str, language: str = "English", panels: int = 6, cfg: dict | None = None, client=None,
-                  series_dir: Path = SERIES_DIR, cast_root: Path | None = None, world: str = "", series_title: str | None = None) -> dict:
+                  series_dir: Path = SERIES_DIR, cast_root: Path | None = None, world: str = "", series_title: str | None = None,
+                  rules: list[str] | None = None, guard=None) -> dict:
     """Part M of Chapter N, written from beat M of the chapter outline + the recaps of parts 1..M-1 (continuity).
     Returns {"comic": {...Comic...}, "chapter": {number, title, part, parts, beat, series_title, final}, "source", "note"}."""
     cfg = cfg if cfg is not None else _settings()
@@ -595,6 +604,11 @@ def research_part(channel: str, premise: str, language: str = "English", panels:
     note = "" if live else "no GEMINI_API_KEY"
     source = "gemini" if live else "topic_fallback"
     cast_text = cast_mod.prompt_text(cast)
+    rules_text = ("HARD RULES of this series (verbatim, never violate them, never even hint at them): " + " | ".join(rules) + " ") if rules else ""
+
+    def violation(text: str) -> str | None:  # `guard` (story packs: forbidden relationships etc.) judges every generated text
+        return guard(text, client if live else None, model) if guard else None
+
     if not ch or ch.get("complete"):  # a chapter starts: plan its whole arc first
         number = int(state.get("chapters_done", 0)) + 1
         outline = None
@@ -602,11 +616,19 @@ def research_part(channel: str, premise: str, language: str = "English", panels:
             try:
                 prompt = (f"You plan ORIGINAL anime story chapters (never existing franchises). Series: {state.get('series_title') or premise}. Language: {language}. "
                           f"Premise: {premise}. Background lore of the series so far: {state.get('background', '')[:600]}. World canon (obey): {world[:1500]} "
-                          f"Earlier chapters: {json.dumps(state.get('chapter_recaps', []), ensure_ascii=False)[:1200]}. {cast_text}"
+                          f"Earlier chapters: {json.dumps(state.get('chapter_recaps', []), ensure_ascii=False)[:1200]}. {cast_text}{rules_text}"
                           f"Plan Chapter {number} as exactly {parts} beats, one per daily 30-second part: setup, rising stakes, twist, climax and a final "
                           "cliffhanger beat, in that order. Return series_title (keep the existing one if given), chapter_title, summary, beats "
                           "(role + one-sentence summary each) and character_sheet (name + fixed look) for any NEW characters. Safe for all audiences.")
                 got = _call_json(client, model, prompt, ChapterOutline)
+                for _ in range(2):  # a hard-rule violation in the outline -> regenerate (max 2 more tries)
+                    bad = violation(" ".join([got.chapter_title, got.summary] + [b.summary for b in got.beats]))
+                    if not bad:
+                        break
+                    got = _call_json(client, model, prompt + f" Your previous outline broke a hard rule ({bad}); rewrite it without that.", ChapterOutline)
+                bad = violation(" ".join([got.chapter_title, got.summary] + [b.summary for b in got.beats]))
+                if bad:
+                    raise ValueError(f"outline violates a hard rule: {bad}")
                 beats = [b.model_dump() for b in got.beats]
                 if len(beats) > parts:
                     beats = beats[: parts - 1] + beats[-1:]
@@ -617,6 +639,9 @@ def research_part(channel: str, premise: str, language: str = "English", panels:
                 note, source = f"outline fallback: {str(exc)[:90]}", "topic_fallback"
         if outline is None:
             outline = _outline_fallback(premise, parts, cast, state, number)
+            bad = violation(" ".join(b["summary"] for b in outline["beats"]))
+            if bad:
+                raise ValueError(f"hard rule violated by the offline outline: {bad}")
         series_title = fixed or state.get("series_title") or outline["series_title"]  # the outline's own series_title is ignored when fixed
         ch = {"number": number, "title": outline["chapter_title"], "summary": outline.get("summary", ""), "outline": outline["beats"], "parts": parts,
               "parts_done": 0, "recaps": [], "rendered": [], "complete": False}
@@ -632,7 +657,7 @@ def research_part(channel: str, premise: str, language: str = "English", panels:
         try:
             prompt = (f"{COMIC_PROMPT_HEAD.format(language=language)}{cast_text}Series: {series_title}. Chapter {ch['number']}: {ch['title']}. "
                       f"This is Part {m} of {ch['parts']} (one ~30 s episode). Beat for this part ({beat['role']}): {beat['summary']} "
-                      f"Previous parts so far: {json.dumps(ch['recaps'], ensure_ascii=False)[:1800]}. Series background: {state.get('background', '')[:400]}. World canon (obey): {world[:1500]} "
+                      f"Previous parts so far: {json.dumps(ch['recaps'], ensure_ascii=False)[:1800]}. Series background: {state.get('background', '')[:400]}. World canon (obey): {world[:1500]} {rules_text}"
                       f"Write exactly {n} panels. Return: series {{title='{series_title}', part={m}, total_parts={ch['parts']}, recap = ONE line of what happens in THIS part}}, "
                       f"hook (3-6 words that tease this part, for the video title), character_sheet (locked cast verbatim + any new characters with a fixed look; style '{COMIC_STYLE}'), "
                       "panels (each: shot close-up|wide|medium|action, characters present, image_prompt = the scene only in English, narration of 8-12 words, optional short bubble, "
@@ -640,6 +665,14 @@ def research_part(channel: str, premise: str, language: str = "English", panels:
                       + ("this is the CHAPTER FINALE: resolve this chapter's main conflict but open a hook for the next chapter; cta = 'Chapter " + str(ch['number']) + " finale'. "
                          if final else f"end on a cliffhanger that pulls into Part {m + 1}; cta = 'Part {m + 1} tomorrow'. ") + "Safe for all audiences.")
             got = _call_json(client, model, prompt, Comic)
+            for _ in range(2):  # a hard-rule violation in the generated part -> regenerate (max 2 more tries)
+                bad = violation(guard_text(got.model_dump()))
+                if not bad:
+                    break
+                got = _call_json(client, model, prompt + f" Your previous draft broke a hard rule ({bad}); rewrite the part without it.", Comic)
+            bad = violation(guard_text(got.model_dump()))
+            if bad:
+                raise ValueError(f"part violates a hard rule: {bad}")
             if cast:
                 got.character_sheet = [Character(**c) for c in cast_mod.merge_cast([c.model_dump() for c in got.character_sheet], cast)]
             got.series.title, got.series.part, got.series.total_parts = series_title, m, int(ch["parts"])
@@ -663,6 +696,9 @@ def research_part(channel: str, premise: str, language: str = "English", panels:
                 p["narration"] = p["narration"].replace(old, hero)
         fb["hook"] = beat["role"].title()
         comic = Comic.model_validate(fb).model_dump()
+        bad = violation(guard_text(comic))
+        if bad:
+            raise ValueError(f"hard rule violated by the offline part: {bad}")
     info = {"number": int(ch["number"]), "title": ch["title"], "part": m, "parts": int(ch["parts"]), "beat": beat, "series_title": series_title, "final": final}
     return {"comic": comic, "chapter": info, "source": source, "note": note}
 

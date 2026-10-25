@@ -18,21 +18,21 @@ def test_parser_reads_the_real_chapter():
     p1 = ch["parts"][0]
     assert p1["title"] == "Navkashi" and len(p1["panels"]) == 4
     lines = [ln for pn in p1["panels"] for ln in pn["lines"]]
-    assert [(l["speaker"], l["kind"]) for l in lines] == [("NARRATOR", "caption"), ("VEER", "speech"), ("MEERA", "speech"), ("VEER", "whisper")]
+    assert [(l["speaker"], l["kind"]) for l in lines] == [("NARRATOR", "caption"), ("VEER", "speech"), ("HRITHVIKA", "speech"), ("VEER", "whisper")]
     assert lines[1]["text"].startswith("Six more panels") and p1["end_card"] == ("To be continued...", "Part 2 tomorrow")
     assert ch["parts"][4]["panels"][0]["lines"][0]["kind"] == "verse"  # parchment-box verse
     assert ch["parts"][8]["panels"][3]["lines"][0]["kind"] == "shout"  # "NOT - MY - CITY!"
     assert ch["parts"][2]["end_card"][0] == "What are we actually?"
     last = ch["parts"][9]
     assert last["end_card"][0].startswith("Chapter 1") and "Chapter 2" in last["end_card"][1]
-    assert [l["speaker"] for pn in last["panels"] for l in pn["lines"]] == ["KABIR", "VEER", "KABIR", "VEER", "VYOM", "SMARAN"]
+    assert [l["speaker"] for pn in last["panels"] for l in pn["lines"]] == ["HRIDYANSH", "VEER", "HRIDYANSH", "VEER", "VYOM", "SMARAN"]
     assert "'When the seventh river forgets" in ch["parts"][1]["panels"][2]["lines"][0]["text"]
 
 
 def test_part_to_comic_marks_scenery_action_and_respect_card():
     ch = manga.parse_chapter(SCRIPT)
     cast = cast_mod.load_cast("veer")
-    assert [m["name"] for m in cast][0] == "Veer" and {m["name"] for m in cast} >= {"Meera", "Tara", "Kabir", "Vyom", "Jalaghna", "Smaran"}
+    assert [m["name"] for m in cast][0] == "Veer" and {m["name"] for m in cast} >= {"Hrithvika", "Tara", "Hridyansh", "Vyom", "Jalaghna", "Smaran"}
     c = manga.part_to_comic(ch, ch["parts"][0], cast, "VEER – Wrath of the Forgotten God")
     assert c["panels"][0]["scenery"] and c["panels"][0]["characters"] == [] and c["panels"][0]["shot"] == "wide"
     assert c["cover_note"] == manga.RESPECT_CARD and c["end_card"] == ["To be continued...", "Part 2 tomorrow"] and c["hook"] == "Navkashi"
@@ -61,7 +61,7 @@ def test_voices_and_prosody():
     v = manga.load_voices("veer")
     assert v["VEER"]["voice"] == "en-IN-PrabhatNeural" and v["TARA"]["voice"] == "en-IN-NeerjaNeural" and v["NARRATOR"]["voice"]
     assert v["JALAGHNA"]["fx"] == "echo" and v["SMARAN"]["fx"] == "reverb" and v["VYOM"]["rate"].startswith("-")
-    assert len({v[n]["voice"] for n in ("VEER", "KABIR", "VYOM", "JALAGHNA", "SMARAN")}) == 5  # distinct voices
+    assert len({v[n]["voice"] for n in ("VEER", "HRIDYANSH", "VYOM", "JALAGHNA", "SMARAN")}) == 5  # distinct voices
     assert manga.voice_for("ACHARYA VYOM", v) == v["VYOM"] and manga.voice_for("NOBODY", v) == v["NARRATOR"]
     base = v["VEER"]
     assert int(manga.prosody(base, "whisper", "whisper")[0].rstrip("%")) < int(manga.prosody(base, "", "speech")[0].rstrip("%"))
@@ -111,7 +111,7 @@ def test_manga_part_renders_with_per_line_voices_and_timed_bubbles(workspace_tmp
     monkeypatch.setattr(comic_layout, "foreground_mask", lambda p: None)
     monkeypatch.setattr(cast_mod, "save_new_members", lambda *a, **k: [])
     res = story.render_next("veer", out_dir=tmp / "out", cfg=_cfg(tmp), switchboard=Board(tmp), music=False, series_dir=tmp / "ser")
-    assert [c[1]["voice"] for c in calls] == ["en-US-AvaNeural", "en-IN-PrabhatNeural", "en-US-AnaNeural", "en-IN-PrabhatNeural"]  # narrator, Veer, Meera, Veer
+    assert [c[1]["voice"] for c in calls] == ["en-US-AvaNeural", "en-IN-PrabhatNeural", "en-US-AnaNeural", "en-IN-PrabhatNeural"]  # narrator, Veer, Hrithvika, Veer
     assert calls[3][1]["rate"].startswith("-")  # whispered "...Not again." is slower than Veer's base +4%
     side = json.loads(Path(res["sidecar"]).read_text(encoding="utf-8"))
     assert res["title"] == "VEER – Wrath of the Forgotten God – Ch.1 Part 1: Navkashi" and side["playlist"].startswith("VEER")

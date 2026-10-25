@@ -43,3 +43,16 @@ line length; the respect charter (no deity fighting/mocked, no prophets, no clai
 - `state_key` is where progress lives (`outputs/series/<state_key>.json`). Echoes of the Aether uses `shinobi` (its existing state); new series: leave it as the slug.
 - Compilations/publishing for a series with its own state key need the Publisher to list that key (Veer is not scheduled yet).
 - Legacy folders `assets/characters/<channel>/` still work for channels without a pack.
+
+## Hard rules (permanent, owner-mandated content rules)
+In `series.yaml`:
+```
+rules:
+  hard_rules: ["Any sentence research must always obey."]
+  forbidden_relationships:
+    - {pair: [NameA, NameB], type: romantic, note: "The sentence shown to research verbatim."}
+```
+and/or `hard_rules: [...]` inside a character file. The engine (no story-specific code):
+1. **Lint** checks the schema and that both pair names exist in `characters/` (did-you-mean), and rejects authored chapters where a segment names BOTH members of a pair with a romance cue.
+2. **Research prompts** (chapter outline and every part) always carry every hard rule verbatim (`story.pack_rules`).
+3. **Post-generation guard** (`story.make_guard`): keyword scan + a Gemini yes/no check per pair on every generated outline and part; a violation is regenerated (max 2 more tries), and if it still fails the offline fallback is used (also guarded); a violating part is never rendered.

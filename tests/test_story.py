@@ -154,3 +154,85 @@ def test_config_series_entries_point_at_real_packs():
 def test_template_pack_lints_clean_and_is_not_a_series():
     assert story.lint("_template")["errors"] == []
     assert "_template" not in story.list_packs() and story.find_pack("_template") is not None
+
+
+# ---------------------------------------------------------------- hard rules: forbidden relationships (engine-generic)
+RULES = {"rules": {"forbidden_relationships": [{"pair": ["Kaelen", "Mira"], "type": "romantic", "note": "NEVER any romance between Kaelen and Mira."}]}}
+TWO = [{"name": "Kaelen", "role": "protagonist", "description": "young man with silver spiky hair and a dark cloak", "hard_rules": ["Kaelen is always kind."]},
+       {"name": "Mira", "role": "friend", "description": "young woman with short teal hair and a yellow scarf"}]
+
+
+def test_lint_validates_hard_rule_schema(packs):
+    make_pack(packs, "ok", series=RULES, chars=TWO, parts=0)
+    assert story.lint("ok")["errors"] == []
+    bad = {"rules": {"forbidden_relationships": [{"pair": ["Kaelen", "Mria"], "type": "romantic"}, {"pair": ["Kaelen", "Kaelen"]}, {"pair": ["only-one"]}, "oops"],
+                     "hard_rules": "not a list"}}
+    make_pack(packs, "bad", series=bad, chars=TWO, parts=0)
+    text = "\n".join(story.lint("bad")["errors"])
+    for needle in ("'Mria' is not a character in characters/ (did you mean 'Mira'?)", "must be two different characters", "type is required", "needs pair: [NameA, NameB]",
+                   "rules.hard_rules must be a list"):
+        assert needle in text, (needle, text)
+    make_pack(packs, "badchar", chars=[{**TWO[0], "hard_rules": "no"}], parts=0)
+    assert any("hard_rules must be a list" in e for e in story.lint("badchar")["errors"])
+
+
+def test_authored_romance_between_a_forbidden_pair_fails_lint(packs):
+    d = make_pack(packs, "romance", series=RULES, chars=TWO, parts=0)
+    (d / "chapters" / "CH_01.md").write_text('# D — Chapter 1: "X"\n\n## Part 1 — "A"\n1. Kaelen blushes as Mira smiles at him\n   **KAELEN**: "Hello."\n2. Wide: ruins\n3. Close-up: eyes\n', encoding="utf-8")
+    assert any("hard rule broken" in e and "Kaelen and Mira" in e for e in story.lint("romance")["errors"])
+
+
+def test_pack_rules_are_verbatim_and_deduplicated(packs):
+    make_pack(packs, "ok", series=RULES, chars=TWO, parts=0)
+    assert story.pack_rules(story.load_pack("ok")) == ["NEVER any romance between Kaelen and Mira.", "Kaelen is always kind."]
+
+
+class RomanticClient(FakeClient):
+    """Writes a romantic part first; a clean one once the prompt carries the 'previous draft broke a hard rule' note. The Gemini yes/no check says violates for 'longing'."""
+
+    def __init__(self):
+        super().__init__()
+        self.violating_calls = 0
+
+    def generate(self, prompt, schema):
+        if schema is story.Verdict:
+            return story.Verdict(violates="longing" in prompt.split("TEXT:", 1)[1], reason="longing look")
+        got = super().generate(prompt, schema)
+        if schema is research.Comic:
+            got.character_sheet = [research.Character(name="Kaelen", description="young man with silver spiky hair and a dark cloak"),
+                                   research.Character(name="Mira", description="young woman with short teal hair and a yellow scarf")]
+            if "broke a hard rule" not in prompt:
+                self.violating_calls += 1
+                got.panels[0].narration = "Kaelen gazes at Mira with longing"  # no keyword cue: only the Gemini check catches this
+        return got
+
+
+def test_research_includes_hard_rules_and_regenerates_a_violating_part(packs, workspace_tmp_path, monkeypatch):
+    make_pack(packs, "demo", series=RULES, chars=TWO, parts=0)
+    monkeypatch.setattr(research, "_call_json", lambda client, model, prompt, schema: client.generate(prompt, schema))
+    pack = story.load_pack("demo")
+    client = RomanticClient()
+    r = research.research_part("demo", "p", cfg={"comic": {"chapter_parts": 10, "cast_lock": False}, "research": {}}, client=client, series_dir=workspace_tmp_path / "s",
+                               rules=story.pack_rules(pack), guard=story.make_guard(pack))
+    prompts = [p for p in client.prompts if "HARD RULES" in p]
+    assert len(prompts) >= 3 and all("NEVER any romance between Kaelen and Mira." in p for p in prompts)  # outline + both part drafts carry the rule verbatim
+    assert client.violating_calls == 1 and any("broke a hard rule" in p for p in client.prompts)
+    assert "longing" not in " ".join(p["narration"] for p in r["comic"]["panels"])
+
+
+def test_a_part_that_keeps_violating_is_never_returned(packs, workspace_tmp_path, monkeypatch):
+    make_pack(packs, "demo", series=RULES, chars=TWO, parts=0)
+    monkeypatch.setattr(research, "_call_json", lambda client, model, prompt, schema: client.generate(prompt, schema))
+    pack = story.load_pack("demo")
+
+    class Stubborn(RomanticClient):
+        def generate(self, prompt, schema):
+            got = super().generate(prompt, schema)
+            if schema is research.Comic:
+                got.panels[0].narration = "Kaelen kisses Mira"
+            return got
+
+    r = research.research_part("demo", "p", cfg={"comic": {"chapter_parts": 10, "cast_lock": False}, "research": {}}, client=Stubborn(), series_dir=workspace_tmp_path / "s",
+                               rules=story.pack_rules(pack), guard=story.make_guard(pack))
+    # live attempts all violated -> offline fallback (clean, generic text) is used, and it is guarded too
+    assert r["source"] == "topic_fallback" and "part fallback" in r["note"] and "kisses" not in " ".join(p["narration"] for p in r["comic"]["panels"])

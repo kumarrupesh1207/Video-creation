@@ -165,6 +165,37 @@ def lint(key: str, root: Path | None = None) -> dict:
         for ref in m.get("references") or []:
             if not (Path(m["_dir"]) / str(ref.get("file", ""))).exists():
                 err(f"{rel}/characters/{f}: reference image '{ref.get('file')}' is missing from characters/")
+    # hard rules
+    rules = s.get("rules") or {}
+    cnames = {str(m["name"]).split()[0].lower(): str(m["name"]) for m in chars} | {str(m["name"]).lower(): str(m["name"]) for m in chars}
+    if rules.get("hard_rules") is not None and not (isinstance(rules["hard_rules"], list) and all(isinstance(x, str) and x.strip() for x in rules["hard_rules"])):
+        err(f"{rel}/series.yaml: rules.hard_rules must be a list of non-empty sentences")
+    fr = rules.get("forbidden_relationships")
+    if fr is not None and not isinstance(fr, list):
+        err(f"{rel}/series.yaml: rules.forbidden_relationships must be a list of {{pair: [A, B], type: romantic, note: ...}}")
+        fr = []
+    for k, r in enumerate(fr or []):
+        at = f"{rel}/series.yaml: rules.forbidden_relationships[{k}]"
+        pair = r.get("pair") if isinstance(r, dict) else None
+        if not (isinstance(pair, list) and len(pair) == 2 and all(isinstance(x, str) for x in pair)):
+            err(f"{at}: needs pair: [NameA, NameB]")
+            continue
+        if pair[0].lower() == pair[1].lower():
+            err(f"{at}: the pair must be two different characters")
+        for nm in pair:
+            if nm.lower() not in cnames:
+                close = difflib.get_close_matches(nm.lower(), list(cnames), n=1)
+                err(f"{at}: '{nm}' is not a character in characters/" + (f" (did you mean '{cnames[close[0]]}'?)" if close else ""))
+        if not str(r.get("type") or "").strip():
+            err(f"{at}: type is required (e.g. romantic)")
+        elif str(r["type"]).lower() != "romantic":
+            warn(f"{at}: only type 'romantic' is checked by keywords; other types are given to research as a rule and checked by Gemini")
+        if not str(r.get("note") or "").strip():
+            warn(f"{at}: add a note (the sentence shown to research verbatim)")
+    for m in chars:
+        hr = m.get("hard_rules")
+        if hr is not None and not (isinstance(hr, list) and all(isinstance(x, str) and x.strip() for x in hr)):
+            err(f"{rel}/characters/{Path(m['_file']).name}: hard_rules must be a list of non-empty sentences")
     # chapters
     allowed = {str(m["name"]).upper() for m in chars} | {str(m["name"]).split()[0].upper() for m in chars} | {"NARRATOR"} | \
         {str(k).upper() for k in (s.get("extra_voices") or {})}
@@ -209,6 +240,9 @@ def lint(key: str, root: Path | None = None) -> dict:
                         err(f"{at}: speaker '{spk}' has no voice (add voice: to characters/ or extra_voices in series.yaml)")
                     if len(ln["text"]) > 220:
                         warn(f"{at}: a line of {len(ln['text'])} characters will not fit one bubble; split it")
+                hit = scan_forbidden(pn["desc"] + ". " + " ".join(ln["text"] for ln in pn["lines"]), s)
+                if hit:
+                    err(f"{at}: hard rule broken, {hit}")
                 bad = banned.search(pn["desc"] + " " + " ".join(ln["text"] for ln in pn["lines"]))
                 if bad:
                     err(f"{at}: '{bad.group(0)}' is not allowed (all-ages rule)")
@@ -223,6 +257,72 @@ def format_report(slug: str, rep: dict) -> str:
     lines = [f"[story] {slug}: {len(rep['errors'])} error(s), {len(rep['warnings'])} warning(s)"]
     lines += [f"  ERROR   {m}" for m in rep["errors"]] + [f"  warning {m}" for m in rep["warnings"]] + [f"  info    {m}" for m in rep["info"]]
     return "\n".join(lines)
+
+
+# ----------------------------------------------------------------------------- hard rules (forbidden relationships etc.)
+ROMANCE = re.compile(r"\b(love[sd]?|loving|in love|lover\w*|kiss\w*|romanc\w*|romantic\w*|crush\w*|blush\w*|sweetheart|darling|beloved|dating|date night|"
+                     r"affection\w*|passion\w*|embrac\w*|cuddl\w*|couple|girlfriend|boyfriend|flirt\w*|attracted|attraction|longing|"
+                     r"hold(?:s|ing)? hands|heart (?:races|raced|flutter\w*|skips?)|butterflies|tender gaze|gazes? into (?:her|his) eyes|yearn\w*)\b", re.I)
+
+
+def _name_re(name: str) -> re.Pattern:
+    return re.compile(rf"\b{re.escape(str(name).split()[0])}\b", re.I)
+
+
+def forbidden_relationships(series: dict) -> list[dict]:
+    return [r for r in ((series.get("rules") or {}).get("forbidden_relationships") or []) if isinstance(r, dict)]
+
+
+def pack_rules(pack: dict) -> list[str]:
+    """Every hard rule of the pack, VERBATIM and de-duplicated: series rules.hard_rules, forbidden_relationships notes, characters' hard_rules."""
+    out = [str(x) for x in ((pack["series"].get("rules") or {}).get("hard_rules") or [])]
+    for r in forbidden_relationships(pack["series"]):
+        a, b = (r.get("pair") or ["?", "?"])[:2]
+        out.append(str(r.get("note") or f"There must NEVER be any {r.get('type', 'forbidden')} relationship, interest or hint between {a} and {b}."))
+    for m in pack["characters"]:
+        out += [str(x) for x in (m.get("hard_rules") or [])]
+    return list(dict.fromkeys(out))
+
+
+class Verdict(research.BaseModel):
+    violates: bool
+    reason: str = ""
+
+
+def scan_forbidden(text: str, series: dict) -> str | None:
+    """Keyword check: a segment (line/panel/sentence) naming BOTH members of a forbidden pair together with a cue of that relationship."""
+    for r in forbidden_relationships(series):
+        a, b = (r.get("pair") or [None, None])[:2]
+        if not a or not b or str(r.get("type", "romantic")).lower() != "romantic":
+            continue
+        na, nb = _name_re(a), _name_re(b)
+        for seg in re.split(r"[\n.!?]+", text):
+            if na.search(seg) and nb.search(seg) and ROMANCE.search(seg):
+                return f"romance cue between {a} and {b}: '{seg.strip()[:80]}'"
+    return None
+
+
+def make_guard(pack: dict):
+    """guard(text, client, model) -> violation message or None: keyword scan, then (when Gemini is available) a yes/no check per forbidden pair."""
+    series = pack["series"]
+
+    def guard(text: str, client=None, model: str | None = None) -> str | None:
+        hit = scan_forbidden(text, series)
+        if hit:
+            return hit
+        if client is not None:
+            for r in forbidden_relationships(series):
+                a, b = (r.get("pair") or ["?", "?"])[:2]
+                try:
+                    v = research._call_json(client, model, f"Does the following story text contain ANY {r.get('type', 'romantic')} relationship, interest, tension or hint between "
+                                            f"{a} and {b} (including subtle hints, jealousy or longing)? Answer with violates=true or false and a short reason. TEXT: {text[:6000]}", Verdict)
+                except Exception:  # noqa: BLE001 - the keyword scan already ran; an unavailable checker never blocks
+                    continue
+                if v.violates:
+                    return f"{a}/{b} {r.get('type', 'romantic')} hint (checker: {v.reason[:80]})"
+        return None
+
+    return guard
 
 
 # ----------------------------------------------------------------------------- cadence
@@ -363,7 +463,7 @@ def render_next(key: str, cfg: dict | None = None, out_dir: Path | None = None, 
         info = {"number": int(ch["number"]), "title": ch["title"], "part": m, "parts": int(ch["parts"]),
                 "beat": {"role": "script", "summary": script["parts"][m - 1]["title"]}, "series_title": s["title"], "final": m >= int(ch["parts"])}
     else:
-        r = research.research_part(sk, "", language=s["language"], panels=panels_n, cfg=cfg, client=client, series_dir=sdir, world=pack["world"])
+        r = research.research_part(sk, "", language=s["language"], panels=panels_n, cfg=cfg, client=client, series_dir=sdir, world=pack["world"], rules=pack_rules(pack), guard=make_guard(pack))
         comic_dict, info = _research_to_lines(r["comic"], pack), r["chapter"]
         if s.get("opening_card"):
             comic_dict["cover_note"] = s["opening_card"]
