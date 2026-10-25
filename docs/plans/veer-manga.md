@@ -36,3 +36,17 @@ timing = lines + 0.4, timed overlays, cover note, end card; charter guard; state
 
 ## Done when
 Tests green, commit (no push), solutions note, reported. No uploads, nothing queued.
+
+## ADDENDUM (user hard requirement, 2026-10-25): stories are CONTENT, never code — story packs
+A new story, chapter, character or series must never need a code change. Engine and content are separate:
+- Pack = `stories/<slug>/`: `series.yaml` (title, channel, playlist, language, format comic|manga, parts_per_chapter, style_head, palette,
+  opening_card, narrator voice, state_key), `characters/<name>.yaml` (locked look, seed, role, voice+rate/pitch/fx, optional reference images),
+  `chapters/CH_NN.md` (script format of CHAPTER_01.md, or absent: research writes it in the same schema and SAVES IT BACK so the user can edit),
+  optional `world.md` (canon rules appended to research prompts).
+- Engine reads packs only (`aurora/story.py`): config `channels[].series: [{slug, per_day, enabled}]` selects series by cadence. Channels without
+  `series:` run exactly as before (backward compatible). Echoes of the Aether becomes a pack (`state_key: shinobi` keeps today's series state and
+  scheduled runs intact; Kaelen + refs move to the pack; assets/characters/* stays as a fallback). docs/stories/veer moves into `stories/veer`.
+- `python -m aurora.story lint <series>` (friendly errors: unknown speakers with did-you-mean, bad voices/fx, part counts, charter + banned words);
+  the scheduler lints before rendering, a bad pack is skipped with a report line and the channel falls back to its legacy flow.
+- Docs: docs/STORY_PACKS.md with a copy-paste template. `manga_series` config is removed (replaced by the pack).
+- Tests: pack load, lint errors, cast from packs, authored vs researched chapters (saved back), cadence picking, Echoes pack == legacy cast, full suite.

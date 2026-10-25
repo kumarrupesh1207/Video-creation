@@ -15,3 +15,4 @@ One line per solved problem. Update an existing note instead of adding a duplica
 - [nim-mode-never-touches-comfyui.md](nim-mode-never-touches-comfyui.md) — scheduled run crashed on dead ComfyUI in nim mode: fallback off by default, optional ComfyUI is preflighted.
 - [chapters-series-parts.md](chapters-series-parts.md) — Series/Chapter/Part structure, >=10 parts per chapter, 16:9 chapter compilation
 - [veer-manga-dialogue.md](veer-manga-dialogue.md) — scripted manga series: per-character voices, timed bubbles, respect-charter guard
+- [STORY_PACKS.md](../STORY_PACKS.md) — content-driven series: packs, lint, cadence, zero-code new series

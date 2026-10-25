@@ -7,9 +7,9 @@ import pytest
 from PIL import Image
 
 from aurora import cast as cast_mod
-from aurora import comic, comic_layout, manga, research
+from aurora import comic, comic_layout, manga, research, story
 
-SCRIPT = (manga.ROOT / "docs" / "stories" / "veer" / "CHAPTER_01.md").read_text(encoding="utf-8")
+SCRIPT = (manga.ROOT / "stories" / "veer" / "chapters" / "CH_01.md").read_text(encoding="utf-8")
 
 
 def test_parser_reads_the_real_chapter():
@@ -102,7 +102,7 @@ def _fake_tts(calls):
 
 def _cfg(tmp, **sc):
     return {"comic": {"cast_lock": False, "image_mode": "nim", "chapter_parts": 10}, "cost_dir": str(tmp / "costs"),
-            "providers": {"nvidia_nim": {"max_credits_per_day": 25}}, "manga_series": {"veer": {"script_dir": "docs/stories/veer", "title": "VEER – Wrath of the Forgotten God", **sc}}}
+            "providers": {"nvidia_nim": {"max_credits_per_day": 25}}}
 
 
 def test_manga_part_renders_with_per_line_voices_and_timed_bubbles(workspace_tmp_path, monkeypatch):
@@ -110,7 +110,7 @@ def test_manga_part_renders_with_per_line_voices_and_timed_bubbles(workspace_tmp
     monkeypatch.setattr("aurora.audio.synthesize_voiceover", _fake_tts(calls))
     monkeypatch.setattr(comic_layout, "foreground_mask", lambda p: None)
     monkeypatch.setattr(cast_mod, "save_new_members", lambda *a, **k: [])
-    res = manga.make_manga_reel("veer", tmp / "out", cfg=_cfg(tmp), switchboard=Board(tmp), music=False, series_dir=tmp / "ser")
+    res = story.render_next("veer", out_dir=tmp / "out", cfg=_cfg(tmp), switchboard=Board(tmp), music=False, series_dir=tmp / "ser")
     assert [c[1]["voice"] for c in calls] == ["en-US-AvaNeural", "en-IN-PrabhatNeural", "en-US-AnaNeural", "en-IN-PrabhatNeural"]  # narrator, Veer, Meera, Veer
     assert calls[3][1]["rate"].startswith("-")  # whispered "...Not again." is slower than Veer's base +4%
     side = json.loads(Path(res["sidecar"]).read_text(encoding="utf-8"))
@@ -130,6 +130,6 @@ def test_manga_waits_for_the_credits_reserved_for_echoes(workspace_tmp_path):
 
     tmp = workspace_tmp_path
     log_credits("nvidia_nim", 10, tmp / "costs")
-    with pytest.raises(RuntimeError, match="kept for Echoes"):
-        manga.make_manga_reel("veer", tmp / "out", cfg=_cfg(tmp), switchboard=Board(tmp), series_dir=tmp / "ser")  # 10 + 4 > 25 - 14
+    with pytest.raises(RuntimeError, match="kept for the other series"):
+        story.render_next("veer", out_dir=tmp / "out", cfg=_cfg(tmp), switchboard=Board(tmp), series_dir=tmp / "ser")  # 10 + 4 > 25 - 14
     assert not (tmp / "ser" / "veer.json").exists() or research.load_series("veer", tmp / "ser")["chapter"]["parts_done"] == 0

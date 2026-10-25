@@ -1,0 +1,8 @@
+name: Hero
+role: protagonist                   # the protagonist comes first and is in every story
+description: young woman with short teal hair, amber eyes, a long grey travel coat and a brass compass pendant   # locked look: keep it under ~200 characters
+distinguishing_marks: teal hair, brass compass pendant
+personality: curious and brave
+seed: 12345
+voice: {voice: en-US-AriaNeural, rate: "+0%", pitch: "+0Hz", fx: ""}   # fx: echo | reverb | empty. Voices: any Edge-TTS name
+references: []                     # optional: [{file: hero_ref1.jpg, use: face}] (images in this folder)

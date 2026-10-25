@@ -542,7 +542,7 @@ def _outline_fallback(premise: str, parts: int, cast: list[dict], state: dict, n
 
 
 def research_part(channel: str, premise: str, language: str = "English", panels: int = 6, cfg: dict | None = None, client=None,
-                  series_dir: Path = SERIES_DIR, cast_root: Path | None = None) -> dict:
+                  series_dir: Path = SERIES_DIR, cast_root: Path | None = None, world: str = "") -> dict:
     """Part M of Chapter N, written from beat M of the chapter outline + the recaps of parts 1..M-1 (continuity).
     Returns {"comic": {...Comic...}, "chapter": {number, title, part, parts, beat, series_title, final}, "source", "note"}."""
     cfg = cfg if cfg is not None else _settings()
@@ -569,7 +569,7 @@ def research_part(channel: str, premise: str, language: str = "English", panels:
         if live:
             try:
                 prompt = (f"You plan ORIGINAL anime story chapters (never existing franchises). Series: {state.get('series_title') or premise}. Language: {language}. "
-                          f"Premise: {premise}. Background lore of the series so far: {state.get('background', '')[:600]}. "
+                          f"Premise: {premise}. Background lore of the series so far: {state.get('background', '')[:600]}. World canon (obey): {world[:1500]} "
                           f"Earlier chapters: {json.dumps(state.get('chapter_recaps', []), ensure_ascii=False)[:1200]}. {cast_text}"
                           f"Plan Chapter {number} as exactly {parts} beats, one per daily 30-second part: setup, rising stakes, twist, climax and a final "
                           "cliffhanger beat, in that order. Return series_title (keep the existing one if given), chapter_title, summary, beats "
@@ -600,7 +600,7 @@ def research_part(channel: str, premise: str, language: str = "English", panels:
         try:
             prompt = (f"{COMIC_PROMPT_HEAD.format(language=language)}{cast_text}Series: {series_title}. Chapter {ch['number']}: {ch['title']}. "
                       f"This is Part {m} of {ch['parts']} (one ~30 s episode). Beat for this part ({beat['role']}): {beat['summary']} "
-                      f"Previous parts so far: {json.dumps(ch['recaps'], ensure_ascii=False)[:1800]}. Series background: {state.get('background', '')[:400]}. "
+                      f"Previous parts so far: {json.dumps(ch['recaps'], ensure_ascii=False)[:1800]}. Series background: {state.get('background', '')[:400]}. World canon (obey): {world[:1500]} "
                       f"Write exactly {n} panels. Return: series {{title='{series_title}', part={m}, total_parts={ch['parts']}, recap = ONE line of what happens in THIS part}}, "
                       f"hook (3-6 words that tease this part, for the video title), character_sheet (locked cast verbatim + any new characters with a fixed look; style '{COMIC_STYLE}'), "
                       "panels (each: shot close-up|wide|medium|action, characters present, image_prompt = the scene only in English, narration of 8-12 words, optional short bubble, "

@@ -1,0 +1,14 @@
+name: Meera
+role: sister
+description: 12-year-old Indian girl, shoulder-length black hair in two small braids, big bright eyes, yellow kurta with ink-stained
+  sleeves, a sketchbook under her arm
+distinguishing_marks: two braids, yellow kurta, sketchbook; eyes glow silver in the Smriti-flood
+personality: bright, stubborn child; echoing older voice when the flood speaks
+voice_notes: bright, stubborn child; echoing older voice when the flood speaks
+voice:
+  voice: en-US-AnaNeural
+  rate: +4%
+  pitch: +0Hz
+seed: 20261025
+first_story: VEER – Wrath of the Forgotten God
+references: []

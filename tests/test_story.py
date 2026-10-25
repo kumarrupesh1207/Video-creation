@@ -1,0 +1,156 @@
+import json
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+import yaml
+from PIL import Image
+
+from aurora import cast as cast_mod
+from aurora import comic, comic_layout, manga, research, story
+from tests.test_chapters import FakeClient
+
+PART = """## Part {n} — "Hook {n}"
+1. Wide: a ruined temple at dawn
+   **NARRATOR** (calm): "The first light touches the old stones."
+2. Kaelen kneels by a glowing rune
+   **KAELEN** (earnest): "It is still warm."
+3. Close-up: his determined eyes
+   **KAELEN**: "Then it is not over."
+"""
+
+
+def make_pack(root: Path, slug="demo", fmt="comic", parts=2, extra_md="", series=None, chars=None):
+    d = root / slug
+    (d / "characters").mkdir(parents=True)
+    (d / "chapters").mkdir()
+    (d / "series.yaml").write_text(yaml.safe_dump({"title": "Demo Saga", "channel": "demo", "format": fmt, "parts_per_chapter": 10,
+                                                   "opening_card": "A made-up tale.", **(series or {})}, allow_unicode=True), encoding="utf-8")
+    ch = chars or [{"name": "Kaelen", "role": "protagonist", "description": "young man with silver spiky hair and a dark cloak",
+                    "voice": {"voice": "en-IN-PrabhatNeural", "rate": "+0%", "pitch": "+0Hz"}}]
+    for c in ch:
+        (d / "characters" / f"{c['name'].lower()}.yaml").write_text(yaml.safe_dump(c, allow_unicode=True), encoding="utf-8")
+    if parts:
+        (d / "chapters" / "CH_01.md").write_text('# Demo — Chapter 1: "Dawn"\n\n' + "\n".join(PART.format(n=i) for i in range(1, parts + 1)) + extra_md, encoding="utf-8")
+    return d
+
+
+@pytest.fixture
+def packs(workspace_tmp_path, monkeypatch):
+    root = workspace_tmp_path / "stories"
+    root.mkdir()
+    monkeypatch.setattr(story, "STORIES_ROOT", root)
+    return root
+
+
+def test_shipped_packs_lint_clean():
+    for slug in ("echoes-of-the-aether", "veer"):
+        rep = story.lint(slug)
+        assert rep["errors"] == [], rep
+
+
+def test_echoes_pack_keeps_the_legacy_cast_and_state_key():
+    assert story.find_pack("shinobi").name == "echoes-of-the-aether"  # legacy channel key resolves to the pack (state_key)
+    packed = cast_mod.load_cast("shinobi")
+    legacy = json.loads((cast_mod.CAST_ROOT / "shinobi" / "kaelen.json").read_text(encoding="utf-8"))
+    assert packed[0]["name"] == "Kaelen" and packed[0]["description"] == legacy["description"]
+    assert cast_mod.reference_image("shinobi").exists()  # reference images moved with the pack
+    assert [m["name"] for m in cast_mod.load_cast("main")] == ["Kaelen"]  # channels without a pack still use assets/characters/<channel>
+
+
+def test_lint_gives_friendly_errors(packs):
+    bad = make_pack(packs, "bad", fmt="manga", parts=1, extra_md='\n## Part 2 — "x"\n1. Krishna fights a demon\n   **KAELN**: "hi"\n2. a\n   **KAELEN**: "naked truth"\n3. b\n',
+                    chars=[{"name": "Kaelen", "description": "short", "voice": {"voice": "bad", "rate": "fast", "pitch": "+0Hz", "fx": "robot"}}])
+    (bad / "characters" / "ghost.yaml").write_text(yaml.safe_dump({"name": "Ghost", "description": "a pale ghost with a long grey coat", "references": [{"file": "nope.jpg"}]}), encoding="utf-8")
+    text = "\n".join(story.lint("bad")["errors"])
+    for needle in ("speaker 'KAELN' has no file in characters/ (did you mean 'KAELEN'?)", "voice.voice must be an Edge-TTS voice", "voice.rate must look like",
+                   "voice.fx must be one of", "reference image 'nope.jpg' is missing", "manga series need a voice", "not allowed (all-ages rule)",
+                   "respect charter"):
+        assert needle in text, (needle, text)
+    assert story.lint("missing")["errors"][0].startswith("no story pack 'missing'")
+    toomany = make_pack(packs, "many", parts=11)
+    assert any("11 parts but parts_per_chapter is 10" in e for e in story.lint("many")["errors"]) and toomany.exists()
+    make_pack(packs, "low", series={"parts_per_chapter": 4})
+    assert any("parts_per_chapter must be a whole number >= 10" in e for e in story.lint("low")["errors"])
+
+
+def test_pack_cast_and_voices(packs):
+    make_pack(packs, "demo")
+    assert [m["name"] for m in cast_mod.load_cast("demo")] == ["Kaelen"]
+    v = story.pack_voices(story.load_pack("demo"))
+    assert v["KAELEN"]["voice"] == "en-IN-PrabhatNeural" and v["NARRATOR"]["voice"].startswith("en-")
+
+
+def test_cadence_and_invalid_packs_are_skipped(packs, workspace_tmp_path):
+    make_pack(packs, "demo")
+    make_pack(packs, "broken", fmt="nope")
+    sd = workspace_tmp_path / "ser"
+    ch = {"name": "c", "series": [{"slug": "broken", "per_day": 1}, {"slug": "off", "per_day": 0}, {"slug": "demo", "per_day": 2}]}
+    entry, reports, invalid = story.pick_series(ch, sd, "2026-10-26")
+    assert entry["slug"] == "demo" and invalid and "format must be one of" in reports[0]
+    research._write_state("demo", {"daily": {"2026-10-26": 2}}, sd)
+    assert story.pick_series(ch, sd, "2026-10-26")[0] is None  # cadence reached
+    assert story.pick_series(ch, sd, "2026-10-27")[0]["slug"] == "demo"  # next day
+    only_bad = {"name": "c", "series": ["broken"]}
+    assert story.render_for_channel({}, only_bad, None, workspace_tmp_path, series_dir=sd) is None  # legacy fallback, no crash
+    with pytest.raises(RuntimeError, match="daily cadence"):
+        story.render_for_channel({}, {"name": "c", "series": [{"slug": "demo", "per_day": 0}]}, None, workspace_tmp_path, series_dir=sd)
+
+class Board:
+    def __init__(self, tmp):
+        self.tmp, self.n = tmp, 0
+
+    def generate(self, prompt, style, res, job, negative_prompt="", seed=None):
+        self.n += 1
+        p = self.tmp / f"{job}_{self.n}.jpg"
+        Image.effect_noise((576, 1024), 50).convert("RGB").save(p)
+        return SimpleNamespace(output_path=str(p), provider="nvidia_nim", latency_ms=1)
+
+
+def test_authored_chapters_are_used_as_is_and_missing_ones_are_researched_and_saved_back(packs, workspace_tmp_path, monkeypatch):
+    tmp = workspace_tmp_path
+    d = make_pack(packs, "demo", parts=2)
+    monkeypatch.setattr(research, "_call_json", lambda client, model, prompt, schema: client.generate(prompt, schema))
+    monkeypatch.setattr(comic_layout, "foreground_mask", lambda p: None)
+    monkeypatch.setattr(cast_mod, "save_new_members", lambda *a, **k: [])
+
+    def tts(text, out, lang=None, options=None):
+        wav = Path(out).with_suffix(".wav")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=f=300:d=0.6", str(wav)], check=True)
+        return wav, "fake"
+
+    monkeypatch.setattr(comic, "synthesize_voiceover", tts)
+    for name, val in (("PANEL_MIN_S", 1.2), ("COVER_S", 1.2), ("END_S", 1.2)):
+        monkeypatch.setattr(comic, name, val)
+    cfg = {"comic": {"cast_lock": False, "image_mode": "nim"}, "research": {}, "cost_dir": str(tmp / "costs"), "providers": {"nvidia_nim": {"max_credits_per_day": 50}}}
+    sd, board, client = tmp / "ser", Board(tmp), FakeClient()
+    r1 = story.render_next("demo", cfg, tmp / "out", board, music=False, series_dir=sd, client=client)
+    assert r1["authored"] and r1["title"] == "Demo Saga – Ch.1 Part 1: Hook 1" and client.prompts == []  # no research call for an authored part
+    side = json.loads(Path(r1["sidecar"]).read_text(encoding="utf-8"))
+    assert side["channel"] == "demo" and side["story"] == "demo" and side["playlist"] == "Demo Saga"
+    assert [p["narration"] for p in side["panels"]][0] == "The first light touches the old stones." and side["panels"][1]["bubble"] == "It is still warm."
+    r2 = story.render_next("demo", cfg, tmp / "out", board, music=False, series_dir=sd, client=client)
+    assert r2["authored"] and r2["chapter"]["part"] == 2
+    r3 = story.render_next("demo", cfg, tmp / "out", board, music=False, series_dir=sd, client=client)  # part 3 is not authored -> research
+    assert not r3["authored"] and r3["chapter"]["part"] == 3 and client.prompts and "World canon" in client.prompts[-1]
+    md = (d / "chapters" / "CH_01.md").read_text(encoding="utf-8")
+    assert '## Part 3 — "The Relic Wakes"' in md and "**NARRATOR** (calm)" in md  # saved back in the authored schema
+    assert story.lint("demo")["errors"] == []  # the saved chapter lints clean and re-parses
+    assert [p["number"] for p in manga.parse_chapter(md)["parts"]] == [1, 2, 3]
+    assert research.load_series("demo", sd)["daily"]
+
+
+def test_config_series_entries_point_at_real_packs():
+    cfg = yaml.safe_load((story.ROOT / "config.yaml").read_text(encoding="utf-8"))
+    shinobi = next(c for c in cfg["autopilot"]["channels"] if c["name"] == "shinobi")
+    slugs = [e["slug"] for e in story.entries(shinobi)]
+    assert slugs == ["echoes-of-the-aether", "veer"] and set(slugs) <= set(story.list_packs())
+    veer = story.entries(shinobi)[1]
+    assert veer["per_day"] == 0 or veer["enabled"] is False  # Veer is not scheduled yet
+    assert "series" not in next(c for c in cfg["autopilot"]["channels"] if c["name"] == "main")
+
+
+def test_template_pack_lints_clean_and_is_not_a_series():
+    assert story.lint("_template")["errors"] == []
+    assert "_template" not in story.list_packs() and story.find_pack("_template") is not None

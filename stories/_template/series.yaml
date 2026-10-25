@@ -1,0 +1,16 @@
+# Copy this folder to stories/<your-series-slug>/ and edit. No code changes needed.
+title: "My Series Title"            # shown on every video and as the playlist name
+channel: shinobi                    # YouTube channel profile (autopilot.channels[].name) that publishes it
+playlist: "My Series Title"         # playlist name (defaults to title)
+language: English
+format: comic                       # comic = one narrator | manga = every character speaks their own lines (needs voice: in characters/)
+parts_per_chapter: 10               # >= 10; each part is one ~30 s Short
+state_key: my-series-slug           # where progress is kept (outputs/series/<state_key>.json); default = the folder name
+style_head: ""                      # image style words; "" = default anime look. Manga example: "cel-shaded manga panel, bold black ink outlines, screentone shading, "
+action_style: ""                    # added on action panels, e.g. "dramatic radial speed lines, "
+palette: []
+opening_card: ""                    # line shown on every cover (manga series should set a respect line)
+narrator: {voice: en-US-AvaNeural, rate: "-8%", pitch: "+0Hz"}
+extra_voices: {}                    # extra speakers without a character file, e.g. ANCHOR: {voice: en-US-JennyNeural}
+reserve_credits: 0                  # NIM credits/day kept for the other series on the channel
+rules: {banned_words: []}           # extra words that must never appear in a script

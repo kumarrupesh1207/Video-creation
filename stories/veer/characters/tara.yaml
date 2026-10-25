@@ -1,0 +1,14 @@
+name: Tara
+role: linguist
+description: 21-year-old Indian woman, sleek black bob with round glasses, sharp dark eyes, teal denim jacket over a white
+  shirt, a tablet in hand
+distinguishing_marks: round glasses, black bob, teal jacket
+personality: sharp, certain, hides old anger
+voice_notes: sharp, certain, hides old anger
+voice:
+  voice: en-IN-NeerjaNeural
+  rate: +6%
+  pitch: +0Hz
+seed: 20261025
+first_story: VEER – Wrath of the Forgotten God
+references: []

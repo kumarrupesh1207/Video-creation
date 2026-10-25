@@ -3,7 +3,7 @@
     python -m aurora.manga parse --chapter 1                 # print the parsed script (no cost)
     python -m aurora.manga render --series veer [--force]    # next part of the series (NIM credits permitting)
 
-A chapter script (docs/stories/<series>/CHAPTER_NN.md) is parsed into the normal comic dict (panels + `lines`), then
+A chapter script (stories/<series>/chapters/CH_NN.md) is parsed into the normal comic dict (panels + `lines`), then
 `comic.make_comic_reel` renders it: images, per-line voices, timed bubbles, sidecar, chapter state, 16:9 compilation.
 Respect charter (STORY_BIBLE section 2) is enforced in code: `check_charter`.
 """
@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import zlib
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -21,7 +20,7 @@ from aurora import cast as cast_mod
 from aurora import research
 
 ROOT = Path(__file__).resolve().parents[1]
-CHAPTER_FILE = "CHAPTER_{:02d}.md"
+CHAPTER_FILE = "CH_{:02d}.md"
 RESPECT_CARD = "A work of fiction inspired by the world's mythologies, told with respect."
 MANGA_HEAD = ("cel-shaded manga panel, bold black ink outlines, screentone shading, palette of saffron, river-teal, night-indigo and ember-red, "
               "single panel, ")
@@ -51,12 +50,17 @@ def _plain(s: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[*_]+", "", s)).strip(" .:-—")
 
 
+def _speech(s: str) -> str:
+    """Spoken text keeps its closing punctuation (the voice needs it)."""
+    return re.sub(r"\s+", " ", re.sub(r"[*_]+", "", s)).strip()
+
+
 def _quote(rest: str) -> tuple[str, str]:
     """(spoken text, trailing action text) from what follows `SPEAKER (emotion):`."""
     a, b = rest.find('"'), rest.rfind('"')
     if a != -1 and b > a:
-        return _plain(rest[a + 1:b]), _plain(rest[b + 1:])
-    return _plain(rest), ""
+        return _speech(rest[a + 1:b]), _plain(rest[b + 1:])
+    return _speech(rest), ""
 
 
 def _line(speaker: str, emotion: str, text: str) -> dict:
@@ -149,7 +153,8 @@ def check_charter(panels: list[dict]) -> None:
             raise ValueError("respect charter: the saviour of the prophecy is never claimed as Veer")
 
 
-def part_to_comic(chapter: dict, part: dict, cast: list[dict], series_title: str) -> dict:
+def part_to_comic(chapter: dict, part: dict, cast: list[dict], series_title: str, style_head: str = MANGA_HEAD, opening_card: str = RESPECT_CARD,
+                  mode: str = "manga", action_style: str = SPEED) -> dict:
     """One scripted part -> the comic dict used by comic.make_comic_reel (panels carry `lines`; style_head makes the manga look)."""
     names = [m["name"] for m in cast]
     panels = []
@@ -162,28 +167,32 @@ def part_to_comic(chapter: dict, part: dict, cast: list[dict], series_title: str
         scene = re.sub(r"^(wide|close-up|insert|full panel)\s*:\s*", "", re.sub(r"\([^)]*\)", "", desc), flags=re.I)
         scene = re.sub(r"[\"“”'‘’].{0,60}?[\"“”'‘’]", "", scene)  # no quoted on-screen text in the image prompt
         panels.append({"shot": shot, "characters": chars, "image_prompt": (scene or desc)[:300], "narration": "", "bubble": "", "action": action,
-                       "scenery": not chars, "style_head": MANGA_HEAD + (SPEED if action else ""), "lines": item["lines"], "desc": desc})
+                       "scenery": not chars, "desc": desc, "lines": item["lines"]})
+        if style_head:
+            panels[-1]["style_head"] = style_head + (action_style if action else "")
     check_charter(panels)
-    first = " ".join(ln["text"] for p in panels for ln in p["lines"])[:200]
+    if mode != "manga":  # single narrator comic: lines -> narration (+ the first spoken line as the bubble)
+        for p in panels:
+            told = " ".join(ln["text"] for ln in p["lines"] if ln["kind"] in ("caption", "verse"))
+            spoken = [ln["text"] for ln in p["lines"] if ln["kind"] not in ("caption", "verse")]
+            p["bubble"] = spoken[0] if spoken else ""
+            p["narration"] = told or (spoken[0] if spoken else p["desc"][:80])
+            p.pop("lines")
+    first = " ".join(p.get("narration") or " ".join(ln["text"] for ln in p.get("lines", [])) for p in panels)[:200]
     total = len(chapter["parts"])
     e_title, e_sub = part["end_card"]
     return {"series": {"title": series_title, "part": part["number"], "total_parts": total, "recap": first},
             "hook": part["title"], "cta": e_sub or e_title, "cliffhanger": e_title if part["number"] < total else "", "panels": panels,
             "character_sheet": [{"name": m["name"], "description": m["description"], "style": research.COMIC_STYLE} for m in cast],
-            "end_card": [e_title, e_sub], "cover_note": RESPECT_CARD}
+            "end_card": [e_title, e_sub], "cover_note": opening_card}
 
 
 # ----------------------------------------------------------------------------- voices
-def load_voices(series: str, root: Path = cast_mod.CAST_ROOT) -> dict[str, dict]:
-    """{SPEAKER NAME: {voice, rate, pitch, fx}} from assets/characters/<series>/*.json ("voice" key) + narrator/anchor defaults."""
-    out = dict(DEFAULT_VOICES)
-    for m in cast_mod.load_cast(series, root):
-        if isinstance(m.get("voice"), dict):
-            out[m["name"].upper()] = m["voice"]
-    extra = Path(root) / series / "_voices.json"
-    if extra.exists():
-        out.update({k.upper(): v for k, v in json.loads(extra.read_text(encoding="utf-8")).items()})
-    return out
+def load_voices(series: str) -> dict[str, dict]:
+    """{SPEAKER NAME: {voice, rate, pitch, fx}} of a story pack (characters' `voice`, narrator, extra_voices)."""
+    from aurora import story
+
+    return story.pack_voices(story.load_pack(series))
 
 
 def voice_for(speaker: str, voices: dict) -> dict:
@@ -281,55 +290,11 @@ def tone_png(path: Path, w: int, h: int, action: bool) -> Path:
     return path
 
 
-# ----------------------------------------------------------------------------- series driver
-def series_cfg(cfg: dict, key: str) -> dict:
-    return (cfg.get("manga_series") or {}).get(key) or {}
+def make_manga_reel(series: str, out_dir: Path, **kw) -> dict:
+    """Kept for compatibility: the series driver is `aurora.story.render_next` (story packs)."""
+    from aurora import story
 
-
-def prepare_state(series: str, sc: dict, script_dir: Path, series_dir: Path) -> tuple[dict, dict, dict]:
-    """(chapter script, current part script, chapter info) for the next part; starts a chapter in the series state when needed."""
-    state = research.load_series(series, series_dir)
-    ch = state.get("chapter")
-    number = int(ch["number"]) if ch and not ch.get("complete") else int(state.get("chapters_done", 0)) + 1
-    script = parse_chapter((Path(script_dir) / CHAPTER_FILE.format(number)).read_text(encoding="utf-8"))
-    title = sc.get("title") or state.get("series_title") or series.upper()
-    if not ch or ch.get("complete"):
-        ch = {"number": number, "title": script["title"], "summary": "", "outline": [{"role": "script", "summary": p["title"]} for p in script["parts"]],
-              "parts": len(script["parts"]), "parts_done": 0, "recaps": [], "rendered": [], "complete": False}
-        state.update(channel=series, series_title=title, title=title, chapter=ch, chapters_done=state.get("chapters_done", 0),
-                     chapters=state.get("chapters", {}), seed=state.get("seed") or zlib.crc32(series.encode()) % 2**31 or 7)
-        research._write_state(series, state, series_dir)
-    m = int(ch["parts_done"]) + 1
-    part = script["parts"][m - 1]
-    info = {"number": int(ch["number"]), "title": ch["title"], "part": m, "parts": int(ch["parts"]), "beat": {"role": "script", "summary": part["title"]},
-            "series_title": title, "final": m >= int(ch["parts"])}
-    return script, part, info
-
-
-def make_manga_reel(series: str, out_dir: Path, cfg: dict | None = None, switchboard=None, music: bool = True, series_dir: Path | None = None,
-                    script_dir: Path | None = None, force: bool = False, **kw) -> dict:
-    """Render the NEXT part of a manga series. Refuses when the shared NIM daily cap would leave less than the reserve kept for the
-    other series (Echoes of the Aether has priority) unless force=True."""
-    import yaml
-
-    from aurora import comic
-    from aurora.costs import COST_DIR, credits_today
-
-    cfg = cfg if cfg is not None else yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
-    sc = series_cfg(cfg, series)
-    sdir = Path(series_dir) if series_dir else research.SERIES_DIR
-    script, part, info = prepare_state(series, sc, ROOT / (script_dir or sc.get("script_dir", f"docs/stories/{series}")), sdir)
-    cast = cast_mod.load_cast(series)
-    comic_dict = part_to_comic(script, part, cast, info["series_title"])
-    cap = int(__import__("os").environ.get("AURORA_NIM_DAILY_CAP") or cfg.get("providers", {}).get("nvidia_nim", {}).get("max_credits_per_day", 25))
-    need, reserve = len(comic_dict["panels"]), int(sc.get("reserve_credits", 14))
-    used = credits_today("nvidia_nim", Path(cfg.get("cost_dir", COST_DIR)))
-    if not force and used + need > cap - reserve:
-        raise RuntimeError(f"NIM credits: {used} used today + {need} needed > cap {cap} - {reserve} kept for Echoes; try again after the reset (or --force)")
-    cfg = {**cfg, "comic": {**cfg.get("comic", {}), "voices": load_voices(series), "manga": True}}
-    res = comic.make_comic_reel(series, "", out_dir, cfg=cfg, comic=comic_dict, chapter=info, switchboard=switchboard, music=music,
-                                series_dir=sdir, **kw)
-    return res
+    return story.render_next(series, out_dir=out_dir, **kw)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -337,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("parse")
     p.add_argument("--chapter", type=int, default=1)
-    p.add_argument("--dir", default="docs/stories/veer")
+    p.add_argument("--dir", default="stories/veer/chapters")
     r = sub.add_parser("render")
     r.add_argument("--series", default="veer")
     r.add_argument("--force", action="store_true")
@@ -347,7 +312,7 @@ def main(argv: list[str] | None = None) -> int:
         for pt in ch["parts"]:
             print(f"Part {pt['number']} {pt['title']!r}: {len(pt['panels'])} panels, {sum(len(x['lines']) for x in pt['panels'])} lines, card={pt['end_card']}")
         return 0
-    res = make_manga_reel(a.series, ROOT / "outputs" / "final" / "shinobi" / "manga", force=a.force)
+    res = make_manga_reel(a.series, None, force=a.force)
     print(json.dumps({k: res[k] for k in ("video", "title", "seconds")}, ensure_ascii=False))
     return 0
 

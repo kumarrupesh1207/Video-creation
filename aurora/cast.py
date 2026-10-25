@@ -21,6 +21,12 @@ def _slug(name: str) -> str:
 
 def load_cast(channel: str, root: Path = CAST_ROOT) -> list[dict]:
     """Locked members of a channel, protagonist first (then by name)."""
+    if Path(root) == CAST_ROOT:  # story packs (stories/<slug>/characters/*.yaml) win over the legacy assets/characters/<channel>/ folders
+        from aurora import story
+
+        packed = story.pack_cast(channel)
+        if packed:
+            return packed
     members = []
     for f in sorted((Path(root) / channel).glob("*.json")):
         try:
@@ -76,6 +82,13 @@ def save_new_members(channel: str, comic: dict, panel_images: list[Path], root: 
         if first is None or first >= len(panel_images):
             continue
         d = Path(root) / channel
+        pack_dir = None
+        if Path(root) == CAST_ROOT:
+            from aurora import story
+
+            pack_dir = story.find_pack(channel)
+        if pack_dir is not None:
+            d = pack_dir / "characters"
         d.mkdir(parents=True, exist_ok=True)
         slug = _slug(c["name"])
         refs = []
@@ -84,9 +97,13 @@ def save_new_members(channel: str, comic: dict, panel_images: list[Path], root: 
             dest = d / f"{slug}_ref1{src.suffix}"
             shutil.copyfile(src, dest)
             refs.append({"file": dest.name, "from_panel": first, "use": "first appearance"})
-        (d / f"{slug}.json").write_text(json.dumps({
-            "name": c["name"], "role": "side character", "description": c["description"], "distinguishing_marks": "",
-            "personality": "", "voice_notes": "", "first_story": comic["series"]["title"], "references": refs,
-        }, indent=2, ensure_ascii=False), encoding="utf-8")
+        entry = {"name": c["name"], "role": "side character", "description": c["description"], "distinguishing_marks": "",
+                 "personality": "", "voice_notes": "", "first_story": comic["series"]["title"], "references": refs}
+        if pack_dir is not None:  # a new character of a story pack becomes a pack file the user can edit
+            import yaml
+
+            (d / f"{slug}.yaml").write_text(yaml.safe_dump(entry, allow_unicode=True, sort_keys=False, width=120), encoding="utf-8")
+        else:
+            (d / f"{slug}.json").write_text(json.dumps(entry, indent=2, ensure_ascii=False), encoding="utf-8")
         added.append(c["name"])
     return added

@@ -791,7 +791,7 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
     if lock:  # characters that debuted in this reel join the permanent cast
         side["cast"] = {"locked": [m["name"] for m in cast_mod.load_cast(channel)], "added": cast_mod.save_new_members(channel, comic, images)}
     if chapter:
-        side.update(chapter=chapter, playlist=comic["series"]["title"], hook=comic.get("hook", ""), panel_times=info["panel_times"],
+        side.update(chapter=chapter, playlist=comic.get("playlist") or comic["series"]["title"], hook=comic.get("hook", ""), panel_times=info["panel_times"],
                     panel_images=[str(p) for p in images], cover_s=COVER_S)
     sidecar = mp4.with_suffix(".json")
     sidecar.write_text(json.dumps(side, indent=2, ensure_ascii=False), encoding="utf-8")

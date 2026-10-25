@@ -1,0 +1,15 @@
+name: Smaran
+role: the unforgotten
+description: tall scarred warrior in bronze armour fused with stone, hair of ash-white flame, burning eyes like dying stars,
+  standing on a mountain of ruins
+distinguishing_marks: bronze-stone armour, ash-white flame hair, burning eyes
+personality: deep, grieving, reverberating
+voice_notes: deep, grieving, reverberating
+voice:
+  voice: en-GB-ThomasNeural
+  rate: -10%
+  pitch: -14Hz
+  fx: reverb
+seed: 20261025
+first_story: VEER – Wrath of the Forgotten God
+references: []

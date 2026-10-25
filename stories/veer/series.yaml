@@ -1,0 +1,28 @@
+title: VEER – Wrath of the Forgotten God
+channel: shinobi
+playlist: VEER – Wrath of the Forgotten God
+language: English
+format: manga
+parts_per_chapter: 10
+state_key: veer
+style_head: 'cel-shaded manga panel, bold black ink outlines, screentone shading, palette of saffron, river-teal, night-indigo
+  and ember-red, single panel, '
+action_style: 'dramatic radial speed lines, dynamic angle, '
+palette:
+- saffron
+- river-teal
+- night-indigo
+- ember-red
+opening_card: A work of fiction inspired by the world's mythologies, told with respect.
+narrator:
+  voice: en-US-AvaNeural
+  rate: -8%
+  pitch: +0Hz
+extra_voices:
+  ANCHOR:
+    voice: en-US-JennyNeural
+    rate: +6%
+    pitch: +0Hz
+reserve_credits: 14
+rules:
+  banned_words: []

@@ -1,0 +1,15 @@
+name: Jalaghna
+role: herald of the flood
+description: tall figure formed of dark flowing river water, a face of swirling currents, glowing teal eyes, drowned-temple
+  relics floating in the body
+distinguishing_marks: water body, face of currents, teal eyes
+personality: deep, echoing, amused
+voice_notes: deep, echoing, amused
+voice:
+  voice: en-US-DavisNeural
+  rate: -10%
+  pitch: -18Hz
+  fx: echo
+seed: 20261025
+first_story: VEER – Wrath of the Forgotten God
+references: []
