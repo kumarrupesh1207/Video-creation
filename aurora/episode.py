@@ -199,15 +199,18 @@ def pick_thumbnail_panel(panels: list[dict], images: list[Path]) -> int:
     return best
 
 
-def make_thumbnail(image: Path, title: str, out: Path, episode_no: int = 1, faces: list | None = None) -> Path:
+def make_thumbnail(image: Path, title: str, out: Path, episode_no: int = 1, faces: list | None = None, label: str = "EPISODE") -> Path:
     """1280x720 thumbnail: the best panel, darkened on the text side, big outlined title on the side away from the face, episode badge."""
     im = Image.open(image).convert("RGB")
     iw, ih = im.size
     s = max(1280 / iw, 720 / ih)
     im = im.resize((int(iw * s) + 1, int(ih * s) + 1), Image.LANCZOS)
-    left, top = (im.width - 1280) // 2, (im.height - 720) // 2
-    im = im.crop((left, top, left + 1280, top + 720))
     faces = comic_layout.detect_faces(Path(image)) if faces is None else faces
+    left, top = (im.width - 1280) // 2, (im.height - 720) // 2
+    if faces and im.height > 720:  # portrait panels: keep the face (not the belly) in the 16:9 crop
+        f0 = max(faces, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+        top = int(min(max((f0[1] + f0[3]) / 2 * s - 720 * 0.38, 0), im.height - 720))
+    im = im.crop((left, top, left + 1280, top + 720))
     fx = ((faces and max(faces, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))) or (0, 0, iw, ih))
     face_cx = ((fx[0] + fx[2]) / 2 * s - left) if faces else 640
     text_left = face_cx > 640  # face on the right -> text on the left
@@ -229,9 +232,9 @@ def make_thumbnail(image: Path, title: str, out: Path, episode_no: int = 1, face
     for l in lines:
         d.text((x0, y), l, font=f, fill=(255, 255, 255), stroke_width=8, stroke_fill=(0, 0, 0))
         y += int(size * 1.1)
-    bf = comic._font(44, "EPISODE")
+    bf = comic._font(44, label)
     d.rounded_rectangle([x0, 600, x0 + 300, 672], radius=14, fill=(255, 214, 80), outline=(0, 0, 0), width=4)
-    d.text((x0 + 22, 606), f"EPISODE {episode_no}", font=bf, fill=(20, 20, 20))
+    d.text((x0 + 22, 606), f"{label} {episode_no}", font=bf, fill=(20, 20, 20))
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     im.save(out, "JPEG", quality=92)

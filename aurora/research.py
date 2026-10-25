@@ -143,6 +143,7 @@ class Comic(BaseModel):
     panels: list[Panel] = Field(min_length=3, max_length=10)
     cliffhanger: str = ""
     cta: str = ""
+    hook: str = ""  # 3-6 word teaser for the video title (chapter mode)
 
 
 def load_series(channel: str, series_dir: Path = SERIES_DIR) -> dict:
@@ -156,7 +157,7 @@ def load_series(channel: str, series_dir: Path = SERIES_DIR) -> dict:
 def save_series(channel: str, comic: dict, series_dir: Path = SERIES_DIR) -> dict:
     """Continuity state for the next part: characters, last-part summary, fixed image seed."""
     prev = load_series(channel, series_dir)
-    state = {"channel": channel, "title": comic["series"]["title"], "part": comic["series"]["part"],
+    state = {**prev, "channel": channel, "title": comic["series"]["title"], "part": comic["series"]["part"],
              "total_parts": comic["series"].get("total_parts", 1),
              "characters": comic["character_sheet"], "last_summary": " ".join(p["narration"] for p in comic["panels"])[:600],
              "cliffhanger": comic.get("cliffhanger", ""), "seed": prev.get("seed") or (abs(hash(channel)) % 2**31 or 7)}
@@ -467,3 +468,190 @@ def save_episode_state(channel: str, episode: dict, series_dir: Path = SERIES_DI
     (Path(series_dir) / f"{channel}-episodes.json").write_text(json.dumps(
         {"channel": channel, "episode": episode["series"]["part"], "title": episode["title"], "last_summary": last,
          "characters": episode["character_sheet"]}, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+# ----------------------------------------------------------------------------- chapters: Series -> Chapter N -> Part M (>= 10 parts each)
+class Beat(BaseModel):
+    role: str  # setup | rising stakes | twist | climax | cliffhanger
+    summary: str = Field(min_length=3)
+
+
+class ChapterOutline(BaseModel):
+    series_title: str = Field(min_length=2)
+    chapter_title: str = Field(min_length=2)
+    summary: str = ""
+    beats: list[Beat] = Field(min_length=10, max_length=12)
+    character_sheet: list[Character] = []
+
+
+def chapter_parts(cfg: dict | None) -> int:
+    """Parts per chapter: config comic.chapter_parts, never fewer than 10."""
+    return max(10, int(((cfg or {}).get("comic") or {}).get("chapter_parts", 10) or 10))
+
+
+def part_title(series: str, chapter: int, part: int, hook: str = "") -> str:
+    """"<Series> – Ch.<N> Part <M>: <hook>" (the en dash is intentional, it is the format the user approved)."""
+    return f"{series} – Ch.{chapter} Part {part}" + (f": {hook.strip().rstrip('.')}" if hook and hook.strip() else "")
+
+
+def end_card_for(chapter: int, part: int, parts: int) -> tuple[str, str]:
+    """End card text: "Part <M+1> tomorrow" or "Chapter <N> finale"."""
+    return (f"Chapter {chapter} finale", "The next chapter is coming") if part >= parts else ("To be continued...", f"Part {part + 1} tomorrow")
+
+
+_BEAT_ROLES = ["setup", "setup", "rising stakes", "rising stakes", "rising stakes", "twist", "twist", "climax", "climax", "cliffhanger"]
+
+
+def _roles(n: int) -> list[str]:
+    roles = _BEAT_ROLES[:]
+    while len(roles) < n:  # 11-12 beats: extra rising stakes before the twist
+        roles.insert(4, "rising stakes")
+    return roles[:n]
+
+
+def _write_state(channel: str, state: dict, series_dir: Path) -> None:
+    Path(series_dir).mkdir(parents=True, exist_ok=True)
+    (Path(series_dir) / f"{channel}.json").write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def reset_for_chapters(channel: str, series_title: str = "Echoes of the Aether", series_dir: Path = SERIES_DIR) -> dict:
+    """Start Chapter 1 FRESH: back up the old (pilot) state, keep the cast, the seed and the old story as `background` lore only."""
+    old = load_series(channel, series_dir)
+    backup = Path(series_dir) / f"{channel}.pilot-backup.json"
+    if old and not backup.exists():
+        backup.write_text(json.dumps(old, indent=2, ensure_ascii=False), encoding="utf-8")
+    state = {"channel": channel, "series_title": series_title, "title": series_title, "background": old.get("last_summary", ""),
+             "characters": old.get("characters", []), "seed": old.get("seed"), "chapter": None, "chapters_done": 0, "chapters": {},
+             "part": 0, "total_parts": chapter_parts(None)}
+    _write_state(channel, state, series_dir)
+    return state
+
+
+def _outline_fallback(premise: str, parts: int, cast: list[dict], state: dict, number: int) -> dict:
+    hero = (cast or state.get("characters") or [{"name": "Kaito"}])[0]["name"]
+    summaries = [
+        f"{hero} finds the first sign that the old world is not dead.", f"{hero} meets someone who knows more than they say.",
+        f"A threat shows itself and {hero} has to choose a side.", "An ally is lost and the cost of the fight becomes real.",
+        f"{hero} follows a trail into forbidden ground.", "A truth about the old power changes what everyone believed.",
+        "A betrayal turns allies into enemies.", f"{hero} faces the guardian of the old power.", f"{hero} pays a price to win.",
+        "The victory opens a door that should have stayed closed.", "A new enemy watches from the dark.", "The chapter ends on a question."]
+    roles = _roles(parts)
+    return {"series_title": state.get("series_title") or (premise.split(".")[0][:50] or "The Last Light"),
+            "chapter_title": f"Chapter {number}: The Road Begins", "summary": f"{hero}'s first chapter.",
+            "beats": [{"role": roles[i], "summary": summaries[i % len(summaries)]} for i in range(parts)], "character_sheet": []}
+
+
+def research_part(channel: str, premise: str, language: str = "English", panels: int = 6, cfg: dict | None = None, client=None,
+                  series_dir: Path = SERIES_DIR, cast_root: Path | None = None) -> dict:
+    """Part M of Chapter N, written from beat M of the chapter outline + the recaps of parts 1..M-1 (continuity).
+    Returns {"comic": {...Comic...}, "chapter": {number, title, part, parts, beat, series_title, final}, "source", "note"}."""
+    cfg = cfg if cfg is not None else _settings()
+    rcfg = cfg.get("research", {})
+    from aurora import cast as cast_mod
+
+    parts = chapter_parts(cfg)
+    cast = cast_mod.load_cast(channel, cast_root or cast_mod.CAST_ROOT) if cfg.get("comic", {}).get("cast_lock", False) else []
+    state = load_series(channel, series_dir)
+    ch = state.get("chapter")
+    key = os.getenv(rcfg.get("api_key_env", "GEMINI_API_KEY"), "").strip()
+    live = client is not None or bool(key)
+    model = rcfg.get("model", "gemini-3.1-flash-lite")
+    if live and client is None:
+        from google import genai
+
+        client = genai.Client(api_key=key)
+    note = "" if live else "no GEMINI_API_KEY"
+    source = "gemini" if live else "topic_fallback"
+    cast_text = cast_mod.prompt_text(cast)
+    if not ch or ch.get("complete"):  # a chapter starts: plan its whole arc first
+        number = int(state.get("chapters_done", 0)) + 1
+        outline = None
+        if live:
+            try:
+                prompt = (f"You plan ORIGINAL anime story chapters (never existing franchises). Series: {state.get('series_title') or premise}. Language: {language}. "
+                          f"Premise: {premise}. Background lore of the series so far: {state.get('background', '')[:600]}. "
+                          f"Earlier chapters: {json.dumps(state.get('chapter_recaps', []), ensure_ascii=False)[:1200]}. {cast_text}"
+                          f"Plan Chapter {number} as exactly {parts} beats, one per daily 30-second part: setup, rising stakes, twist, climax and a final "
+                          "cliffhanger beat, in that order. Return series_title (keep the existing one if given), chapter_title, summary, beats "
+                          "(role + one-sentence summary each) and character_sheet (name + fixed look) for any NEW characters. Safe for all audiences.")
+                got = _call_json(client, model, prompt, ChapterOutline)
+                beats = [b.model_dump() for b in got.beats]
+                if len(beats) > parts:
+                    beats = beats[: parts - 1] + beats[-1:]
+                if len(beats) != parts:
+                    raise ValueError(f"outline has {len(beats)} beats, want {parts}")
+                outline = {**got.model_dump(), "beats": beats}
+            except Exception as exc:  # noqa: BLE001
+                note, source = f"outline fallback: {str(exc)[:90]}", "topic_fallback"
+        if outline is None:
+            outline = _outline_fallback(premise, parts, cast, state, number)
+        series_title = state.get("series_title") or outline["series_title"]
+        ch = {"number": number, "title": outline["chapter_title"], "summary": outline.get("summary", ""), "outline": outline["beats"], "parts": parts,
+              "parts_done": 0, "recaps": [], "rendered": [], "complete": False}
+        state.update(series_title=series_title, title=series_title, chapter=ch)
+        _write_state(channel, state, series_dir)  # the outline persists even if this part's render fails
+    m = int(ch["parts_done"]) + 1
+    beat = ch["outline"][m - 1]
+    series_title = state.get("series_title") or premise[:40]
+    n = max(5, min(int(panels), 10))
+    final = m >= int(ch["parts"])
+    comic = None
+    if live:
+        try:
+            prompt = (f"{COMIC_PROMPT_HEAD.format(language=language)}{cast_text}Series: {series_title}. Chapter {ch['number']}: {ch['title']}. "
+                      f"This is Part {m} of {ch['parts']} (one ~30 s episode). Beat for this part ({beat['role']}): {beat['summary']} "
+                      f"Previous parts so far: {json.dumps(ch['recaps'], ensure_ascii=False)[:1800]}. Series background: {state.get('background', '')[:400]}. "
+                      f"Write exactly {n} panels. Return: series {{title='{series_title}', part={m}, total_parts={ch['parts']}, recap = ONE line of what happens in THIS part}}, "
+                      f"hook (3-6 words that tease this part, for the video title), character_sheet (locked cast verbatim + any new characters with a fixed look; style '{COMIC_STYLE}'), "
+                      "panels (each: shot close-up|wide|medium|action, characters present, image_prompt = the scene only in English, narration of 8-12 words, optional short bubble, "
+                      "sfx/mood tag, action true for fights/chases), "
+                      + ("this is the CHAPTER FINALE: resolve this chapter's main conflict but open a hook for the next chapter; cta = 'Chapter " + str(ch['number']) + " finale'. "
+                         if final else f"end on a cliffhanger that pulls into Part {m + 1}; cta = 'Part {m + 1} tomorrow'. ") + "Safe for all audiences.")
+            got = _call_json(client, model, prompt, Comic)
+            if cast:
+                got.character_sheet = [Character(**c) for c in cast_mod.merge_cast([c.model_dump() for c in got.character_sheet], cast)]
+            got.series.title, got.series.part, got.series.total_parts = series_title, m, int(ch["parts"])
+            got.cta = f"Chapter {ch['number']} finale" if final else f"Part {m + 1} tomorrow"
+            if final:
+                got.cliffhanger = got.cliffhanger or "A new threat rises."
+            comic = got.model_dump()
+        except Exception as exc:  # noqa: BLE001
+            note, source = f"part fallback: {str(exc)[:90]}", "topic_fallback"
+    if comic is None:
+        fb = _comic_fallback(beat["summary"], n, {"characters": state.get("characters"), "title": series_title}, note)
+        fb["series"] = {"title": series_title, "part": m, "total_parts": int(ch["parts"]), "recap": beat["summary"]}
+        fb["cta"] = f"Chapter {ch['number']} finale" if final else f"Part {m + 1} tomorrow"
+        if cast:
+            fb["character_sheet"] = cast_mod.merge_cast(fb["character_sheet"], cast)
+            hero = fb["character_sheet"][0]["name"]
+            old = (state.get("characters") or [{"name": "Kaito"}])[0]["name"]
+            for p in fb["panels"]:
+                p["characters"] = [hero]
+                p["image_prompt"] = p["image_prompt"].replace(old, hero)
+                p["narration"] = p["narration"].replace(old, hero)
+        fb["hook"] = beat["role"].title()
+        comic = Comic.model_validate(fb).model_dump()
+    info = {"number": int(ch["number"]), "title": ch["title"], "part": m, "parts": int(ch["parts"]), "beat": beat, "series_title": series_title, "final": final}
+    return {"comic": comic, "chapter": info, "source": source, "note": note}
+
+
+COMIC_PROMPT_HEAD = ("You write ORIGINAL anime-style motion-comic scripts for vertical short videos (never use existing franchises or their characters). "
+                     "Language of narration, speech bubbles and CTA: {language}. ")
+
+
+def record_part(channel: str, comic: dict, info: dict, rendered: dict, series_dir: Path = SERIES_DIR) -> dict:
+    """After a part rendered OK: advance the chapter (recap for continuity, rendered files, completion). A failed part never calls this."""
+    state = load_series(channel, series_dir)
+    ch = state["chapter"]
+    ch["parts_done"] = int(info["part"])
+    ch["recaps"].append((comic["series"].get("recap") or " ".join(p["narration"] for p in comic["panels"]))[:220])
+    ch["rendered"].append(rendered)
+    state.update(part=int(info["part"]), total_parts=int(info["parts"]), characters=comic["character_sheet"],
+                 last_summary=" ".join(p["narration"] for p in comic["panels"])[:600], cliffhanger=comic.get("cliffhanger", ""))
+    if info["part"] >= info["parts"]:
+        ch["complete"] = True
+        state["chapters_done"] = int(ch["number"])
+        state.setdefault("chapters", {})[str(ch["number"])] = ch
+        state.setdefault("chapter_recaps", []).append(f"Ch.{ch['number']} {ch['title']}: " + " ".join(ch["recaps"])[:500])
+    _write_state(channel, state, series_dir)
+    return state

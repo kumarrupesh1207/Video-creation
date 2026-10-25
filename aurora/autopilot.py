@@ -119,6 +119,8 @@ def render_idea(cfg: dict, switchboard, channel: dict, idea: dict) -> dict:
         side = _json.loads(Path(res["sidecar"]).read_text(encoding="utf-8"))
         idea.update(series=side["series"]["title"], part=side["part"], description=side["caption"],
                     hook=None)  # compose_meta -> "<Series> – Part N"
+        if side.get("chapter"):  # chapter mode: the sidecar already holds "<Series> – Ch.N Part M: <hook>"
+            idea.update(title=side["title"], chapter=side["chapter"]["number"], playlist=side.get("playlist"))
         return side
     if not idea.get("image_prompt"):  # topics.txt stub: let autorun's own LLM step write the prompt
         return autorun.process_topic(cfg, switchboard, idea["topic"], a, out_dir)
@@ -268,6 +270,8 @@ def compose_meta(idea: dict, sha256: str) -> dict:
     series, part = idea.get("series"), idea.get("part")
     base = idea.get("title") or idea["topic"]
     title = f"{series} – Part {part}" + (f": {idea['hook']}" if idea.get("hook") else "") if series and part else base
+    if idea.get("chapter") and idea.get("title"):  # "<Series> – Ch.<N> Part <M>: <hook>"
+        title = idea["title"]
     tags = list(dict.fromkeys(list(idea.get("series_hashtags", [])) + list(idea.get("hashtags", []))))
     ai = idea.get("ai_disclosure", True)
     desc = "\n\n".join(x for x in (idea.get("description", ""), " ".join(t if t.startswith("#") else f"#{t}" for t in tags),

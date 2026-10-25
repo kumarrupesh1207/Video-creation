@@ -1,0 +1,17 @@
+# Chapters: Series -> Chapter N -> Part M (+ one 16:9 compilation per chapter)
+
+**Problem:** 2-part stories were too short. **Fix:** a chapter has >= 10 parts (`comic.chapter_parts`, min 10, enforced by `research.chapter_parts`),
+each one ~30 s comic Short (unchanged format, locked cast).
+
+- Outline first: `research.research_part` asks Gemini for 10-12 beats (setup -> rising stakes -> twist -> climax -> cliffhanger) when a chapter
+  starts and saves it in `outputs/series/<channel>.json` (`chapter.outline`) before any image is drawn. Part M = beat M + one-line recaps of parts 1..M-1.
+- State advances only in `research.record_part`, after a part rendered and validated. A failed render returns the same part next time.
+- Titles `"<Series> – Ch.N Part M: <hook>"`; end cards "Part M+1 tomorrow" / "Chapter N finale"; cover "CH.N PART M".
+- `aurora/chapter.py`: after the last part, `compile_chapter` cuts each Short's story window (panel_times: first panel start .. last panel end; the cut
+  starts at the panel start because its voice begins 0.05 s later - starting at +XF clipped the first word), reframes 9:16 -> 1920x1080 over a blurred copy,
+  adds open/finale cards, joins with stream copy. SRT from narration timings, one YouTube chapter marker per part, thumbnail (face-aware crop),
+  sidecar `outputs/final/<channel>/chapters/chN/chapter.json` (`kind: chapter`, `publish_at_hint` = next Saturday 18:00 IST, >= 6 h after completion).
+  0 NIM credits. A failure never fails the part: `python -m aurora.chapter compile --channel <name>` (`pending` lists chapters to build).
+- Replaces the weekly `aurora.episode` long video (`long_episode` commented out in config.yaml; the module stays for manual use).
+- Pilots: `research.reset_for_chapters` backs up the old state to `<channel>.pilot-backup.json`, keeps cast/seed and the old story as `background` only.
+- Gotcha: the sidecar's `character_sheet` entries need `description` (not `look`) for `Comic` validation.

@@ -644,7 +644,7 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode=None, 
 def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None = None, language: str = "English",
                     panels: int = 6, voice: str = "en-US-AvaNeural", comic: dict | None = None, switchboard=None,
                     music: bool = True, series_dir: Path | None = None, resolution: tuple[int, int] | None = None,
-                    client=None, image_mode: str | None = None) -> dict:
+                    client=None, image_mode: str | None = None, chapter: dict | None = None) -> dict:
     """Research (series-aware) -> panel images (NIM -> local ComfyUI anime) -> render -> validate -> sidecar -> save series state.
 
     Returns {"video", "sidecar", "title", "caption", "part", "source", "seconds"}. Raises on validation failure."""
@@ -655,7 +655,10 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
     cfg = cfg if cfg is not None else yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
     sdir = Path(series_dir) if series_dir else research.SERIES_DIR
     source = "given"
-    if comic is None:
+    if comic is None and cfg.get("comic", {}).get("chapter_parts"):  # Series -> Chapter N -> Part M (>= 10 parts per chapter)
+        res = research.research_part(channel, premise, language, panels, cfg=cfg, client=client, series_dir=sdir)
+        comic, source, chapter = res["comic"], res["source"], res["chapter"]
+    elif comic is None:
         res = research.research_comic(channel, premise, language, panels, cfg=cfg, client=client, series_dir=sdir)
         comic, source = res["comic"], res["source"]
     state = research.load_series(channel, sdir)
@@ -665,7 +668,8 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
 
         switchboard = ImageSwitchboard(cfg)
     part = comic["series"]["part"]
-    slug = re.sub(r"[^a-z0-9]+", "-", f"{channel}-part{part}-{comic['series']['title']}".lower()).strip("-")[:60]
+    ptag = f"ch{chapter['number']}-part{part}" if chapter else f"part{part}"
+    slug = re.sub(r"[^a-z0-9]+", "-", f"{channel}-{ptag}-{comic['series']['title']}".lower()).strip("-")[:60]
     job = f"comic_{datetime.now():%Y%m%d_%H%M%S}_{slug[:24]}"
     resolution = tuple(resolution or cfg.get("comic", {}).get("nim_resolution", [1024, 1088]))  # ~ the art window's shape
     from aurora import cast as cast_mod
@@ -677,12 +681,16 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
     out_dir.mkdir(parents=True, exist_ok=True)
     mp4 = out_dir / f"{slug}.mp4"
     ffmpeg = FFmpegKenBurns().ffmpeg
+    extra = {}
+    if chapter:  # end cards "Part M+1 tomorrow" / "Chapter N finale"; cover "CH.N PART M"
+        extra = {"end_card": research.end_card_for(chapter["number"], chapter["part"], chapter["parts"]), "cover_label": f"CH.{chapter['number']} PART"}
     info = render_comic(ffmpeg, comic, images, mp4, ROOT / "outputs" / "comic_work" / slug, voice, music, language,
-                        layout=cfg.get("comic", {}).get("layout"))
+                        layout=cfg.get("comic", {}).get("layout"), **extra)
     rep = validate_video(mp4, W, H, fps=FPS, require_audio=True, deep=True)
     if not rep.ok:
         raise RuntimeError(f"comic reel failed validation: {rep.errors}")
-    title = f"{comic['series']['title']} - Part {part}"
+    title = (research.part_title(comic["series"]["title"], chapter["number"], part, comic.get("hook", "")) if chapter
+             else f"{comic['series']['title']} - Part {part}")
     caption = f"{comic['cliffhanger'] or comic['series']['recap']} {comic['cta']}".strip()
     side = {"status": "ok", "format": "comic", "channel": channel, "title": title, "part": part, "caption": caption,
             "source": source, "seed": seed, "series": comic["series"], "image_mode": mode_used, "image_note": img_note,
@@ -691,7 +699,25 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
             "fps": rep.fps, "duration_secs": rep.duration_secs, "has_audio": rep.has_audio, "md5": rep.md5, "sha256": rep.sha256}}
     if lock:  # characters that debuted in this reel join the permanent cast
         side["cast"] = {"locked": [m["name"] for m in cast_mod.load_cast(channel)], "added": cast_mod.save_new_members(channel, comic, images)}
-    mp4.with_suffix(".json").write_text(json.dumps(side, indent=2, ensure_ascii=False), encoding="utf-8")
-    research.save_series(channel, comic, sdir)
-    return {"video": str(mp4), "sidecar": str(mp4.with_suffix(".json")), "title": title, "caption": caption, "part": part,
-            "source": source, "seconds": info["seconds"]}
+    if chapter:
+        side.update(chapter=chapter, playlist=comic["series"]["title"], hook=comic.get("hook", ""), panel_times=info["panel_times"],
+                    panel_images=[str(p) for p in images], cover_s=COVER_S)
+    sidecar = mp4.with_suffix(".json")
+    sidecar.write_text(json.dumps(side, indent=2, ensure_ascii=False), encoding="utf-8")
+    compiled = None
+    if chapter:
+        research.record_part(channel, comic, chapter, {"part": part, "video": str(mp4), "sidecar": str(sidecar), "title": title}, sdir)
+        if chapter["final"]:  # the chapter is complete: build the 16:9 compilation from the cached parts (0 NIM credits)
+            try:
+                from aurora import chapter as chapter_mod
+
+                compiled = chapter_mod.compile_chapter(channel, chapter["number"], cfg, series_dir=sdir)
+            except Exception as exc:  # noqa: BLE001 - never fail the part; retry with `python -m aurora.chapter compile`
+                print(f"[comic] WARNING: chapter compilation failed ({str(exc)[:160]}); retry: python -m aurora.chapter compile --channel {channel}")
+                compiled = {"error": str(exc)[:300]}
+            side["chapter_compilation"] = compiled
+            sidecar.write_text(json.dumps(side, indent=2, ensure_ascii=False), encoding="utf-8")
+    else:
+        research.save_series(channel, comic, sdir)
+    return {"video": str(mp4), "sidecar": str(sidecar), "title": title, "caption": caption, "part": part,
+            "source": source, "seconds": info["seconds"], **({"chapter": chapter} if chapter else {})}

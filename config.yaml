@@ -41,7 +41,7 @@ audio:                             # voiceover engines: see assets/voices/README
 research:                          # aurora/research.py (Gemini text, free tier; key from AI Studio)
   model: "gemini-3.1-flash-lite"    # free-tier text model id; change here if Google retires it
   grounding: false                 # Google Search grounding is paid-only
-  max_parts: 2                     # comic stories are 1-2 parts
+  max_parts: 2 # LEGACY (non-chapter stories only); chapters use comic.chapter_parts                     # comic stories are 1-2 parts
   api_key_env: "GEMINI_API_KEY"
 
 comic:                             # aurora/comic.py image settings (ComfyUI first, NIM fallback)
@@ -58,6 +58,7 @@ comic:                             # aurora/comic.py image settings (ComfyUI fir
   comfy_timeout_sec: 1800          # per-image floor; later panels get max(floor, 3 x median of the images so far)
   timeout_multiplier: 3
   cast_lock: true                  # channel casts in assets/characters/<channel>/ are reused verbatim (never a new look)
+  chapter_parts: 10                # Series -> Chapter N -> Part M: parts per chapter (minimum 10); one ~30 s Short each
   nim_comfy_fallback: false        # nim mode never touches ComfyUI; true = after a NIM failure, preflight ComfyUI then draw the rest with IP-Adapter
   image_mode: nim                  # nim (default) | auto (ComfyUI first) | comfy (ComfyUI only)
   max_nim_credits_per_reel: 8      # NIM credits one comic reel may use (panels per reel)
@@ -259,7 +260,7 @@ autopilot:
       platforms: [youtube]
       reels_per_day: 2        # 2 Shorts/day
       slots: ["12:30", "18:30"]   # IST
-      long_episode: {weekday: saturday, time: "18:00"}   # 1 long episode / week (aurora/episode.py), uploaded ahead like Shorts
+      # long_episode: {weekday: saturday, time: "18:00"}   # OFF: replaced by the Saturday 18:00 CHAPTER COMPILATION (aurora/chapter.py); aurora/episode.py stays for manual use
       publish_enabled: true   # per-channel go-live (global autopilot.publish.enabled stays false)
       motion: ai
       voice: en-US-AvaNeural
