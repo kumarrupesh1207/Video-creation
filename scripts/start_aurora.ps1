@@ -2,10 +2,11 @@
 # Commands mirror .claude/launch.json. Usage (normally via start_aurora.bat / stop_aurora.bat):
 #   start_aurora.ps1                 launch ONE hidden, detached supervisor for all three services, open the UI
 #   start_aurora.ps1 -Stop           stop only these three (ComfyUI is spared while its queue is busy)
+#   start_aurora.ps1 -Ensure         start the supervisor only if missing or its log is >3 min stale; no waiting, no browser
 #   start_aurora.ps1 -Supervise all  internal: the supervisor loop
 # The supervisor is created through WMI (Win32_Process.Create) so it is NOT a child of the caller:
 # closing the launching console / killing the caller's process tree / job object does not kill it.
-param([switch]$Stop, [string]$Supervise = "", [switch]$NoBrowser)
+param([switch]$Stop, [string]$Supervise = "", [switch]$NoBrowser, [switch]$Ensure)
 
 $ErrorActionPreference = "Continue"
 $Root = Split-Path -Parent $PSScriptRoot
@@ -118,14 +119,23 @@ if ($Stop) {
 
 # ---- start -----------------------------------------------------------------------------------
 New-Item -ItemType Directory -Force $Logs | Out-Null
-if (Get-Supervisors) {
-    Write-Host "supervisor already running"
-} else {
+function Start-Supervisor {
     $cmd = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Supervise all"
     $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd; CurrentDirectory = $Root }
-    if ($r.ReturnValue -eq 0) { Write-Host "supervisor started (pid $($r.ProcessId)); logs\supervisor.log" }
-    else { Write-Warning "could not start supervisor (WMI code $($r.ReturnValue))"; exit 1 }
+    if ($r.ReturnValue -eq 0) { Write-Host "supervisor started (pid $($r.ProcessId)); logs\supervisor.log"; $true }
+    else { Write-Warning "could not start supervisor (WMI code $($r.ReturnValue))"; $false }
 }
+if ($Ensure) {
+    # idempotent: used by the logon task and before scheduled renders
+    $log = Join-Path $Logs "supervisor.log"
+    $fresh = (Test-Path $log) -and (((Get-Date) - (Get-Item $log).LastWriteTime).TotalSeconds -lt 180)
+    $sup = @(Get-Supervisors)
+    if ($sup.Count -gt 0 -and $fresh) { Write-Host "supervisor healthy"; exit 0 }
+    $sup | ForEach-Object { taskkill /PID $_.ProcessId /F | Out-Null }   # hung/stale: replace (children keep running)
+    if (Start-Supervisor) { exit 0 } else { exit 1 }
+}
+if (Get-Supervisors) { Write-Host "supervisor already running" }
+elseif (-not (Start-Supervisor)) { exit 1 }
 
 $deadline = (Get-Date).AddSeconds(180)
 foreach ($name in $Order) {
