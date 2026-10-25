@@ -63,7 +63,7 @@ def test_seo_pick_best_chapters_and_description():
     assert "AI-generated" in d and "Chapters:" in d and d.startswith("Hook.")
 
 
-def test_seo_build_metadata_with_mocked_gemini_and_search():
+def test_seo_build_metadata_with_mocked_gemini_and_search(workspace_tmp_path):
     svc = MagicMock()
     svc.search.return_value.list.return_value.execute.return_value = {"items": [{"id": {"videoId": "v1"}, "snippet": {"title": "Best anime story aether"}}]}
     svc.videos.return_value.list.return_value.execute.return_value = {"items": [{"snippet": {"tags": ["Anime", "aether"]}}]}
@@ -71,7 +71,8 @@ def test_seo_build_metadata_with_mocked_gemini_and_search():
     client.models.generate_content.return_value.text = json.dumps(
         {"titles": ["Short", "Kaelen Enters the Aether: Anime Story of Power"], "hook": "He sees it."})
     budget = MagicMock()
-    m = seo.build_metadata("t", "Echoes of the Aether", 2, "Recap text", ["#anime"], "Plain", svc, budget, client)
+    m = seo.build_metadata("t", "Echoes of the Aether", 2, "Recap text", ["#anime"], "Plain", svc, budget, client,
+                           cache_dir=workspace_tmp_path / "seo")
     assert m["title"].endswith("Part 2") and m["source"] == "gemini" and "He sees it." in m["description"]
     budget.spend.assert_any_call("search.list")
     none = seo.build_metadata("t", "S", 1, "r", fallback_title="Plain title", client=None, cfg=NOKEY)

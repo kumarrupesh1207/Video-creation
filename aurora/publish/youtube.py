@@ -115,7 +115,7 @@ def build_service(channel: str, interactive: bool = False, expected_handle: str 
 def build_body(meta: dict, privacy: str = "public", publish_at: str | None = None) -> dict:
     tags = [t.lstrip("#") for t in meta.get("tags", [])]
     desc = meta.get("description", "")
-    if "#shorts" not in desc.lower():
+    if "#shorts" not in desc.lower() and meta.get("kind", "short") == "short" and (meta.get("duration_secs") or 0) < 180:
         desc = f"{desc}\n\n#Shorts".strip()
     status = {"privacyStatus": privacy, "selfDeclaredMadeForKids": False,
               "containsSyntheticMedia": bool(meta.get("ai_disclosure", True))}

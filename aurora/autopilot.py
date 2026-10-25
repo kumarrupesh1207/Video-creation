@@ -125,6 +125,7 @@ def render_idea(cfg: dict, switchboard, channel: dict, idea: dict) -> dict:
                                   switchboard=switchboard)
         side = _json.loads(Path(res["sidecar"]).read_text(encoding="utf-8"))
         idea["story"] = res.get("story") or side.get("story")  # story-pack slug: drives per-series slots / enabled switch
+        idea.update({k: v for k, v in idea_from_sidecar(side).items() if k not in ("topic", "title", "hashtags")})
         idea.update(series=side["series"]["title"], part=side["part"], description=side["caption"],
                     hook=None)  # compose_meta -> "<Series> – Part N"
         if side.get("chapter"):  # chapter mode: the sidecar already holds "<Series> – Ch.N Part M: <hook>"
@@ -328,8 +329,35 @@ def _sidecar_extras(sidecar: dict) -> dict:
             "chapters": sidecar.get("chapters")}
 
 
+COMIC_HASHTAGS = ["#anime", "#animeshorts", "#originalstory"]
+
+
+def idea_from_sidecar(side: dict) -> dict:
+    """Everything SEO needs about one comic part, read from its render sidecar (also used to regenerate metadata later)."""
+    chap = side.get("chapter") if isinstance(side.get("chapter"), dict) else {}
+    ser = side.get("series") if isinstance(side.get("series"), dict) else {}
+    return {"topic": side.get("title", ""), "title": side.get("title", ""), "series": ser.get("title") or chap.get("series_title"),
+            "part": int(side["part"]) if side.get("part") else None, "chapter": chap.get("number"), "parts": chap.get("parts"),
+            "playlist": side.get("playlist"), "story": side.get("story"), "recap": ser.get("recap", ""),
+            "beat": (chap.get("beat") or {}).get("summary", ""), "caption": side.get("caption", ""), "hook": side.get("hook") or "",
+            "hashtags": list(COMIC_HASHTAGS)}
+
+
+def _niche_keywords(ch: dict, idea: dict) -> list[str] | None:
+    """Curated niche phrases: channel `seo_keywords`, else the series pack's `seo_keywords`, else the module default."""
+    if ch.get("seo_keywords"):
+        return list(ch["seo_keywords"])
+    try:
+        from aurora.story import load_pack
+
+        return list(load_pack(idea["story"]).get("seo_keywords") or []) or None if idea.get("story") else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def apply_seo(cfg: dict, ch: dict, idea: dict, meta: dict, service_factory=None, budget=None, client=None) -> dict:
-    """Replace title/description/tags with SEO-researched ones. Never raises: any failure keeps the plain metadata."""
+    """Replace description/tags (and the title of non-chapter items) with SEO-researched ones. Never raises: any failure keeps
+    the plain metadata. Research or Gemini trouble is logged loudly and the seo.py template is used instead."""
     try:
         from aurora.publish import seo, youtube as yt
 
@@ -338,15 +366,41 @@ def apply_seo(cfg: dict, ch: dict, idea: dict, meta: dict, service_factory=None,
             service = (service_factory or (lambda c: yt.build_service(c, expected_handle=ch.get("expected_handle"))))(ch["name"])
         except Exception as e:  # noqa: BLE001 - no token yet: SEO still works without competitor data
             print(f"[autopilot] {ch['name']}: SEO without competitor search ({e})", file=sys.stderr)
-        res = seo.build_metadata(idea.get("topic", ""), idea.get("series"), idea.get("part"), meta.get("description", "")[:600],
-                                 hashtags=meta.get("tags"), fallback_title=meta["title"], service=service, budget=budget,
-                                 client=client, cfg=cfg, duration_secs=meta.get("duration_secs"), chapters=meta.get("chapters"),
-                                 chapter=idea.get("chapter"))
+        res = seo.build_metadata(idea.get("topic", ""), idea.get("series"), idea.get("part"), idea.get("recap") or idea.get("description", ""),
+                                 hashtags=idea.get("hashtags") or [h for h in meta.get("tags", []) if str(h).startswith("#")],
+                                 fallback_title=meta["title"], service=service, budget=budget, client=client, cfg=cfg,
+                                 duration_secs=meta.get("duration_secs"), chapters=meta.get("chapters"), chapter=idea.get("chapter"),
+                                 beat=idea.get("beat", ""), caption=idea.get("caption", ""), parts=idea.get("parts"),
+                                 playlist=idea.get("playlist") or meta.get("playlist"), niche_keywords=_niche_keywords(ch, idea),
+                                 hook=idea.get("hook") or "")
+        for w in res.get("warnings", []):
+            print(f"[autopilot] {ch['name']}: SEO note: {w}", file=sys.stderr)
         title = meta["title"] if idea.get("chapter") and idea.get("part") else res["title"]  # "<Series> – Ch.N Part M: hook" is fixed, never rewritten
         return {**meta, "title": title, "description": res["description"], "tags": res["tags"] or meta["tags"]}
     except Exception as e:  # noqa: BLE001
         print(f"[autopilot] {ch['name']}: SEO failed, using plain metadata: {e}", file=sys.stderr)
         return meta
+
+
+def reseo_item(queue: PublishQueue, item_id: str, cfg: dict, service_factory=None, budget=None, client=None, apply: bool = True) -> dict:
+    """Regenerate the SEO metadata of a not-yet-uploaded item from its render sidecar (no re-render, no upload).
+    Returns {"before": {...}, "after": {...}}; with apply=False nothing is written."""
+    import json as _json
+
+    it = queue.get(item_id)
+    if not it or it["status"] not in ("scheduled", "vetoed", "pending_approval"):
+        raise ValueError("only items that are not uploaded yet can be re-SEO'd")
+    side = _json.loads(Path(it["path"]).with_suffix(".json").read_text(encoding="utf-8"))
+    ch = next((c for c in channels_from(cfg) if c["name"] == it["channel"]), {"name": it["channel"]})
+    idea = idea_from_sidecar(side)
+    meta = {"title": it["title"], "description": it.get("description", ""), "tags": idea["hashtags"], "duration_secs": it.get("duration_secs"),
+            "chapters": it.get("chapters"), "playlist": it.get("playlist")}
+    new = apply_seo(cfg, ch, idea, meta, service_factory, budget, client)
+    before = {k: it.get(k) for k in ("title", "description", "tags")}
+    after = {k: new[k] for k in ("title", "description", "tags")}
+    if apply:
+        queue._update(item_id, **after)
+    return {"before": before, "after": after}
 
 
 def compose_meta(idea: dict, sha256: str) -> dict:
@@ -822,7 +876,7 @@ def main(argv: list[str] | None = None) -> int:
     load_env()
     ap = argparse.ArgumentParser(description="Aurora autopilot")
     ap.add_argument("cmd", choices=["render", "publish-due", "publish-one", "analytics", "status", "veto", "approve", "comments",
-                                    "comment-approve", "comment-reject", "weekly-report", "approvals", "daily-report"])
+                                    "comment-approve", "comment-reject", "weekly-report", "approvals", "daily-report", "reseo"])
     ap.add_argument("--reply", help="comment-approve: edited reply text")
     ap.add_argument("--privacy", default="private", choices=["private", "unlisted", "public"], help="publish-one only")
     ap.add_argument("--i-confirm", action="store_true", help="publish-one: required; bypasses the kill-switch for this ONE item")
@@ -850,6 +904,15 @@ def main(argv: list[str] | None = None) -> int:
                           dry_run=a.dry_run, budget=budget))
         if not a.dry_run:
             print(f"[autopilot] daily report: {write_daily_report(q, budget)}")
+    elif a.cmd == "reseo":
+        import json as _json
+
+        from aurora.publish.quota import QuotaBudget
+
+        if not a.id:
+            ap.error("queue id required")
+        out = reseo_item(q, a.id, cfg, budget=QuotaBudget(), apply=not a.dry_run)
+        print(_json.dumps(out["after"], indent=2, ensure_ascii=False))
     elif a.cmd == "daily-report":
         from aurora.publish.quota import QuotaBudget
 
