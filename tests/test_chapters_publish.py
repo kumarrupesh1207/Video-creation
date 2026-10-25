@@ -92,22 +92,25 @@ def _chapter_json(root, n, ok=True):
 
 def test_render_chapters_compiles_pending_then_queues_each_once(q, workspace_tmp_path):
     root = workspace_tmp_path / "chapters"
-    _chapter_json(root, 1)
-    _chapter_json(root, 2, ok=False)
+    _chapter_json(root / "shinobi", 1)
+    _chapter_json(root / "shinobi", 2, ok=False)
     compiled = []
-    out = autopilot.render_chapters(CFG, q, CH, compile_fn=lambda c, n, cfg: compiled.append(n), pending_fn=lambda c: [3], root=root)
-    assert compiled == [3] and len(out) == 1
+    keys = {"shinobi": None}
+    out = autopilot.render_chapters(CFG, q, CH, compile_fn=lambda c, n, cfg: compiled.append((c, n)), pending_fn=lambda c: [3], root=root,
+                                    state_keys=keys)
+    assert compiled == [("shinobi", 3)] and len(out) == 1
     it = out[0]
     assert it["kind"] == "chapter" and it["chapter"] == 1 and it["playlist"] == "Echoes" and it["series"] == "Echoes"
     assert it["publish_at"].startswith("2026-10-31T12:30") and it["thumbnail"] == "t.jpg" and it["duration_secs"] == 300
-    assert autopilot.render_chapters(CFG, q, CH, compile_fn=lambda *a: None, pending_fn=lambda c: [], root=root) == []  # not twice
+    assert autopilot.render_chapters(CFG, q, CH, compile_fn=lambda *a: None, pending_fn=lambda c: [], root=root, state_keys=keys) == []  # not twice
 
 
 def test_failed_chapter_compile_does_not_stop_queueing(q, workspace_tmp_path):
     def boom(c, n, cfg):
         raise RuntimeError("ffmpeg failed")
 
-    assert autopilot.render_chapters(CFG, q, CH, compile_fn=boom, pending_fn=lambda c: [1], root=workspace_tmp_path / "none") == []
+    assert autopilot.render_chapters(CFG, q, CH, compile_fn=boom, pending_fn=lambda c: [1], root=workspace_tmp_path / "none",
+                                     state_keys={"shinobi": None}) == []
 
 
 def test_seo_keeps_chapter_markers_in_titles():
@@ -166,3 +169,18 @@ def test_quota_budget_serves_soonest_slot_and_holds_the_latest_without_moving_sl
     assert sorted(r["scheduled"]) == sorted([e1["id"], v["id"]])  # the slots that come first are served first
     assert r["deferred"] == [e2["id"]] and q.get(e2["id"])["status"] == "scheduled"  # lowest priority waits for the next budget day
     assert q.get(e2["id"])["publish_at"] == slot_e2 and q.get(e2["id"])["attempts"] == 0  # slot untouched, nothing burned
+
+
+def test_chapters_are_compiled_per_series_state_key(q, workspace_tmp_path):
+    ch = {**SERIES_CH, "series": [{"slug": "echoes-of-the-aether", "per_day": 2}, {"slug": "veer", "per_day": 1}, {"slug": "off", "per_day": 1, "enabled": False}]}
+    packs = {"echoes-of-the-aether": {"state_key": "shinobi"}, "veer": {"state_key": "veer"}}
+    keys = autopilot.chapter_state_keys(ch, load_pack=lambda slug: packs[slug])
+    assert keys == {"shinobi": None, "veer": "veer"} or keys == {"shinobi": "echoes-of-the-aether", "veer": "veer"}  # disabled series: none
+    assert "off" not in keys.values()
+    root = workspace_tmp_path / "chapters"
+    _chapter_json(root / "veer", 1)
+    compiled = []
+    out = autopilot.render_chapters(CFG, q, ch, compile_fn=lambda c, n, cfg: compiled.append(c), pending_fn=lambda c: [1] if c == "veer" else [],
+                                    root=root, state_keys=keys)
+    assert compiled == ["veer"] and len(out) == 1 and out[0]["story"] == "veer" and out[0]["channel"] == "shinobi"
+    assert autopilot.chapter_state_keys(ch, load_pack=lambda slug: (_ for _ in ()).throw(ValueError("bad pack"))) == {"shinobi": None}

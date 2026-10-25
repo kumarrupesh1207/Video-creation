@@ -161,44 +161,65 @@ def shorts_needed(queue: PublishQueue, ch: dict, now: datetime | None = None) ->
     return max(0, min(per_day - made_today, per_day * int(ch.get("lookahead_days", 2)) - pending))
 
 
+def chapter_state_keys(ch: dict, load_pack=None) -> dict[str, str | None]:
+    """{state_key: story slug} to compile chapters for: the channel's own state (legacy / Echoes, key = channel name) plus the
+    state key of every ENABLED story-pack series (Veer has its own). Disabled series are not compiled or queued."""
+    keys: dict[str, str | None] = {ch["name"]: None}
+    for e in ch.get("series") or []:
+        e = {"slug": e} if isinstance(e, str) else e
+        if e.get("enabled", True) is False or int(e.get("per_day", 1)) <= 0:
+            continue
+        try:
+            if load_pack is None:
+                from aurora.story import load_pack
+            keys[load_pack(e["slug"])["state_key"]] = e["slug"]
+        except Exception as ex:  # noqa: BLE001 - a broken pack must not stop the other series
+            print(f"[autopilot] {ch['name']}: series {e.get('slug')} skipped for chapters: {ex}", file=sys.stderr)
+    return keys
+
+
 def render_chapters(cfg: dict, queue: PublishQueue, ch: dict, compile_fn=None, pending_fn=None, root: Path | None = None,
-                    seo_service_factory=None) -> list[dict]:
+                    seo_service_factory=None, state_keys: dict | None = None) -> list[dict]:
     """Compile chapters whose parts are all done (0 NIM credits), then queue every chapter.json not queued yet, at its
     publish_at_hint (Saturday 18:00 IST, never inside the veto window). Its playlist is the series playlist, after its parts."""
     import json as _json
 
     try:
         from aurora import chapter as chapter_mod
-
-        for n in (pending_fn or chapter_mod.pending)(ch["name"]):
-            try:
-                (compile_fn or chapter_mod.compile_chapter)(ch["name"], n, cfg)
-            except Exception as e:  # noqa: BLE001 - never blocks the daily Shorts
-                print(f"[autopilot] {ch['name']}: chapter {n} compile failed: {e}", file=sys.stderr)
-                _event("chapter_compile_failed", ch["name"], f"chapter {n}: {e}")
-        base = Path(root) if root else chapter_mod.FINAL_ROOT / ch["name"] / "chapters"
     except Exception as e:  # noqa: BLE001
         print(f"[autopilot] {ch['name']}: chapters unavailable: {e}", file=sys.stderr)
         return []
     out = []
-    for f in sorted(base.glob("ch*/chapter.json")):
-        side = _json.loads(f.read_text(encoding="utf-8"))
-        if side.get("status") != "ok":
+    for key, slug in (state_keys if state_keys is not None else chapter_state_keys(ch)).items():
+        try:
+            for n in (pending_fn or chapter_mod.pending)(key):
+                try:
+                    (compile_fn or chapter_mod.compile_chapter)(key, n, cfg)
+                except Exception as e:  # noqa: BLE001 - never blocks the daily Shorts
+                    print(f"[autopilot] {ch['name']}/{key}: chapter {n} compile failed: {e}", file=sys.stderr)
+                    _event("chapter_compile_failed", ch["name"], f"{key} chapter {n}: {e}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[autopilot] {ch['name']}/{key}: chapters unavailable: {e}", file=sys.stderr)
             continue
-        meta = {"title": side["title"][:100], "description": side["description"], "ai_disclosure": True, "kind": "chapter",
-                "tags": [k for k in side.get("keywords", [])] + [h.lstrip("#") for h in side.get("hashtags", [])],
-                "sha256": side["video"]["sha256"], "captions_srt": side.get("captions_srt"), "thumbnail": side.get("thumbnail"),
-                "duration_secs": side["video"]["duration_secs"], "chapters": side.get("chapters"), "series": side.get("series"),
-                "playlist": side.get("playlist") or side.get("series"), "chapter": side.get("chapter"),
-                "publish_at_hint": side.get("publish_at_hint")}
-        if ch.get("seo"):
-            meta = apply_seo(cfg, ch, {"topic": side["title"], "series": side.get("series"), "chapter": side.get("chapter")}, meta,
-                             seo_service_factory)
-        for platform in ch["platforms"]:
-            item = queue.enqueue(ch["name"], side["video"]["path"], meta, platform=platform)
-            if item:
-                out.append(item)
-                print(f"[autopilot] {ch['name']}/{platform}: queued CHAPTER {item['id']} (publish_at {item['publish_at']})")
+        base = Path(root) / key if root else chapter_mod.FINAL_ROOT / key / "chapters"
+        for f in sorted(base.glob("ch*/chapter.json")):
+            side = _json.loads(f.read_text(encoding="utf-8"))
+            if side.get("status") != "ok":
+                continue
+            meta = {"title": side["title"][:100], "description": side["description"], "ai_disclosure": True, "kind": "chapter",
+                    "tags": [k for k in side.get("keywords", [])] + [h.lstrip("#") for h in side.get("hashtags", [])],
+                    "sha256": side["video"]["sha256"], "captions_srt": side.get("captions_srt"), "thumbnail": side.get("thumbnail"),
+                    "duration_secs": side["video"]["duration_secs"], "chapters": side.get("chapters"), "series": side.get("series"),
+                    "playlist": side.get("playlist") or side.get("series"), "chapter": side.get("chapter"),
+                    "publish_at_hint": side.get("publish_at_hint"), "story": side.get("story") or slug}
+            if ch.get("seo"):
+                meta = apply_seo(cfg, ch, {"topic": side["title"], "series": side.get("series"), "chapter": side.get("chapter")}, meta,
+                                 seo_service_factory)
+            for platform in ch["platforms"]:
+                item = queue.enqueue(ch["name"], side["video"]["path"], meta, platform=platform)
+                if item:
+                    out.append(item)
+                    print(f"[autopilot] {ch['name']}/{platform}: queued CHAPTER {item['id']} (publish_at {item['publish_at']})")
     return out
 
 
