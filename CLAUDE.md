@@ -45,6 +45,7 @@ Runs on a CPU-only Windows PC (Ryzen 5 5600G, 16 GB, no NVIDIA GPU). History/sta
 - Write files as UTF-8 with the Write/Edit tools — PowerShell `>`/Out-File wrote UTF-16 NULs into a test (daf2fc0).
 - Tokens/client secrets live in git-ignored `outputs/tokens/` (c16483c).
 - Stories are Series -> Chapter N -> Part M, >= 10 parts per chapter (`comic.chapter_parts`); the finished chapter is compiled to ONE 16:9 video from cached parts, 0 NIM credits (`aurora/chapter.py`); the weekly `aurora.episode` long video is off.
+- Stories are CONTENT, not code: a new series, chapter or character must never need a code change. Story packs (series meta, characters, chapter scripts, world rules) are data files read by a generic engine and validated before render (user requirement, 2026-10-25; see docs/STORY_PACKS.md once built).
 - Core architecture rules (cheapest tier first, structured JSON logs, fail loud) — `AURORA.md` "CORE ARCHITECTURE RULES".
 
 ## Workflow (Compound loop)
