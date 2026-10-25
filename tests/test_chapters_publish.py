@@ -117,3 +117,52 @@ def test_seo_keeps_chapter_markers_in_titles():
     assert part["title"].endswith("Ch.1 Part 3")
     whole = seo.build_metadata("t", "Echoes", None, "recap", client=client, chapter=1)
     assert whole["title"].endswith("Chapter 1")
+
+
+# ---- multi-series cadence: Echoes 12:30/18:30, Veer 21:00 (off until enabled) ----------------
+SERIES_CH = {"name": "shinobi", "platforms": ["youtube"], "format": "comic", "reels_per_day": 2, "publish_enabled": True,
+             "series": [{"slug": "echoes", "per_day": 2, "slots": ["12:30", "18:30"]},
+                        {"slug": "veer", "per_day": 1, "enabled": False, "slots": ["21:00"]}]}
+SERIES_CFG = {"autopilot": {"publish": {"enabled": False, "upload_ahead": True, "veto_hours": 6, "slots": ["19:00"]}, "channels": [SERIES_CH]}}
+
+
+def test_per_series_slots_and_enabled_switch(workspace_tmp_path):
+    q = PublishQueue(workspace_tmp_path / "s.json", SERIES_CFG)
+    e = q.enqueue("shinobi", mp4(workspace_tmp_path, "e"), {"title": "e", "story": "echoes"}, now=NOW)
+    v = q.enqueue("shinobi", mp4(workspace_tmp_path, "v"), {"title": "v", "story": "veer"}, now=NOW)
+    assert datetime.fromisoformat(e["publish_at"]).astimezone(timezone(timedelta(hours=5, minutes=30))).strftime("%H:%M") == "18:30"
+    assert datetime.fromisoformat(v["publish_at"]).astimezone(timezone(timedelta(hours=5, minutes=30))).strftime("%H:%M") == "21:00"
+    up = MagicMock(return_value="V1")
+    r = autopilot.publish_due(q, now=NOW + timedelta(days=2), service_factory=lambda c: object(), uploader=up)
+    assert r["skipped_disabled"] == [v["id"]] and up.call_count == 1  # Veer is off: its part is never uploaded
+    assert q.get(v["id"])["status"] == "scheduled"
+    SERIES_CH["series"][1]["enabled"] = True  # flipping the switch is the only change needed
+    try:
+        q2 = PublishQueue(workspace_tmp_path / "s.json", SERIES_CFG)
+        assert q2.story_enabled("shinobi", "veer") and autopilot.series_per_day(SERIES_CH) == 3
+    finally:
+        SERIES_CH["series"][1]["enabled"] = False
+    assert autopilot.series_per_day(SERIES_CH) == 2
+
+
+def test_shorts_needed_follows_enabled_series(workspace_tmp_path):
+    q = PublishQueue(workspace_tmp_path / "n.json", SERIES_CFG)
+    assert autopilot.shorts_needed(q, SERIES_CH, NOW) == 2  # Echoes only while Veer is off
+
+
+def test_quota_budget_serves_soonest_slot_and_holds_the_latest_without_moving_slots(workspace_tmp_path):
+    from aurora.publish.quota import QuotaBudget
+
+    cfg = json.loads(json.dumps(SERIES_CFG))
+    cfg["autopilot"]["channels"][0]["series"][1]["enabled"] = True
+    q = PublishQueue(workspace_tmp_path / "b.json", cfg)
+    e1 = q.enqueue("shinobi", mp4(workspace_tmp_path, "e1"), {"title": "e1", "story": "echoes"}, now=NOW)  # 18:30 IST today
+    v = q.enqueue("shinobi", mp4(workspace_tmp_path, "v"), {"title": "v", "story": "veer"}, now=NOW)  # 21:00 IST today
+    e2 = q.enqueue("shinobi", mp4(workspace_tmp_path, "e2"), {"title": "e2", "story": "echoes"}, now=NOW)  # 12:30 IST tomorrow
+    slot_e2 = q.get(e2["id"])["publish_at"]
+    budget = QuotaBudget(workspace_tmp_path / "qb", limit=3300)  # room for two uploads (2 x 1600)
+    up = MagicMock(side_effect=["A", "B", "C"])
+    r = autopilot.publish_due(q, now=NOW + timedelta(hours=6, minutes=30), service_factory=lambda c: object(), uploader=up, budget=budget)
+    assert sorted(r["scheduled"]) == sorted([e1["id"], v["id"]])  # the slots that come first are served first
+    assert r["deferred"] == [e2["id"]] and q.get(e2["id"])["status"] == "scheduled"  # lowest priority waits for the next budget day
+    assert q.get(e2["id"])["publish_at"] == slot_e2 and q.get(e2["id"])["attempts"] == 0  # slot untouched, nothing burned

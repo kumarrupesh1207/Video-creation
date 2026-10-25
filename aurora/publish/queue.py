@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 QUEUE_PATH = ROOT / "outputs" / "publish_queue.json"
 IST = timezone(timedelta(hours=5, minutes=30), "IST")
 DEFAULTS = {"enabled": False, "upload_ahead": False, "approval": "veto", "veto_hours": 6.0, "slots": ["19:00"], "timezone": "Asia/Kolkata", "max_attempts": 3}
-EXTRA_KEYS = ("captions_srt", "thumbnail", "duration_secs", "part", "chapters", "chapter", "playlist")  # render outputs the publisher uses
+EXTRA_KEYS = ("captions_srt", "thumbnail", "duration_secs", "part", "chapters", "chapter", "playlist", "story")  # render outputs the publisher uses
 ACTIVE = {"pending_approval", "scheduled", "uploaded_scheduled", "publishing", "published"}  # statuses that block re-enqueueing a sha
 _lock = threading.RLock()
 
@@ -93,9 +93,21 @@ class PublishQueue:
         flag = self.channel_cfg.get(channel, {}).get("publish_enabled")
         return bool(self.s.get("enabled", False)) if flag is None else bool(flag)
 
+    def series_entry(self, channel: str, story: str | None) -> dict | None:
+        for e in self.channel_cfg.get(channel, {}).get("series") or []:
+            e = {"slug": e} if isinstance(e, str) else e
+            if e.get("slug") == story:
+                return e
+        return None
+
+    def story_enabled(self, channel: str, story: str | None) -> bool:
+        """A series switched off in config (`enabled: false` or `per_day: 0`) is never published, even if parts exist."""
+        e = self.series_entry(channel, story)
+        return e is None or (e.get("enabled", True) is not False and int(e.get("per_day", 1)) > 0)
+
     # ---- scheduling ----------------------------------------------
     def next_slot(self, channel: str, now: datetime | None = None, taken: list[datetime] | None = None,
-                  kind: str = "short") -> datetime:
+                  kind: str = "short", story: str | None = None) -> datetime:
         """Earliest configured slot >= now + veto_hours that this channel hasn't used yet (UTC).
         Per-channel `slots` override the global ones; kind "long" uses the channel's weekly `long_episode` slot."""
         now = now or _now()
@@ -104,7 +116,7 @@ class PublishQueue:
         ccfg = self.channel_cfg.get(channel, {})
         if kind == "long" and ccfg.get("long_episode"):
             return self._next_weekly(ccfg["long_episode"], earliest, tz, taken)
-        slots = ccfg.get("slots") or self.s["slots"]
+        slots = (self.series_entry(channel, story) or {}).get("slots") or ccfg.get("slots") or self.s["slots"]
         used = {t.astimezone(timezone.utc).replace(second=0, microsecond=0) for t in (taken or [])}
         day = earliest.astimezone(tz).date()
         for offset in range(0, 60):
@@ -156,7 +168,7 @@ class PublishQueue:
                 **{k: meta[k] for k in EXTRA_KEYS if meta.get(k) is not None},
                 "status": "pending_approval" if mode == "manual" else "scheduled",
                 "kind": meta.get("kind", "short"),
-                "publish_at": self.next_slot(channel, now, taken, meta.get("kind", "short")).isoformat(),
+                "publish_at": self.next_slot(channel, now, taken, meta.get("kind", "short"), meta.get("story")).isoformat(),
                 "created_at": now.isoformat(),
                 "veto_until": (now + timedelta(hours=float(self.s["veto_hours"]) if mode == "veto" else 0)).isoformat(),
                 "attempts": 0, "video_id": None, "error": None, "stats": None,
@@ -185,7 +197,7 @@ class PublishQueue:
         taken = [datetime.fromisoformat(i["publish_at"]) for i in self.list(it["channel"])
                  if i["status"] == "scheduled" and i.get("platform", "youtube") == it.get("platform", "youtube")]
         return self._update(item_id, status="scheduled", error=None,
-                            publish_at=self.next_slot(it["channel"], taken=taken).isoformat())
+                            publish_at=self.next_slot(it["channel"], taken=taken, story=it.get("story")).isoformat())
 
     def reschedule(self, item_id: str, when: datetime) -> dict:
         return self._update(item_id, publish_at=when.astimezone(timezone.utc).isoformat())
@@ -221,6 +233,11 @@ class PublishQueue:
             return self._update(item_id, status="scheduled", error=error[:500],
                                 publish_at=(_now() + retry_in).isoformat())
         return self._update(item_id, status="failed", error=error[:500])
+
+    def hold(self, item_id: str, error: str) -> dict:
+        """Not uploaded this run (daily budget used up): stays scheduled with its slot untouched, no attempt counted."""
+        it = self.get(item_id)
+        return self._update(item_id, status="scheduled", attempts=max(0, it["attempts"] - 1), error=error[:500])
 
     def defer(self, item_id: str, delta: timedelta, error: str) -> dict:
         """Quota hit: put back without counting an attempt."""

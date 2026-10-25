@@ -112,11 +112,19 @@ def render_idea(cfg: dict, switchboard, channel: dict, idea: dict) -> dict:
 
         from aurora.comic import make_comic_reel
 
-        res = make_comic_reel(channel["name"], idea["topic"], ROOT / "outputs" / "final" / channel["name"] / "comic", cfg=cfg,
-                              language=LANGS.get(str(channel.get("language", "en")).lower(), "English"),
-                              panels=int(channel.get("panels", 6)), voice=channel.get("voice", "en-US-AvaNeural"),
-                              switchboard=switchboard)
+        res = None
+        if channel.get("series"):  # story packs: series picked by cadence, content-driven (aurora/story.py); None -> legacy flow
+            from aurora import story
+
+            res = story.render_for_channel(cfg, channel, switchboard, ROOT / "outputs" / "final" / channel["name"] / "comic",
+                                           voice=channel.get("voice"), panels=int(channel.get("panels", 6)))
+        if res is None:
+            res = make_comic_reel(channel["name"], idea["topic"], ROOT / "outputs" / "final" / channel["name"] / "comic", cfg=cfg,
+                                  language=LANGS.get(str(channel.get("language", "en")).lower(), "English"),
+                                  panels=int(channel.get("panels", 6)), voice=channel.get("voice", "en-US-AvaNeural"),
+                                  switchboard=switchboard)
         side = _json.loads(Path(res["sidecar"]).read_text(encoding="utf-8"))
+        idea["story"] = res.get("story") or side.get("story")  # story-pack slug: drives per-series slots / enabled switch
         idea.update(series=side["series"]["title"], part=side["part"], description=side["caption"],
                     hook=None)  # compose_meta -> "<Series> – Part N"
         if side.get("chapter"):  # chapter mode: the sidecar already holds "<Series> – Ch.N Part M: <hook>"
@@ -130,6 +138,14 @@ def render_idea(cfg: dict, switchboard, channel: dict, idea: dict) -> dict:
         return autorun.process_topic(cfg, switchboard, idea["topic"], a, out_dir)
 
 
+def series_per_day(ch: dict) -> int:
+    """Parts to make per day: the sum of the channel's enabled story-pack series (Echoes 2 + Veer 1), else reels_per_day."""
+    entries = [{"slug": e} if isinstance(e, str) else e for e in ch.get("series") or []]
+    if not entries:
+        return int(ch["reels_per_day"])
+    return sum(int(e.get("per_day", 1)) for e in entries if e.get("enabled", True) is not False and int(e.get("per_day", 1)) > 0)
+
+
 def shorts_needed(queue: PublishQueue, ch: dict, now: datetime | None = None) -> int:
     """How many Shorts to render now: the channel's reels_per_day minus those already made today (local day), never more
     than keeps `lookahead_days` (default 2) of reels queued. Three render runs a day therefore make 2 reels, not 6."""
@@ -141,7 +157,7 @@ def shorts_needed(queue: PublishQueue, ch: dict, now: datetime | None = None) ->
     made_today = len({i["sha256"] for i in mine if datetime.fromisoformat(i["created_at"]).astimezone(tz).date() == now.astimezone(tz).date()})
     pending = sum(1 for i in mine if i["status"] in ("scheduled", "pending_approval", "uploaded_scheduled", "publishing")
                   and datetime.fromisoformat(i["publish_at"]) > now)
-    per_day = int(ch["reels_per_day"])
+    per_day = series_per_day(ch)
     return max(0, min(per_day - made_today, per_day * int(ch.get("lookahead_days", 2)) - pending))
 
 
@@ -267,6 +283,7 @@ def run_render(cfg: dict, queue: PublishQueue, only: str | None = None, limit: i
                 continue
             meta = compose_meta(idea, sidecar["reel"]["sha256"])
             meta.update(_sidecar_extras(sidecar))
+            meta["story"] = idea.get("story")
             if ch.get("seo"):
                 meta = apply_seo(cfg, ch, idea, meta, seo_service_factory)
             for platform in ch["platforms"]:
@@ -304,7 +321,8 @@ def apply_seo(cfg: dict, ch: dict, idea: dict, meta: dict, service_factory=None,
                                  hashtags=meta.get("tags"), fallback_title=meta["title"], service=service, budget=budget,
                                  client=client, cfg=cfg, duration_secs=meta.get("duration_secs"), chapters=meta.get("chapters"),
                                  chapter=idea.get("chapter"))
-        return {**meta, "title": res["title"], "description": res["description"], "tags": res["tags"] or meta["tags"]}
+        title = meta["title"] if idea.get("chapter") and idea.get("part") else res["title"]  # "<Series> – Ch.N Part M: hook" is fixed, never rewritten
+        return {**meta, "title": title, "description": res["description"], "tags": res["tags"] or meta["tags"]}
     except Exception as e:  # noqa: BLE001
         print(f"[autopilot] {ch['name']}: SEO failed, using plain metadata: {e}", file=sys.stderr)
         return meta
@@ -346,8 +364,12 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
         return result
     ahead = bool(queue.s.get("upload_ahead", False))
     due_ids = {i["id"] for i in queue.due(now, only)}
-    todo = [i for i in (queue.uploadable(now, only) if ahead else queue.due(now, only))
-            if i.get("platform", "youtube") == "youtube"] + [
+    def priority(i: dict):  # slot already past first, then soonest slot; ties: series listed first in config (Echoes before Veer)
+        order = [e if isinstance(e, str) else e.get("slug") for e in queue.channel_cfg.get(i["channel"], {}).get("series") or []]
+        return (datetime.fromisoformat(i["publish_at"]) > now, i["publish_at"], order.index(i.get("story")) if i.get("story") in order else 99)
+
+    todo = sorted([i for i in (queue.uploadable(now, only) if ahead else queue.due(now, only))
+                   if i.get("platform", "youtube") == "youtube"], key=priority) + [
         i for i in queue.due(now, only) if i.get("platform", "youtube") == "instagram"]  # IG cannot schedule ahead
     if dry_run:  # log what WOULD be sent; no auth, no upload, queue untouched
         result["would_publish"] = []
@@ -371,7 +393,7 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
     reconcile(queue, now, service_factory, services, blocked)
     for it in todo:
         ch = it["channel"]
-        if not queue.publish_enabled(ch):
+        if not queue.publish_enabled(ch) or not queue.story_enabled(ch, it.get("story")):
             result["skipped_disabled"].append(it["id"])
             continue
         if it.get("platform", "youtube") == "instagram":
@@ -395,7 +417,7 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
             if budget:
                 budget.spend("videos.insert")  # defer (not fail) when today's quota budget is used up
         except yt.QuotaExceeded as e:
-            queue.defer(it["id"], QUOTA_BACKOFF, f"quota budget: {e}")
+            queue.hold(it["id"], f"daily quota budget used up, retried next run: {e}")  # slot untouched; lowest priority waits
             blocked.add(ch)
             result["deferred"].append(it["id"])
             _event("quota", ch, str(e))
@@ -418,7 +440,7 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
             # a scheduled video is meant to become public, so its series playlist is public too
             _post_upload(queue, it, vid, services[ch], playlist_fn, privacy="public" if schedule else privacy, budget=budget)
         except yt.QuotaExceeded as e:
-            queue.defer(it["id"], QUOTA_BACKOFF, f"quota: {e}")
+            queue.hold(it["id"], f"YouTube quota: {e}")
             blocked.add(ch)
             result["deferred"].append(it["id"])
             _event("quota", ch, str(e))
@@ -475,7 +497,7 @@ def approve_item(queue: PublishQueue, item_id: str, service_factory=None, budget
     if it and it["status"] == "vetoed" and it.get("video_id"):
         service = (service_factory or (lambda c: yt.build_service(c, expected_handle=queue.expected_handles.get(c))))(it["channel"])
         slot = queue.next_slot(it["channel"], now, [datetime.fromisoformat(i["publish_at"]) for i in queue.list(it["channel"])
-                                                    if i["status"] in ("scheduled", "uploaded_scheduled")], it.get("kind", "short"))
+                                                    if i["status"] in ("scheduled", "uploaded_scheduled")], it.get("kind", "short"), it.get("story"))
         yt.update_video_status(service, it["video_id"], "private", yt.rfc3339(slot), budget)
         return queue._update(item_id, status="uploaded_scheduled", publish_at=slot.isoformat(), error=None)
     return queue.approve(item_id)
