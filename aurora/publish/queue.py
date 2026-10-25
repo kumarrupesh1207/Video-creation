@@ -17,9 +17,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 QUEUE_PATH = ROOT / "outputs" / "publish_queue.json"
 IST = timezone(timedelta(hours=5, minutes=30), "IST")
-DEFAULTS = {"enabled": False, "approval": "veto", "veto_hours": 6.0, "slots": ["19:00"], "timezone": "Asia/Kolkata", "max_attempts": 3}
+DEFAULTS = {"enabled": False, "upload_ahead": False, "approval": "veto", "veto_hours": 6.0, "slots": ["19:00"], "timezone": "Asia/Kolkata", "max_attempts": 3}
 EXTRA_KEYS = ("captions_srt", "thumbnail", "duration_secs", "part", "chapters")  # render outputs the publisher uses
-ACTIVE = {"pending_approval", "scheduled", "publishing", "published"}  # statuses that block re-enqueueing a sha
+ACTIVE = {"pending_approval", "scheduled", "uploaded_scheduled", "publishing", "published"}  # statuses that block re-enqueueing a sha
 _lock = threading.RLock()
 
 
@@ -53,6 +53,7 @@ class PublishQueue:
         self.path = Path(path)
         self.s = settings(cfg)
         # YouTube handle each channel profile must authorise as (config autopilot.channels[].expected_handle)
+        self.channel_cfg = {c["name"]: c for c in ((cfg or {}).get("autopilot") or {}).get("channels", []) if c.get("name")}
         self.expected_handles = {c["name"]: c["expected_handle"]
                                  for c in ((cfg or {}).get("autopilot") or {}).get("channels", [])
                                  if c.get("name") and c.get("expected_handle")}
@@ -87,21 +88,49 @@ class PublishQueue:
                     return i
         raise KeyError(item_id)
 
+    def publish_enabled(self, channel: str) -> bool:
+        """Per-channel `publish_enabled` wins; otherwise the global autopilot.publish.enabled (default false)."""
+        flag = self.channel_cfg.get(channel, {}).get("publish_enabled")
+        return bool(self.s.get("enabled", False)) if flag is None else bool(flag)
+
     # ---- scheduling ----------------------------------------------
-    def next_slot(self, channel: str, now: datetime | None = None, taken: list[datetime] | None = None) -> datetime:
-        """Earliest configured slot >= now + veto_hours that this channel hasn't used yet (UTC)."""
+    def next_slot(self, channel: str, now: datetime | None = None, taken: list[datetime] | None = None,
+                  kind: str = "short") -> datetime:
+        """Earliest configured slot >= now + veto_hours that this channel hasn't used yet (UTC).
+        Per-channel `slots` override the global ones; kind "long" uses the channel's weekly `long_episode` slot."""
         now = now or _now()
         earliest = now + timedelta(hours=float(self.s["veto_hours"]) if self.s["approval"] == "veto" else 0)
         tz = _tz(self.s["timezone"])
+        ccfg = self.channel_cfg.get(channel, {})
+        if kind == "long" and ccfg.get("long_episode"):
+            return self._next_weekly(ccfg["long_episode"], earliest, tz, taken)
+        slots = ccfg.get("slots") or self.s["slots"]
         used = {t.astimezone(timezone.utc).replace(second=0, microsecond=0) for t in (taken or [])}
         day = earliest.astimezone(tz).date()
         for offset in range(0, 60):
-            for slot in sorted(self.s["slots"]):
+            for slot in sorted(slots):
                 hh, mm = (int(x) for x in slot.split(":"))
                 cand = datetime(2000, 1, 1, hh, mm).replace(year=day.year, month=day.month, day=day.day, tzinfo=tz)
                 cand = (cand + timedelta(days=offset)).astimezone(timezone.utc)
                 if cand >= earliest and cand not in used:
                     return cand
+        return earliest
+
+    @staticmethod
+    def _next_weekly(spec: dict, earliest: datetime, tz, taken: list[datetime] | None) -> datetime:
+        names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        wd = spec.get("weekday", "saturday")
+        wd = names.index(str(wd).lower()) if str(wd).lower() in names else int(wd)
+        hh, mm = (int(x) for x in str(spec.get("time", "18:00")).split(":"))
+        used = {t.astimezone(timezone.utc).replace(second=0, microsecond=0) for t in (taken or [])}
+        day = earliest.astimezone(tz).date()
+        for offset in range(0, 60):
+            d = day + timedelta(days=offset)
+            if d.weekday() != wd:
+                continue
+            cand = datetime(d.year, d.month, d.day, hh, mm, tzinfo=tz).astimezone(timezone.utc)
+            if cand >= earliest and cand not in used:
+                return cand
         return earliest
 
     def enqueue(self, channel: str, video_path: str | Path, meta: dict, now: datetime | None = None,
@@ -117,7 +146,7 @@ class PublishQueue:
                 return None
             taken = [datetime.fromisoformat(i["publish_at"]) for i in items
                      if i["channel"] == channel and i.get("platform", "youtube") == platform
-                     and i["status"] in ("scheduled", "pending_approval", "publishing")]
+                     and i["status"] in ("scheduled", "pending_approval", "uploaded_scheduled", "publishing")]
             mode = self.s["approval"]
             item = {
                 "id": uuid.uuid4().hex[:12], "channel": channel, "platform": platform, "path": str(path), "sha256": sha,
@@ -126,7 +155,10 @@ class PublishQueue:
                 "privacy": meta.get("privacy", "public"), "approval": mode, "series": meta.get("series"),
                 **{k: meta[k] for k in EXTRA_KEYS if meta.get(k) is not None},
                 "status": "pending_approval" if mode == "manual" else "scheduled",
-                "publish_at": self.next_slot(channel, now, taken).isoformat(), "created_at": now.isoformat(),
+                "kind": meta.get("kind", "short"),
+                "publish_at": self.next_slot(channel, now, taken, meta.get("kind", "short")).isoformat(),
+                "created_at": now.isoformat(),
+                "veto_until": (now + timedelta(hours=float(self.s["veto_hours"]) if mode == "veto" else 0)).isoformat(),
                 "attempts": 0, "video_id": None, "error": None, "stats": None,
             }
             items.append(item)
@@ -136,6 +168,8 @@ class PublishQueue:
     # ---- user actions --------------------------------------------
     def veto(self, item_id: str) -> dict:
         it = self.get(item_id)
+        if it and it["status"] == "uploaded_scheduled":
+            raise ValueError("already uploaded: use aurora.autopilot.veto_item (removes publishAt on YouTube)")
         if not it or it["status"] not in ("scheduled", "pending_approval"):
             raise ValueError("only scheduled/pending items can be vetoed")
         return self._update(item_id, status="vetoed")
@@ -158,6 +192,16 @@ class PublishQueue:
         now = now or _now()
         return sorted((i for i in self.list(channel, "scheduled") if datetime.fromisoformat(i["publish_at"]) <= now),
                       key=lambda i: i["publish_at"])
+
+    def uploadable(self, now: datetime | None = None, channel: str | None = None) -> list[dict]:
+        """Scheduled items whose veto window has passed (upload-ahead: they may be uploaded before their slot)."""
+        now = now or _now()
+        return sorted((i for i in self.list(channel, "scheduled")
+                       if datetime.fromisoformat(i.get("veto_until") or i["publish_at"]) <= now), key=lambda i: i["publish_at"])
+
+    def mark_uploaded_scheduled(self, item_id: str, video_id: str) -> dict:
+        return self._update(item_id, status="uploaded_scheduled", video_id=video_id, error=None,
+                            uploaded_at=_now().isoformat())
 
     def mark_publishing(self, item_id: str) -> dict:
         it = self.get(item_id)

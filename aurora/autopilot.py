@@ -127,19 +127,83 @@ def render_idea(cfg: dict, switchboard, channel: dict, idea: dict) -> dict:
         return autorun.process_topic(cfg, switchboard, idea["topic"], a, out_dir)
 
 
+def shorts_needed(queue: PublishQueue, ch: dict, now: datetime | None = None) -> int:
+    """How many Shorts to render now: the channel's reels_per_day minus those already made today (local day), never more
+    than keeps `lookahead_days` (default 2) of reels queued. Three render runs a day therefore make 2 reels, not 6."""
+    from aurora.publish.queue import _tz
+
+    now = now or datetime.now(timezone.utc)
+    tz = _tz(queue.s["timezone"])
+    mine = [i for i in queue.list(ch["name"]) if i.get("kind", "short") == "short" and i.get("platform", "youtube") == "youtube"]
+    made_today = len({i["sha256"] for i in mine if datetime.fromisoformat(i["created_at"]).astimezone(tz).date() == now.astimezone(tz).date()})
+    pending = sum(1 for i in mine if i["status"] in ("scheduled", "pending_approval", "uploaded_scheduled", "publishing")
+                  and datetime.fromisoformat(i["publish_at"]) > now)
+    per_day = int(ch["reels_per_day"])
+    return max(0, min(per_day - made_today, per_day * int(ch.get("lookahead_days", 2)) - pending))
+
+
+def render_long(cfg: dict, queue: PublishQueue, ch: dict, episode_fn=None, now: datetime | None = None) -> list[dict]:
+    """Advance / finish the channel's long episode (aurora.episode, resumable under the NIM cap) and queue it plus its Shorts.
+    Skipped while a long episode is already queued for a future slot."""
+    now = now or datetime.now(timezone.utc)
+    if any(i.get("kind") == "long" and i["channel"] == ch["name"] and i["status"] in ("scheduled", "pending_approval", "uploaded_scheduled")
+           and datetime.fromisoformat(i["publish_at"]) > now for i in queue.list()):
+        return []
+    try:
+        if episode_fn is None:
+            from aurora.episode import run_episode as episode_fn
+        res = episode_fn(ch["name"], ch.get("niche", "an original anime story"), cfg, int(ch.get("episode_panels", 45)),
+                         int(ch.get("episode_shorts", 4)))
+    except Exception as e:  # noqa: BLE001
+        print(f"[autopilot] {ch['name']}: long episode failed: {e}", file=sys.stderr)
+        _event("episode_failed", ch["name"], str(e))
+        return []
+    if res.get("status") != "rendered":
+        print(f"[autopilot] {ch['name']}: long episode paused ({res.get('remaining', '?')} panels left, resumes next run)")
+        return []
+    out = []
+    side = res["episode"]
+    meta = {"title": side["title"][:100], "tags": [h.lstrip("#") for h in side.get("hashtags", [])], "ai_disclosure": True,
+            "sha256": side["video"]["sha256"], "kind": "long", "captions_srt": side.get("captions_srt"), "thumbnail": side.get("thumbnail"),
+            "duration_secs": side["video"]["duration_secs"], "chapters": side.get("chapters"),
+            "description": "\n\n".join(x for x in (side.get("hook", ""), side.get("description", ""),
+                                                    "Chapters:\n" + side["chapters_text"] if side.get("chapters_text") else "",
+                                                    " ".join(side.get("hashtags", [])), "AI-generated content.") if x)}
+    if ch.get("seo"):
+        meta = apply_seo(cfg, ch, {"topic": side["title"], "part": side.get("episode")}, meta)
+    for platform in ch["platforms"]:
+        item = queue.enqueue(ch["name"], side["video"]["path"], meta, platform=platform)
+        if item:
+            out.append(item)
+            print(f"[autopilot] {ch['name']}/{platform}: queued LONG {item['id']} (publish_at {item['publish_at']})")
+    for sh in res.get("shorts", []):
+        m = {"title": sh["title"], "description": sh["description"], "tags": [h.lstrip("#") for h in sh.get("hashtags", [])],
+             "ai_disclosure": True, "sha256": sh["video"]["sha256"], "duration_secs": sh["video"]["duration_secs"], "kind": "short"}
+        for platform in ch["platforms"]:
+            item = queue.enqueue(ch["name"], sh["video"]["path"], m, platform=platform)
+            if item:
+                out.append(item)
+    return out
+
+
 def run_render(cfg: dict, queue: PublishQueue, only: str | None = None, limit: int = 0,
-               research=None, renderer=None, seo_service_factory=None) -> list[dict]:
+               research=None, renderer=None, seo_service_factory=None, now: datetime | None = None,
+               episode_fn=None) -> list[dict]:
     """For each channel: research N ideas, render, enqueue. `renderer(cfg, channel, idea)->sidecar` is injectable."""
     queued: list[dict] = []
     switchboard = None
     for ch in channels_from(cfg):
         if only and ch["name"] != only:
             continue
-        n = limit or int(ch["reels_per_day"])
+        if ch.get("render_enabled", True) is False:
+            print(f"[autopilot] {ch['name']}: render disabled (render_enabled: false); skipped")
+            continue
+        n = limit or shorts_needed(queue, ch, now)
         try:
-            ideas = get_ideas(ch, n, research)
+            ideas = get_ideas(ch, n, research) if n > 0 else []
         except Exception as e:  # noqa: BLE001 - one channel's failure must not stop others
             print(f"[autopilot] {ch['name']}: research failed: {e}", file=sys.stderr)
+            _event("research_failed", ch["name"], str(e))
             continue
         for idea in ideas:
             try:
@@ -155,6 +219,7 @@ def run_render(cfg: dict, queue: PublishQueue, only: str | None = None, limit: i
                     raise RuntimeError(f"render status {sidecar.get('status')}")
             except Exception as e:  # noqa: BLE001
                 print(f"[autopilot] {ch['name']}: '{idea.get('topic')}' failed: {e}", file=sys.stderr)
+                _event("render_failed", ch["name"], f"{idea.get('topic')}: {e}")
                 continue
             meta = compose_meta(idea, sidecar["reel"]["sha256"])
             meta.update(_sidecar_extras(sidecar))
@@ -165,6 +230,8 @@ def run_render(cfg: dict, queue: PublishQueue, only: str | None = None, limit: i
                 if item:
                     queued.append(item)
                     print(f"[autopilot] {ch['name']}/{platform}: queued {item['id']} ({item['status']}, publish_at {item['publish_at']})")
+        if ch.get("long_episode") and not limit:  # weekly long episode: uses what is left of the daily NIM cap after the Shorts
+            queued += render_long(cfg, queue, ch, episode_fn, now)
     return queued
 
 
@@ -211,22 +278,29 @@ def compose_meta(idea: dict, sha256: str) -> dict:
 # ---- publish ---------------------------------------------------------
 def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | None = None, service_factory=None,
                 uploader=None, dry_run: bool = False, ig_publisher=None, playlist_fn=None, budget=None) -> dict:
-    """Upload every due, non-vetoed item. Stops a channel on quota; failures retry up to max_attempts."""
+    """Upload every eligible, non-vetoed item. Stops a channel on quota; failures retry up to max_attempts.
+    With autopilot.publish.upload_ahead the upload happens as soon as the veto window passed: private + publishAt=<slot>
+    (YouTube publishes it itself, PC may be off); a slot that is already past is published public right away."""
     from aurora.publish import youtube as yt
 
+    now = now or datetime.now(timezone.utc)
     service_factory = service_factory or (lambda ch: yt.build_service(ch, expected_handle=queue.expected_handles.get(ch)))
     uploader = uploader or yt.upload_short
-    result = {"published": [], "failed": [], "deferred": []}
-    if not dry_run and not queue.s.get("enabled", False):  # global kill-switch: autopilot.publish.enabled (default false)
-        print("[autopilot] publishing is DISABLED (autopilot.publish.enabled is false); nothing uploaded. "
-              "Use --dry-run to preview.", file=sys.stderr)
+    result = {"published": [], "failed": [], "deferred": [], "scheduled": [], "skipped_disabled": []}
+    channels = {i["channel"] for i in queue.list()}
+    if not dry_run and not any(queue.publish_enabled(c) for c in channels | {only or ""}):
+        print("[autopilot] publishing is DISABLED (autopilot.publish.enabled / channel publish_enabled are false); "
+              "nothing uploaded. Use --dry-run to preview.", file=sys.stderr)
         result["disabled"] = True
         return result
+    ahead = bool(queue.s.get("upload_ahead", False))
+    due_ids = {i["id"] for i in queue.due(now, only)}
+    todo = [i for i in (queue.uploadable(now, only) if ahead else queue.due(now, only))
+            if i.get("platform", "youtube") == "youtube"] + [
+        i for i in queue.due(now, only) if i.get("platform", "youtube") == "instagram"]  # IG cannot schedule ahead
     if dry_run:  # log what WOULD be sent; no auth, no upload, queue untouched
-        from aurora.publish import youtube as yt
-
         result["would_publish"] = []
-        for it in queue.due(now, only):
+        for it in todo:
             if it.get("platform", "youtube") == "instagram":
                 from aurora.publish import instagram as ig
 
@@ -234,15 +308,21 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
                 result["would_publish"].append(it["id"])
                 continue
             body = yt.build_body(it, it.get("privacy", "public"))
+            sched = ahead and it["id"] not in due_ids and it.get("privacy", "public") == "public"
             print(f"[autopilot] DRY-RUN {it['channel']}: would upload {it['path']} ({it['sha256'][:12]}) "
                   f"title={body['snippet']['title']!r} tags={body['snippet']['tags']} "
-                  f"privacy={body['status']['privacyStatus']} containsSyntheticMedia={body['status']['containsSyntheticMedia']}")
+                  f"privacy={'private + publishAt ' + it['publish_at'] if sched else body['status']['privacyStatus']} "
+                  f"containsSyntheticMedia={body['status']['containsSyntheticMedia']}")
             result["would_publish"].append(it["id"])
         return result
     services: dict[str, object] = {}
     blocked: set[str] = set()
-    for it in queue.due(now, only):
+    reconcile(queue, now, service_factory, services, blocked)
+    for it in todo:
         ch = it["channel"]
+        if not queue.publish_enabled(ch):
+            result["skipped_disabled"].append(it["id"])
+            continue
         if it.get("platform", "youtube") == "instagram":
             _publish_instagram(queue, it, result, ig_publisher)
             continue
@@ -258,6 +338,7 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
         except Exception as e:  # noqa: BLE001 - AuthRequired etc.
             blocked.add(ch)
             print(f"[autopilot] {ch}: cannot authenticate: {e}", file=sys.stderr)
+            _event("auth", ch, str(e))
             continue
         try:
             if budget:
@@ -266,22 +347,154 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
             queue.defer(it["id"], QUOTA_BACKOFF, f"quota budget: {e}")
             blocked.add(ch)
             result["deferred"].append(it["id"])
+            _event("quota", ch, str(e))
             continue
+        privacy = it.get("privacy", "public")
+        slot = datetime.fromisoformat(it["publish_at"])
+        schedule = ahead and privacy == "public" and slot > now  # slot still in the future -> private + publishAt
         queue.mark_publishing(it["id"])
         try:
-            vid = uploader(services[ch], it["path"], it, privacy=it.get("privacy", "public"))
-            queue.mark_published(it["id"], vid)
-            result["published"].append(it["id"])
-            print(f"[autopilot] {ch}: published {vid}")
-            _post_upload(queue, it, vid, services[ch], playlist_fn, budget=budget)
+            if schedule:
+                vid = uploader(services[ch], it["path"], it, privacy="private", publish_at=yt.rfc3339(slot))
+                queue.mark_uploaded_scheduled(it["id"], vid)
+                result["scheduled"].append(it["id"])
+                print(f"[autopilot] {ch}: uploaded {vid}, YouTube publishes it at {it['publish_at']}")
+            else:
+                vid = uploader(services[ch], it["path"], it, privacy=privacy)
+                queue.mark_published(it["id"], vid)
+                result["published"].append(it["id"])
+                print(f"[autopilot] {ch}: published {vid}")
+            # a scheduled video is meant to become public, so its series playlist is public too
+            _post_upload(queue, it, vid, services[ch], playlist_fn, privacy="public" if schedule else privacy, budget=budget)
         except yt.QuotaExceeded as e:
             queue.defer(it["id"], QUOTA_BACKOFF, f"quota: {e}")
             blocked.add(ch)
             result["deferred"].append(it["id"])
+            _event("quota", ch, str(e))
         except Exception as e:  # noqa: BLE001
             queue.mark_failed(it["id"], f"{type(e).__name__}: {e}")
             result["failed"].append(it["id"])
+            _event("upload_failed", ch, f"{it['title']}: {e}")
     return result
+
+
+def reconcile(queue: PublishQueue, now: datetime, service_factory, services: dict, blocked: set) -> int:
+    """uploaded_scheduled items whose slot has passed: confirm YouTube made them public -> published. Returns count."""
+    done = 0
+    for it in queue.list(status="uploaded_scheduled"):
+        if datetime.fromisoformat(it["publish_at"]) + timedelta(minutes=5) > now or it["channel"] in blocked or not it.get("video_id"):
+            continue
+        ch = it["channel"]
+        try:
+            if ch not in services:
+                services[ch] = service_factory(ch)
+            r = services[ch].videos().list(part="status", id=it["video_id"]).execute().get("items", [])
+        except Exception as e:  # noqa: BLE001
+            blocked.add(ch)
+            print(f"[autopilot] {ch}: reconcile skipped ({e})", file=sys.stderr)
+            continue
+        status = r[0]["status"]["privacyStatus"] if r else "missing"
+        if status == "public":
+            queue.mark_published(it["id"], it["video_id"])
+            done += 1
+        elif now > datetime.fromisoformat(it["publish_at"]) + timedelta(hours=1):
+            queue._update(it["id"], error=f"still {status} an hour after its slot")
+            _event("not_public", ch, f"{it['title']} is {status} after its slot")
+    return done
+
+
+def veto_item(queue: PublishQueue, item_id: str, service_factory=None, budget=None) -> dict:
+    """The one veto entry point. Already-uploaded items: videos.update removes publishAt (stays private), then vetoed."""
+    from aurora.publish import youtube as yt
+
+    it = queue.get(item_id)
+    if it and it["status"] == "uploaded_scheduled":
+        service = (service_factory or (lambda c: yt.build_service(c, expected_handle=queue.expected_handles.get(c))))(it["channel"])
+        yt.update_video_status(service, it["video_id"], "private", None, budget)
+        return queue._update(item_id, status="vetoed")
+    return queue.veto(item_id)
+
+
+def approve_item(queue: PublishQueue, item_id: str, service_factory=None, budget=None, now: datetime | None = None) -> dict:
+    """Approve / restore. A vetoed item that is already on YouTube is rescheduled there instead of uploaded again."""
+    from aurora.publish import youtube as yt
+
+    it = queue.get(item_id)
+    now = now or datetime.now(timezone.utc)
+    if it and it["status"] == "vetoed" and it.get("video_id"):
+        service = (service_factory or (lambda c: yt.build_service(c, expected_handle=queue.expected_handles.get(c))))(it["channel"])
+        slot = queue.next_slot(it["channel"], now, [datetime.fromisoformat(i["publish_at"]) for i in queue.list(it["channel"])
+                                                    if i["status"] in ("scheduled", "uploaded_scheduled")], it.get("kind", "short"))
+        yt.update_video_status(service, it["video_id"], "private", yt.rfc3339(slot), budget)
+        return queue._update(item_id, status="uploaded_scheduled", publish_at=slot.isoformat(), error=None)
+    return queue.approve(item_id)
+
+
+# ---- events + daily report -------------------------------------------------
+EVENTS_DIR = ROOT / "outputs" / "publish_state"
+REPORT_DIR = ROOT / "outputs" / "reports"
+
+
+def _event(kind: str, channel: str, msg: str, when: datetime | None = None) -> None:
+    """Append a render/publish problem to today's event log (read by the daily report). Never raises."""
+    try:
+        import json as _json
+
+        when = when or datetime.now(timezone.utc)
+        f = EVENTS_DIR / f"events_{when.date().isoformat()}.json"
+        ev = _json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
+        ev.append({"at": when.isoformat(timespec="seconds"), "kind": kind, "channel": channel, "msg": str(msg)[:300]})
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(_json.dumps(ev, indent=1, ensure_ascii=False), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def write_daily_report(queue: PublishQueue, budget=None, now: datetime | None = None, nim_credits: int | None = None,
+                       report_dir: Path | None = None, events_dir: Path | None = None) -> Path:
+    """outputs/reports/<date>.md: rendered, uploaded, scheduled, failures, NIM credits and quota used today (local day)."""
+    import json as _json
+
+    from aurora.publish.queue import _tz
+
+    now = now or datetime.now(timezone.utc)
+    tz = _tz(queue.s["timezone"])
+    today = now.astimezone(tz).date()
+
+    def is_today(iso: str | None) -> bool:
+        return bool(iso) and datetime.fromisoformat(iso).astimezone(tz).date() == today
+
+    items = queue.list()
+    rendered = [i for i in items if is_today(i.get("created_at")) and i.get("platform", "youtube") == "youtube"]
+    uploaded = [i for i in items if is_today(i.get("uploaded_at")) or is_today(i.get("published_at"))]
+    upcoming = sorted((i for i in items if i["status"] == "uploaded_scheduled"), key=lambda i: i["publish_at"])
+    waiting = [i for i in items if i["status"] in ("scheduled", "pending_approval")]
+    failed = [i for i in items if i["status"] == "failed" or i.get("error")]
+    f = (events_dir or EVENTS_DIR) / f"events_{now.date().isoformat()}.json"
+    events = _json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
+    if nim_credits is None:
+        try:
+            from aurora import costs
+
+            nim_credits = costs.credits_today("nvidia_nim")
+        except Exception:  # noqa: BLE001
+            nim_credits = 0
+
+    def line(i: dict) -> str:
+        return f"- [{i['channel']}] {i['title'][:70]} ({i['status']}, slot {i['publish_at'][:16]}Z)" + (f" id {i['video_id']}" if i.get("video_id") else "")
+
+    md = [f"# Aurora daily report - {today}", "",
+          f"NIM credits used today: {nim_credits} | YouTube quota used: {budget.used() if budget else '?'} / 10000 units", "",
+          f"## Rendered today ({len(rendered)})", *(map(line, rendered) or ["- none"]),
+          f"## Uploaded / published today ({len(uploaded)})", *(map(line, uploaded) or ["- none"]),
+          f"## Scheduled on YouTube ({len(upcoming)})", *(map(line, upcoming) or ["- none"]),
+          f"## Waiting for veto window / approval ({len(waiting)})", *(map(line, waiting) or ["- none"]),
+          f"## Failures and problems ({len(failed) + len(events)})",
+          *([f"- {i['title'][:50]}: {i.get('error')}" for i in failed] + [f"- {e['at'][11:16]} {e['kind']} [{e['channel']}] {e['msg']}" for e in events] or ["- none"])]
+    out = (report_dir or REPORT_DIR) / f"{today}.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(md) + "\n", encoding="utf-8")
+    return out
 
 
 def _add_to_playlist(queue: PublishQueue, it: dict, video_id: str, service, playlist_fn=None, privacy: str | None = None,
@@ -464,7 +677,7 @@ def main(argv: list[str] | None = None) -> int:
     load_env()
     ap = argparse.ArgumentParser(description="Aurora autopilot")
     ap.add_argument("cmd", choices=["render", "publish-due", "publish-one", "analytics", "status", "veto", "approve", "comments",
-                                    "comment-approve", "comment-reject", "weekly-report", "approvals"])
+                                    "comment-approve", "comment-reject", "weekly-report", "approvals", "daily-report"])
     ap.add_argument("--reply", help="comment-approve: edited reply text")
     ap.add_argument("--privacy", default="private", choices=["private", "unlisted", "public"], help="publish-one only")
     ap.add_argument("--i-confirm", action="store_true", help="publish-one: required; bypasses the kill-switch for this ONE item")
@@ -485,8 +698,15 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "publish-due":
         from aurora.publish.quota import QuotaBudget
 
+        budget = QuotaBudget()
         print(publish_due(q, a.channel, now=datetime.fromisoformat(a.at).astimezone(timezone.utc) if a.at else None,
-                          dry_run=a.dry_run, budget=QuotaBudget()))
+                          dry_run=a.dry_run, budget=budget))
+        if not a.dry_run:
+            print(f"[autopilot] daily report: {write_daily_report(q, budget)}")
+    elif a.cmd == "daily-report":
+        from aurora.publish.quota import QuotaBudget
+
+        print(write_daily_report(q, QuotaBudget()))
     elif a.cmd == "publish-one":
         if not a.id:
             ap.error("queue id required")
@@ -525,7 +745,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if not a.id:
             ap.error("id required")
-        print((q.veto if a.cmd == "veto" else q.approve)(a.id)["status"])
+        print((veto_item if a.cmd == "veto" else approve_item)(q, a.id)["status"])
     return 0
 
 

@@ -13,6 +13,7 @@ import os
 import random
 import re
 import time
+from datetime import timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -252,6 +253,26 @@ def add_to_series_playlist(service, channel: str, series: str, video_id: str, vi
         budget.spend("playlistItems.insert")
     _retry_404(lambda: pl.insert(part="snippet", body={"snippet": snippet}).execute(), f"playlist {pid} insert", sleep)
     return pid
+
+
+def update_video_status(service, video_id: str, privacy: str, publish_at: str | None = None, budget=None) -> None:
+    """videos.update(part=status): keep the other status fields, set privacy and (re)set or remove publishAt.
+    publishAt=None + privacy private = a plain private video (cancels a scheduled publish)."""
+    if budget:
+        budget.spend("videos.list")
+    cur = service.videos().list(part="status", id=video_id).execute()["items"][0]["status"]
+    status = {k: cur[k] for k in ("selfDeclaredMadeForKids", "embeddable", "license", "publicStatsViewable", "containsSyntheticMedia")
+              if k in cur}
+    status["privacyStatus"] = "private" if publish_at else privacy
+    if publish_at:
+        status["publishAt"] = publish_at
+    if budget:
+        budget.spend("videos.update")
+    service.videos().update(part="status", body={"id": video_id, "status": status}).execute()
+
+
+def rfc3339(dt) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 # ---- captions, thumbnails, branding ----------------------------------------------------

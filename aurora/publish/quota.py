@@ -16,7 +16,7 @@ STATE_DIR = ROOT / "outputs" / "publish_state"
 DAILY_LIMIT = 10000
 SAFETY_LIMIT = 9000  # leave headroom for manual Studio/API use
 COSTS = {
-    "videos.insert": 1600, "captions.insert": 400, "thumbnails.set": 50, "search.list": 100,
+    "videos.insert": 1600, "videos.update": 50, "captions.insert": 400, "thumbnails.set": 50, "search.list": 100,
     "playlists.insert": 50, "playlists.update": 50, "playlistItems.insert": 50, "channels.update": 50,
     "comments.insert": 50, "comments.setModerationStatus": 50,
     "videos.list": 1, "playlists.list": 1, "playlistItems.list": 1, "commentThreads.list": 1, "channels.list": 1,

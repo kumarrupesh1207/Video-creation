@@ -17,6 +17,11 @@ NOW = datetime(2026, 10, 22, 6, 0, tzinfo=timezone.utc)
 NOKEY = {"research": {"api_key_env": "NOPE_NO_SUCH_KEY"}}
 
 
+@pytest.fixture(autouse=True)
+def _events_in_tmp(workspace_tmp_path, monkeypatch):
+    monkeypatch.setattr(autopilot, "EVENTS_DIR", workspace_tmp_path / "events")  # never write the real event log
+
+
 @pytest.fixture
 def q(workspace_tmp_path):
     return PublishQueue(workspace_tmp_path / "q.json", {"autopilot": {"publish": {"enabled": True, "veto_hours": 6, "slots": ["19:00"]}}})
