@@ -200,3 +200,74 @@ def test_make_comic_reel_chapter_mode(workspace_tmp_path, monkeypatch):
     assert side["chapter"]["parts"] == 10 and side["playlist"] and len(side["panel_times"]) == 5 and len(side["panel_images"]) == 5
     state = research.load_series("c", tmp / "ser")
     assert state["chapter"]["parts_done"] == 1 and state["chapter"]["rendered"][0]["sidecar"] == res["sidecar"]
+
+
+# ---------------------------------------------------------------- the series title is content: research may never rename it
+class RenamingClient(FakeClient):
+    def generate(self, prompt, schema):
+        got = super().generate(prompt, schema)
+        if schema is research.ChapterOutline:
+            got.series_title = "Chronicles of the Aether Blade"
+        else:
+            got.series.title = "Chronicles of the Aether Blade"
+        return got
+
+
+def test_research_cannot_rename_a_series(workspace_tmp_path):
+    sd = workspace_tmp_path / "s"
+    r = research.research_part("shinobi", "p", cfg=_cfg(), client=RenamingClient(), series_dir=sd)  # channel shinobi -> pack "Echoes of the Aether"
+    assert r["comic"]["series"]["title"] == "Echoes of the Aether" and research.load_series("shinobi", sd)["series_title"] == "Echoes of the Aether"
+    research._write_state("shinobi", {**research.load_series("shinobi", sd), "series_title": "Chronicles of the Aether Blade", "title": "Chronicles of the Aether Blade"}, sd)
+    r2 = research.research_part("shinobi", "p", cfg=_cfg(), client=RenamingClient(), series_dir=sd)  # a wrong stored title is corrected too
+    assert r2["comic"]["series"]["title"] == "Echoes of the Aether" and research.load_series("shinobi", sd)["title"] == "Echoes of the Aether"
+
+
+def test_part_title_has_one_marker_and_a_short_hook():
+    t = research.part_title("Echoes of the Aether", 1, 2, "The Guardian Locks Onto Kaelen In The Ruined Sky City and more")
+    assert t.count("Part") == 1 and t.startswith("Echoes of the Aether – Ch.1 Part 2: ") and len(t.split(": ", 1)[1]) <= 40 and len(t) <= 100
+    assert not t.rstrip().endswith((" In", " The", " the", " of"))
+    assert research.part_title("S", 1, 1, "") == "S – Ch.1 Part 1"
+
+
+def test_seo_never_rewrites_a_chapter_part_title(monkeypatch):
+    from aurora import autopilot
+    from aurora.publish import seo
+
+    monkeypatch.setattr(seo, "build_metadata", lambda *a, **k: {"title": "Clickbait Pt. 1", "description": "d", "tags": ["x"]})
+    meta = {"title": "Echoes of the Aether – Ch.1 Part 1: Hook", "tags": [], "description": ""}
+    fail = lambda c: (_ for _ in ()).throw(RuntimeError("no service"))  # noqa: E731
+    out = autopilot.apply_seo({}, {"name": "c"}, {"chapter": 1, "part": 1, "topic": "t"}, meta, fail)
+    assert out["title"] == meta["title"] and out["description"] == "d"
+    out = autopilot.apply_seo({}, {"name": "c"}, {"part": 1, "topic": "t"}, meta, fail)  # plain series parts keep the SEO title
+    assert out["title"] == "Clickbait Pt. 1"
+
+
+def test_rerender_from_cached_panels_uses_no_images_and_does_not_advance_the_chapter(workspace_tmp_path, monkeypatch):
+    from aurora import comic_layout
+
+    tmp = workspace_tmp_path
+    imgs = []
+    for i in range(5):
+        p = tmp / f"c{i}.png"
+        Image.effect_noise((576, 1024), 50).convert("RGB").save(p)
+        imgs.append(str(p))
+
+    def tts(text, out, lang=None, options=None):
+        wav = Path(out).with_suffix(".wav")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=f=300:d=0.6", str(wav)], check=True)
+        return wav, "fake"
+
+    monkeypatch.setattr(comic, "synthesize_voiceover", tts)
+    monkeypatch.setattr(comic_layout, "foreground_mask", lambda p: None)
+    for name, val in (("PANEL_MIN_S", 1.2), ("COVER_S", 1.2), ("END_S", 1.2)):
+        monkeypatch.setattr(comic, name, val)
+    spec = research.research_comic("c", "a swordsman", panels=5, cfg={}, series_dir=tmp / "s0")["comic"]
+    spec["series"].update(title="Echoes of the Aether", part=1, total_parts=10)
+    info = {"number": 1, "title": "T", "part": 1, "parts": 10, "beat": {}, "series_title": "Echoes of the Aether", "final": False}
+    sd = tmp / "ser"
+    research._write_state("c", {"chapter": {"number": 1, "parts_done": 1, "parts": 10, "rendered": [], "recaps": [], "complete": False}}, sd)
+    res = comic.make_comic_reel("c", "", tmp / "out", cfg={"comic": {}}, comic=spec, chapter=info, images=imgs, switchboard=object(), music=False,
+                                series_dir=sd, record=False)
+    side = json.loads(Path(res["sidecar"]).read_text(encoding="utf-8"))
+    assert side["image_mode"] == "cached" and res["title"].startswith("Echoes of the Aether – Ch.1 Part 1")
+    assert research.load_series("c", sd)["chapter"]["parts_done"] == 1  # unchanged

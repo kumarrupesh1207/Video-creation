@@ -18,3 +18,10 @@ each one ~30 s comic Short (unchanged format, locked cast).
 
 ## Publisher side (autopilot)
 One playlist per series, ordered by `(chapter, part)`; the compilation sorts after its parts (`autopilot.order_key`). The insert position comes from the live playlist (`youtube.compute_position`): videos Aurora does not know (pilots) count as earlier, so they never get mixed into the parts. `render_chapters` queues each `chapter.json` once at `publish_at_hint` (queue honours it but never earlier than the veto window).
+
+## Series title is fixed content (2026-10-25 incident)
+Research renamed the series ("Chronicles of the Aether Blade") because shinobi's state had no title and the Gemini outline supplied one; SEO then appended a second
+marker ("Pt. 1 – Ch.1 Part 1"). Fixes: `research.fixed_series_title(channel)` (story pack series.yaml) always overrides the state title and the outline/part titles in
+`research_part`; `part_title` = one marker, hook <= 40 chars, title <= 100; `apply_seo` never rewrites a chapter part title (description/tags only).
+Repair without credits: `make_comic_reel(..., images=<cached panels>, record=False)` re-renders a part from its stored panels (`panel_images` in the sidecar).
+Gotcha: `PublishQueue()` without `cfg=` uses default slots (19:00); always `PublishQueue(cfg=cfg)` when enqueuing by hand.

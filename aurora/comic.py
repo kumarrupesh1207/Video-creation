@@ -732,7 +732,7 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode=None, 
 def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None = None, language: str = "English",
                     panels: int = 6, voice: str = "en-US-AvaNeural", comic: dict | None = None, switchboard=None,
                     music: bool = True, series_dir: Path | None = None, resolution: tuple[int, int] | None = None,
-                    client=None, image_mode: str | None = None, chapter: dict | None = None) -> dict:
+                    client=None, image_mode: str | None = None, chapter: dict | None = None, images: list | None = None, record: bool = True) -> dict:
     """Research (series-aware) -> panel images (NIM -> local ComfyUI anime) -> render -> validate -> sidecar -> save series state.
 
     Returns {"video", "sidecar", "title", "caption", "part", "source", "seconds"}. Raises on validation failure."""
@@ -763,8 +763,11 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
     from aurora import cast as cast_mod
 
     lock = bool(cfg.get("comic", {}).get("cast_lock", False))
-    images, timings, img_note, mode_used = _panel_images(cfg, switchboard, comic, seed, job, resolution, image_mode,
-                                                         cast_mod.reference_image(channel) if lock else None)
+    if images:  # re-render from cached panels: no image generation, no NIM credits
+        images, timings, img_note, mode_used = [Path(p) for p in images], [], "re-rendered from cached panels (0 credits)", "cached"
+    else:
+        images, timings, img_note, mode_used = _panel_images(cfg, switchboard, comic, seed, job, resolution, image_mode,
+                                                             cast_mod.reference_image(channel) if lock else None)
     out_dir = Path(out_dir) / date.today().isoformat()
     out_dir.mkdir(parents=True, exist_ok=True)
     mp4 = out_dir / f"{slug}.mp4"
@@ -796,7 +799,7 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
     sidecar = mp4.with_suffix(".json")
     sidecar.write_text(json.dumps(side, indent=2, ensure_ascii=False), encoding="utf-8")
     compiled = None
-    if chapter:
+    if chapter and record:
         research.record_part(channel, comic, chapter, {"part": part, "video": str(mp4), "sidecar": str(sidecar), "title": title}, sdir)
         if chapter["final"]:  # the chapter is complete: build the 16:9 compilation from the cached parts (0 NIM credits)
             try:
@@ -808,7 +811,7 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
                 compiled = {"error": str(exc)[:300]}
             side["chapter_compilation"] = compiled
             sidecar.write_text(json.dumps(side, indent=2, ensure_ascii=False), encoding="utf-8")
-    else:
+    elif not chapter:
         research.save_series(channel, comic, sdir)
     return {"video": str(mp4), "sidecar": str(sidecar), "title": title, "caption": caption, "part": part,
             "source": source, "seconds": info["seconds"], **({"chapter": chapter} if chapter else {})}

@@ -489,9 +489,37 @@ def chapter_parts(cfg: dict | None) -> int:
     return max(10, int(((cfg or {}).get("comic") or {}).get("chapter_parts", 10) or 10))
 
 
+HOOK_MAX = 40
+
+
+def _short_hook(hook: str, room: int = HOOK_MAX) -> str:
+    """Hook <= 40 characters (and whatever still fits in the 100-character title), cut at a word boundary."""
+    hook = " ".join((hook or "").replace(":", " ").split()).rstrip(".")
+    if len(hook) <= room:
+        return hook
+    words = (hook[:room].rsplit(" ", 1)[0] or hook[:room]).split()
+    while len(words) > 2 and words[-1].lower().strip(",;-") in {"a", "an", "the", "in", "of", "and", "to", "with", "at", "on", "for", "by", "from", "into", "its", "his", "her"}:
+        words.pop()
+    return " ".join(words).rstrip(" ,;-")
+
+
 def part_title(series: str, chapter: int, part: int, hook: str = "") -> str:
-    """"<Series> – Ch.<N> Part <M>: <hook>" (the en dash is intentional, it is the format the user approved)."""
-    return f"{series} – Ch.{chapter} Part {part}" + (f": {hook.strip().rstrip('.')}" if hook and hook.strip() else "")
+    """"<Series> – Ch.<N> Part <M>: <hook>" (the en dash is intentional, it is the format the user approved). One Part marker,
+    hook <= 40 characters, whole title <= 100."""
+    base = f"{series} – Ch.{chapter} Part {part}"
+    h = _short_hook(hook, min(HOOK_MAX, 100 - len(base) - 2))
+    return base + (f": {h}" if h else "")
+
+
+def fixed_series_title(channel: str) -> str | None:
+    """The series title is CONTENT (story pack series.yaml): research may never rename it."""
+    try:
+        from aurora import story
+
+        pdir = story.find_pack(channel)
+        return str(story.load_pack(pdir.name)["series"]["title"]) if pdir else None
+    except Exception:  # noqa: BLE001 - a broken pack is reported by `story lint`, never here
+        return None
 
 
 def end_card_for(chapter: int, part: int, parts: int) -> tuple[str, str]:
@@ -542,7 +570,7 @@ def _outline_fallback(premise: str, parts: int, cast: list[dict], state: dict, n
 
 
 def research_part(channel: str, premise: str, language: str = "English", panels: int = 6, cfg: dict | None = None, client=None,
-                  series_dir: Path = SERIES_DIR, cast_root: Path | None = None, world: str = "") -> dict:
+                  series_dir: Path = SERIES_DIR, cast_root: Path | None = None, world: str = "", series_title: str | None = None) -> dict:
     """Part M of Chapter N, written from beat M of the chapter outline + the recaps of parts 1..M-1 (continuity).
     Returns {"comic": {...Comic...}, "chapter": {number, title, part, parts, beat, series_title, final}, "source", "note"}."""
     cfg = cfg if cfg is not None else _settings()
@@ -552,6 +580,10 @@ def research_part(channel: str, premise: str, language: str = "English", panels:
     parts = chapter_parts(cfg)
     cast = cast_mod.load_cast(channel, cast_root or cast_mod.CAST_ROOT) if cfg.get("comic", {}).get("cast_lock", False) else []
     state = load_series(channel, series_dir)
+    fixed = series_title or fixed_series_title(channel)
+    if fixed and state.get("series_title") != fixed:  # the fixed title always wins over whatever an earlier run stored
+        state.update(series_title=fixed, title=fixed)
+        _write_state(channel, state, series_dir)
     ch = state.get("chapter")
     key = os.getenv(rcfg.get("api_key_env", "GEMINI_API_KEY"), "").strip()
     live = client is not None or bool(key)
@@ -585,14 +617,14 @@ def research_part(channel: str, premise: str, language: str = "English", panels:
                 note, source = f"outline fallback: {str(exc)[:90]}", "topic_fallback"
         if outline is None:
             outline = _outline_fallback(premise, parts, cast, state, number)
-        series_title = state.get("series_title") or outline["series_title"]
+        series_title = fixed or state.get("series_title") or outline["series_title"]  # the outline's own series_title is ignored when fixed
         ch = {"number": number, "title": outline["chapter_title"], "summary": outline.get("summary", ""), "outline": outline["beats"], "parts": parts,
               "parts_done": 0, "recaps": [], "rendered": [], "complete": False}
         state.update(series_title=series_title, title=series_title, chapter=ch)
         _write_state(channel, state, series_dir)  # the outline persists even if this part's render fails
     m = int(ch["parts_done"]) + 1
     beat = ch["outline"][m - 1]
-    series_title = state.get("series_title") or premise[:40]
+    series_title = fixed or state.get("series_title") or premise[:40]
     n = max(5, min(int(panels), 10))
     final = m >= int(ch["parts"])
     comic = None
