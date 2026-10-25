@@ -306,6 +306,21 @@ def update_video_status(service, video_id: str, privacy: str, publish_at: str | 
     service.videos().update(part="status", body={"id": video_id, "status": status}).execute()
 
 
+def update_video_snippet(service, video_id: str, fields: dict, budget=None) -> dict:
+    """videos.update(part=snippet) on a LIVE or scheduled video: merges `fields` (title, description, tags, categoryId,
+    defaultLanguage, ...) into the current snippet, because an update replaces the whole snippet. The status part (privacy,
+    publishAt, disclosure flag) is never sent, so a scheduled publish is not touched. Returns the snippet that was sent."""
+    if budget:
+        budget.spend("videos.list")
+    cur = service.videos().list(part="snippet", id=video_id).execute()["items"][0]["snippet"]
+    snippet = {k: cur[k] for k in ("title", "description", "tags", "categoryId", "defaultLanguage", "defaultAudioLanguage") if k in cur}
+    snippet.update({k: v for k, v in fields.items() if v is not None})
+    if budget:
+        budget.spend("videos.update")
+    service.videos().update(part="snippet", body={"id": video_id, "snippet": snippet}).execute()
+    return snippet
+
+
 def rfc3339(dt) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 

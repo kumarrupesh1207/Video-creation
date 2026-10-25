@@ -113,3 +113,64 @@ def test_reseo_regenerates_from_sidecar_and_refuses_uploaded(workspace_tmp_path)
     q._update(it["id"], status="uploaded_scheduled")
     with pytest.raises(ValueError):
         autopilot.reseo_item(q, it["id"], cfg)
+
+
+# ---- update-metadata: new SEO on a video that is already on YouTube (snippet only) ------------------
+def _uploaded_item(workspace_tmp_path, status="uploaded_scheduled"):
+    cfg = {"autopilot": {"publish": {}, "channels": [{"name": "shinobi", "platforms": ["youtube"], "expected_handle": "@ShinobiMindset1"}]}}
+    q = PublishQueue(workspace_tmp_path / "q.json", cfg)
+    mp4 = workspace_tmp_path / "p.mp4"
+    mp4.write_bytes(b"x")
+    mp4.with_suffix(".json").write_text(json.dumps({
+        "title": "Echoes of the Aether – Ch.1 Part 2: Awakening", "part": "2", "caption": "A claw forms. Part 3 tomorrow", "hook": "Awakening",
+        "playlist": "Echoes of the Aether", "story": "echoes-of-the-aether", "panels": [{"narration": "A claw rises from the sphere."}],
+        "chapter": {"number": 1, "parts": 10, "beat": {"summary": "Kaelen finds a sphere."}, "series_title": "Echoes of the Aether"},
+        "series": {"title": "Echoes of the Aether", "recap": "Kaelen enters the sky city."}}), encoding="utf-8")
+    it = q.enqueue("shinobi", mp4, {"title": "Echoes of the Aether – Ch.1 Part 2: Awakening", "description": "old", "tags": ["the"], "duration_secs": 30}, now=None)
+    q._update(it["id"], status=status, video_id="VID2")
+    return cfg, q, it
+
+
+def _live_service():
+    svc = MagicMock()
+    svc.videos.return_value.list.return_value.execute.return_value = {"items": [{"snippet": {
+        "title": "Old title", "description": "old", "tags": ["the"], "categoryId": "22", "defaultLanguage": "en-US", "channelId": "UC", "publishedAt": "x"}}]}
+    return svc
+
+
+def test_update_metadata_sends_snippet_only_and_never_status(workspace_tmp_path):
+    cfg, q, it = _uploaded_item(workspace_tmp_path)
+    svc = _live_service()
+    out = autopilot.update_metadata(q, it["id"], cfg, confirm=True, service_factory=lambda c: svc)
+    call = svc.videos.return_value.update.call_args.kwargs
+    assert call["part"] == "snippet" and "status" not in call["body"] and call["body"]["id"] == "VID2"  # publishAt/privacy untouched
+    sn = call["body"]["snippet"]
+    assert sn["categoryId"] == "1" and sn["defaultLanguage"] == "en" and sn["defaultAudioLanguage"] == "en"
+    assert sn["title"] == it["title"] and sn["description"].rstrip().endswith("#EchoesOfTheAether #anime #animestory") and 5 <= len(sn["tags"]) <= 10
+    assert "channelId" not in sn and "publishedAt" not in sn  # read-only fields are not sent back
+    got = q.get(it["id"])
+    assert got["description"] == sn["description"] and got["tags"] == sn["tags"] and got["metadata_updated_at"] and got["status"] == "uploaded_scheduled"
+    assert out["after"]["title"] == it["title"]
+
+
+def test_update_metadata_needs_confirm_and_dry_run_touches_nothing(workspace_tmp_path):
+    cfg, q, it = _uploaded_item(workspace_tmp_path)
+    svc = _live_service()
+    with pytest.raises(PermissionError):
+        autopilot.update_metadata(q, it["id"], cfg, confirm=False, service_factory=lambda c: svc)
+    preview = autopilot.update_metadata(q, it["id"], cfg, dry_run=True, service_factory=lambda c: svc)
+    assert "Watch Part 3 next" in preview["after"]["description"]
+    svc.videos.return_value.update.assert_not_called()
+    assert q.get(it["id"])["description"] == "old"
+
+
+def test_update_metadata_refuses_items_not_on_youtube(workspace_tmp_path):
+    cfg, q, it = _uploaded_item(workspace_tmp_path, status="vetoed")
+    with pytest.raises(ValueError):
+        autopilot.update_metadata(q, it["id"], cfg, confirm=True, service_factory=lambda c: _live_service())
+
+
+def test_update_video_snippet_keeps_unrelated_fields():
+    svc = _live_service()
+    sent = yt.update_video_snippet(svc, "V", {"title": "New", "tags": None})
+    assert sent["title"] == "New" and sent["tags"] == ["the"] and sent["description"] == "old"  # None = keep what is there

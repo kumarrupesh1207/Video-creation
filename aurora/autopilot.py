@@ -389,6 +389,41 @@ def apply_seo(cfg: dict, ch: dict, idea: dict, meta: dict, service_factory=None,
         return meta
 
 
+def _fresh_metadata(queue: PublishQueue, it: dict, cfg: dict, service_factory=None, budget=None, client=None) -> dict:
+    """New title/description/tags for an existing queue item, rebuilt from its render sidecar (no re-render)."""
+    import json as _json
+
+    side = _json.loads(Path(it["path"]).with_suffix(".json").read_text(encoding="utf-8"))
+    ch = next((c for c in channels_from(cfg) if c["name"] == it["channel"]), {"name": it["channel"]})
+    idea = idea_from_sidecar(side)
+    meta = {"title": it["title"], "description": it.get("description", ""), "tags": idea["hashtags"], "duration_secs": it.get("duration_secs"),
+            "chapters": it.get("chapters"), "playlist": it.get("playlist")}
+    new = apply_seo(cfg, ch, idea, meta, service_factory, budget, client)
+    return {k: new[k] for k in ("title", "description", "tags")}
+
+
+def update_metadata(queue: PublishQueue, item_id: str, cfg: dict, confirm: bool = False, dry_run: bool = False, service_factory=None,
+                    budget=None, client=None) -> dict:
+    """Apply fresh SEO text to a video that is ALREADY on YouTube (uploaded_scheduled or published): videos.update with the
+    snippet only, so status/publishAt/privacy are untouched; then the queue item is updated. Needs confirm (--i-confirm);
+    dry_run just returns the generated text. Always an explicit, per-video action: never run automatically."""
+    from aurora.publish import youtube as yt
+
+    it = queue.get(item_id)
+    if not it or it.get("platform", "youtube") != "youtube" or not it.get("video_id") or it["status"] not in ("uploaded_scheduled", "published"):
+        raise ValueError("update-metadata needs a YouTube item that is already uploaded (has a video id)")
+    after = _fresh_metadata(queue, it, cfg, service_factory, budget, client)
+    out = {"video_id": it["video_id"], "before": {k: it.get(k) for k in after}, "after": after, "categoryId": "1", "defaultLanguage": "en"}
+    if dry_run:
+        return out
+    if not confirm:
+        raise PermissionError("update-metadata changes a live video: pass --i-confirm (or --dry-run to preview)")
+    service = (service_factory or (lambda c: yt.build_service(c, expected_handle=queue.expected_handles.get(c))))(it["channel"])
+    yt.update_video_snippet(service, it["video_id"], {**after, "categoryId": "1", "defaultLanguage": "en", "defaultAudioLanguage": "en"}, budget)
+    queue._update(item_id, **after, metadata_updated_at=datetime.now(timezone.utc).isoformat())
+    return out
+
+
 def reseo_item(queue: PublishQueue, item_id: str, cfg: dict, service_factory=None, budget=None, client=None, apply: bool = True) -> dict:
     """Regenerate the SEO metadata of a not-yet-uploaded item from its render sidecar (no re-render, no upload).
     Returns {"before": {...}, "after": {...}}; with apply=False nothing is written."""
@@ -397,14 +432,8 @@ def reseo_item(queue: PublishQueue, item_id: str, cfg: dict, service_factory=Non
     it = queue.get(item_id)
     if not it or it["status"] not in ("scheduled", "vetoed", "pending_approval"):
         raise ValueError("only items that are not uploaded yet can be re-SEO'd")
-    side = _json.loads(Path(it["path"]).with_suffix(".json").read_text(encoding="utf-8"))
-    ch = next((c for c in channels_from(cfg) if c["name"] == it["channel"]), {"name": it["channel"]})
-    idea = idea_from_sidecar(side)
-    meta = {"title": it["title"], "description": it.get("description", ""), "tags": idea["hashtags"], "duration_secs": it.get("duration_secs"),
-            "chapters": it.get("chapters"), "playlist": it.get("playlist")}
-    new = apply_seo(cfg, ch, idea, meta, service_factory, budget, client)
+    after = _fresh_metadata(queue, it, cfg, service_factory, budget, client)
     before = {k: it.get(k) for k in ("title", "description", "tags")}
-    after = {k: new[k] for k in ("title", "description", "tags")}
     if apply:
         queue._update(item_id, **after)
     return {"before": before, "after": after}
@@ -886,7 +915,7 @@ def main(argv: list[str] | None = None) -> int:
     load_env()
     ap = argparse.ArgumentParser(description="Aurora autopilot")
     ap.add_argument("cmd", choices=["render", "publish-due", "publish-one", "analytics", "status", "veto", "approve", "comments",
-                                    "comment-approve", "comment-reject", "weekly-report", "approvals", "daily-report", "reseo"])
+                                    "comment-approve", "comment-reject", "weekly-report", "approvals", "daily-report", "reseo", "update-metadata"])
     ap.add_argument("--reply", help="comment-approve: edited reply text")
     ap.add_argument("--privacy", default="private", choices=["private", "unlisted", "public"], help="publish-one only")
     ap.add_argument("--i-confirm", action="store_true", help="publish-one: required; bypasses the kill-switch for this ONE item")
@@ -914,6 +943,19 @@ def main(argv: list[str] | None = None) -> int:
                           dry_run=a.dry_run, budget=budget))
         if not a.dry_run:
             print(f"[autopilot] daily report: {write_daily_report(q, budget)}")
+    elif a.cmd == "update-metadata":
+        import json as _json
+
+        from aurora.publish.quota import QuotaBudget
+
+        if not a.id:
+            ap.error("queue id required")
+        try:
+            res = update_metadata(q, a.id, cfg, a.i_confirm, a.dry_run, budget=QuotaBudget())
+        except PermissionError as e:
+            print(f"[autopilot] refused: {e}", file=sys.stderr)
+            return 2
+        print(_json.dumps(res, indent=2, ensure_ascii=False))
     elif a.cmd == "reseo":
         import json as _json
 
