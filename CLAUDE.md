@@ -35,6 +35,7 @@ Runs on a CPU-only Windows PC (Ryzen 5 5600G, 16 GB, no NVIDIA GPU). History/sta
 - Comic `image_mode: nim` never touches ComfyUI (`comic.nim_comfy_fallback: false`); optional ComfyUI use is preflighted (`/system_stats`) and skipped with a warning, never a crash.
 - Comic `image_mode: comfy` never falls back to NIM; any NIM fallback must be explicit, capped and logged (65e825f).
 - Autopilot publish kill-switch `autopilot.publish.enabled` stays `false` until the user says go (ecf6a44).
+- YouTube text follows `docs/research/YOUTUBE_SEO.md`: unique description per part, exactly 3 hashtags (series first), 5-10 tags, no keyword lists, ONE disclosure line; SEO data lives in `stories/<slug>/series.yaml` (`aurora/publish/seo.py`).
 - Every upload carries the AI/synthetic disclosure (`containsSyntheticMedia: true`) — docs/AUTOPILOT.md.
 - Never stop or restart ComfyUI while its `/queue` has running/pending jobs; `stop_aurora.bat` enforces this.
 - Supervisor must run detached (WMI), never as a child of the launching shell (98c7c37).

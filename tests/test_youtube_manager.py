@@ -59,8 +59,8 @@ def test_seo_pick_best_chapters_and_description():
     txt = seo.format_chapters(ch, 270)
     assert txt.splitlines()[0] == "0:00 Intro" and "3:20 End" in txt
     assert seo.format_chapters(ch[:2], 270) == "" and seo.format_chapters(ch, 40) == ""  # <3 chapters / short video
-    d = seo.build_description("Hook.", "Recap.", ["anime"], ["#Shorts"], txt)
-    assert "AI-generated" in d and "Chapters:" in d and d.startswith("Hook.")
+    d = seo.build_description("Hook.", "Recap.", ["#a", "#b", "#c"], txt)
+    assert d.count("AI-generated") == 1 and "Chapters:" in d and d.startswith("Hook.") and d.rstrip().endswith("#a #b #c")
 
 
 def test_seo_build_metadata_with_mocked_gemini_and_search(workspace_tmp_path):

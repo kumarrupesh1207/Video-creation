@@ -102,16 +102,18 @@ def competitor_research(service, query: str, budget=None, max_results: int = 10,
 
 
 OPTIONS_PROMPT = (
-    "You write YouTube metadata for an original anime story channel (Shorts). Series: {series}, chapter {chapter}, part {part} of {parts}. "
-    "This part: {beat} Recap so far: {recap} Last caption: {caption} Competitor titles (keyword ideas only, never copy): {titles}. "
-    "Target keyword phrases: {keywords}. Return JSON {{\"titles\": [3 distinct titles, each <= 70 characters, curiosity-driven, honest], "
-    "\"hook\": \"one punchy first sentence for the description\", \"summary\": \"2-3 natural sentences about this part that "
-    "work 2-3 of the keyword phrases in, no spoilers beyond this part, no hashtags, no links\"}}. Language: English."
+    "You write YouTube metadata for an original anime story channel (Shorts), following YouTube's guidelines. Series: {series}, chapter {chapter}, "
+    "part {part} of {parts}. What happens in THIS part: {events} Beat: {beat} Recap so far: {recap}. Competitor titles (ideas only, never copy): {titles}. "
+    "Main keyword: {main}. Return JSON {{\"titles\": [3 distinct titles, each <= 70 characters, honest, include the main keyword only if natural], "
+    "\"hook\": \"one punchy first sentence that contains the main keyword once\", \"summary\": \"2-3 sentences unique to THIS part, "
+    "built only from the events above, no spoilers beyond this part, natural wording: no keyword lists, no hashtags, no links, no 'Part N tomorrow'\"}}. "
+    "Language: English."
 )
 
 
 def generate_options(series: str, part: int, recap: str, research: dict, keywords: list[str], client=None, cfg: dict | None = None,
-                     chapter: int | None = None, parts: int | None = None, beat: str = "", caption: str = "") -> dict:
+                     chapter: int | None = None, parts: int | None = None, beat: str = "", caption: str = "",
+                     events: list[str] | None = None, main_keyword: str = "") -> dict:
     """Gemini proposes titles + hook + summary. Returns {"titles", "hook", "summary", "source": "gemini"|"none"}."""
     cfg = cfg or {}
     rc = cfg.get("research", {}) or {}
@@ -128,9 +130,9 @@ def generate_options(series: str, part: int, recap: str, research: dict, keyword
 
         resp = client.models.generate_content(
             model=rc.get("model", "gemini-3.1-flash-lite"),
-            contents=OPTIONS_PROMPT.format(series=series, chapter=chapter or 1, part=part, parts=parts or "?", beat=beat[:300] or "-",
-                                           recap=recap[:500] or "-", caption=caption[:200] or "-",
-                                           titles=research.get("titles", [])[:8], keywords=keywords[:8]),
+            contents=OPTIONS_PROMPT.format(series=series, chapter=chapter or 1, part=part, parts=parts or "?",
+                                           events=" ".join(events or [caption])[:700] or "-", beat=beat[:300] or "-",
+                                           recap=recap[:400] or "-", titles=research.get("titles", [])[:6], main=main_keyword or "anime story"),
             config=types.GenerateContentConfig(response_mime_type="application/json"))
         data = json.loads(resp.text)
         titles = [str(t).strip() for t in data.get("titles", []) if str(t).strip()][:3]
@@ -170,20 +172,43 @@ def format_chapters(chapters: list[dict] | None, duration_secs: float | None) ->
     return "\n".join(f"{_ts(c['start'])} {c['title']}" for c in ch)
 
 
-def clean_hashtags(hashtags: list[str] | None, is_short: bool = True, limit: int = 5) -> list[str]:
-    """At most `limit` unique hashtags (case-insensitive); #Shorts first and only once for Shorts."""
+def series_hashtag(series: str | None) -> str:
+    """'Echoes of the Aether' -> '#EchoesOfTheAether' (used when the series pack does not set `hashtag`)."""
+    words = re.findall(r"[A-Za-z0-9]+", series or "")
+    return "#" + "".join(w if w.isupper() else w.capitalize() for w in words) if words else ""
+
+
+def clean_hashtags(hashtags: list[str] | None, is_short: bool = True, limit: int = 3, shorts_tag: bool = False) -> list[str]:
+    """Exactly the first `limit` (default 3) unique hashtags, most relevant first (the first three show above the title).
+    #Shorts is optional (vertical <= 3 min is a Short anyway) and at most once."""
     out: list[str] = []
     seen: set[str] = set()
-    for h in (["#Shorts"] if is_short else []) + list(hashtags or []):
-        h = "#" + re.sub(r"[^A-Za-z0-9_]", "", h.lstrip("#"))
-        if len(h) > 1 and h.lower() not in seen and h.lower() != ("#shorts" if not is_short else ""):
-            seen.add(h.lower())
+    for h in list(hashtags or []) + (["#Shorts"] if shorts_tag and is_short else []):
+        h = "#" + re.sub(r"[^A-Za-z0-9_]", "", str(h).lstrip("#"))
+        key = h.lower()
+        if len(h) > 1 and key not in seen and (key != "#shorts" or (shorts_tag and is_short)):
+            seen.add(key)
             out.append(h)
     return out[:limit]
 
 
-def clean_tags(candidates: list[str], exclude: set[str], lo: int = 8, hi: int = 15) -> list[str]:
-    """8-15 clean lowercase tags: phrases, no lone stop-words / series-title tokens, no hashtags marks, <= 450 chars total."""
+def misspellings(series: str | None, given: list[str] | None = None, n: int = 3) -> list[str]:
+    """Common misspellings people type for the series name (pack `seo_misspellings` first, else simple automatic variants)."""
+    if given:
+        return [g.lower() for g in given][:n]
+    t = (series or "").lower().strip()
+    if not t:
+        return []
+    cands = [re.sub(r"\bthe\b ?", "", t).strip(), re.sub(r"oes\b", "os", t), re.sub(r"ae", "e", t), re.sub(r"(.)\1", r"\1", t, count=1)]
+    out: list[str] = []
+    for c in cands:
+        if c and c != t and c not in out:
+            out.append(c)
+    return out[:n]
+
+
+def clean_tags(candidates: list[str], exclude: set[str], lo: int = 5, hi: int = 10) -> list[str]:
+    """5-10 clean lowercase tags: phrases, no lone stop-words / series-title tokens, no hashtag marks, <= 450 chars total."""
     out: list[str] = []
     total = 0
     for c in candidates:
@@ -206,14 +231,25 @@ def _sentences(text: str) -> str:
     return re.sub(r"\s*(Part \d+ tomorrow|Chapter \d+ finale)\.?\s*$", "", text.strip(), flags=re.I).strip()
 
 
-def build_description(hook: str, summary: str, keywords: list[str], hashtags: list[str], chapters_text: str = "",
-                      ai_note: str = AI_NOTE, next_line: str = "", playlist_line: str = "", cta: str = "") -> str:
-    """Hook, summary, next-part line, playlist mention, follow CTA, keywords used naturally, hashtags ONCE, one disclosure line."""
-    k3 = keywords[:3]
-    natural = f"Perfect if you like {', '.join(k3[:-1])} and {k3[-1]}." if len(k3) >= 3 else ""
-    parts = [hook, summary, chapters_text and f"Chapters:\n{chapters_text}", next_line, playlist_line, cta, natural, ai_note,
+def build_description(hook: str, summary: str, hashtags: list[str], chapters_text: str = "", ai_note: str = AI_NOTE,
+                      next_line: str = "", playlist_line: str = "") -> str:
+    """Hook (+ main keyword), a unique 2-3 sentence body, at most 2 short boilerplate lines (next part, playlist), ONE disclosure
+    line, then the hashtags last. No keyword lists."""
+    parts = [hook, summary, chapters_text and f"Chapters:\n{chapters_text}", "\n".join(x for x in (next_line, playlist_line) if x), ai_note,
              " ".join(hashtags)]
     return "\n\n".join(p.strip() for p in parts if p and p.strip())[:4900]
+
+
+def _body_from_events(beat: str, events: list[str], caption: str, recap: str, n: int = 3) -> str:
+    """Template body for when Gemini is down: this part's own events (beat + narration lines), 2-3 distinct sentences."""
+    out: list[str] = []
+    for t in [beat] + list(events or []) + [caption]:
+        t = _sentences(t or "")
+        if t and t.lower() not in {o.lower() for o in out} and not any(t.lower() in o.lower() or o.lower() in t.lower() for o in out):
+            out.append(t if t[-1] in ".!?\u2026" else t + ".")
+        if len(out) >= n:
+            break
+    return " ".join(out) or _sentences(recap)
 
 
 def build_metadata(topic: str, series: str | None, part: int | None, recap: str, hashtags: list[str] | None = None,
@@ -221,10 +257,12 @@ def build_metadata(topic: str, series: str | None, part: int | None, recap: str,
                    duration_secs: float | None = None, chapters: list[dict] | None = None, state_dir: Path | None = None,
                    chapter: int | None = None, *, beat: str = "", caption: str = "", parts: int | None = None,
                    playlist: str | None = None, niche_keywords: list[str] | None = None, hook: str = "",
-                   cache_dir: Path | None = None) -> dict:
-    """Title, SEO description and 8-15 tags. Never raises; failures are logged loudly and the template is used."""
+                   cache_dir: Path | None = None, events: list[str] | None = None, main_keyword: str | None = None,
+                   series_hashtag_: str | None = None, misspell: list[str] | None = None) -> dict:
+    """Title, SEO description, 5-10 tags and 3 hashtags. Never raises; failures are logged loudly and the template is used."""
     is_short = (duration_secs or 0) < LONG_SECS
     niche = list(niche_keywords or DEFAULT_NICHE)
+    main = (main_keyword or niche[0]).lower()
     research = {"titles": [], "tags": []}
     warnings: list[str] = []
     if service is not None:
@@ -238,7 +276,7 @@ def build_metadata(topic: str, series: str | None, part: int | None, recap: str,
         warnings.append("no YouTube service: competitor research skipped")
     exclude = title_tokens(series, topic, playlist)
     kws = keywords_from(research["titles"] + research["tags"], exclude, niche)
-    opts = generate_options(series or topic, part or 1, recap, research, kws, client, cfg, chapter, parts, beat, caption)
+    opts = generate_options(series or topic, part or 1, recap, research, kws, client, cfg, chapter, parts, beat, caption, events, main)
     if opts["source"] == "none":
         warnings.append("Gemini options unavailable: template used")
     best = pick_best(opts["titles"], kws)
@@ -251,18 +289,21 @@ def build_metadata(topic: str, series: str | None, part: int | None, recap: str,
     elif best and series and part and f"part {part}" not in best.lower():
         best = f"{best[:100 - len(f' – Part {part}')]} – Part {part}"
     title = best or fallback_title or topic
-    # template pieces: every part is real story text from the sidecar, never filler about other topics
-    story_line = _sentences(beat) or _sentences(caption)
-    summary = opts["summary"] or " ".join(x for x in (_sentences(recap), story_line if story_line != _sentences(recap) else "") if x)
-    first = opts["hook"] or hook or (f"{series}: {_sentences(caption)}" if series and caption else title)
+    # line 1-2: hook + ONE main keyword; body: unique to this part
+    body = opts["summary"] or _body_from_events(beat, events or [], caption, recap)
+    first = opts["hook"] or hook or _sentences(caption) or title
+    if main not in (first + " " + body).lower():
+        first = f"{first.rstrip('. ')}. Original {main}."
     nxt = ""
     if part and parts and part < parts:
         nxt = f"Watch Part {part + 1} next → a new part every day."
     elif part and parts and part >= parts:
-        nxt = f"That was the final part of Chapter {chapter or 1}. The full chapter is coming soon."
+        nxt = f"That was the final part of Chapter {chapter or 1}."
     pl = f"All parts in order: the \"{playlist or series}\" playlist." if (playlist or series) else ""
-    tag_pool = list(kws) + [series.lower()] * bool(series) + [t.lstrip("#") for t in (hashtags or [])] + DEFAULT_NICHE
+    hts = clean_hashtags([series_hashtag_ or series_hashtag(series)] + [h for h in (hashtags or [])], is_short)
+    name = (series or "").lower()
+    tag_pool = ([name] if name else []) + misspellings(series, misspell) + list(niche) + list(kws) + [t.lstrip("#") for t in (hashtags or [])]
     tags = clean_tags(tag_pool, exclude)
-    desc = build_description(first, summary, kws, clean_hashtags(hashtags, is_short), format_chapters(chapters, duration_secs),
-                             next_line=nxt, playlist_line=pl, cta="Follow for the next part of the story.")
-    return {"title": title[:100], "description": desc, "tags": tags, "source": opts["source"], "keywords": kws, "warnings": warnings}
+    desc = build_description(first, body, hts, format_chapters(chapters, duration_secs), next_line=nxt, playlist_line=pl)
+    return {"title": title[:100], "description": desc, "tags": tags, "source": opts["source"], "keywords": kws, "warnings": warnings,
+            "hashtags": hts}

@@ -12,6 +12,7 @@ import json
 import os
 import random
 import re
+import sys
 import time
 from datetime import timezone
 from pathlib import Path
@@ -115,13 +116,15 @@ def build_service(channel: str, interactive: bool = False, expected_handle: str 
 def build_body(meta: dict, privacy: str = "public", publish_at: str | None = None) -> dict:
     tags = [t.lstrip("#") for t in meta.get("tags", [])]
     desc = meta.get("description", "")
-    if "#shorts" not in desc.lower() and meta.get("kind", "short") == "short" and (meta.get("duration_secs") or 0) < 180:
+    if "#" not in desc and meta.get("kind", "short") == "short" and (meta.get("duration_secs") or 0) < 180:  # only when no hashtags at all
         desc = f"{desc}\n\n#Shorts".strip()
     status = {"privacyStatus": privacy, "selfDeclaredMadeForKids": False,
               "containsSyntheticMedia": bool(meta.get("ai_disclosure", True))}
     if publish_at:  # YouTube requires private + RFC3339 time
         status.update(privacyStatus="private", publishAt=publish_at)
-    return {"snippet": {"title": meta["title"][:100], "description": desc[:5000], "tags": tags[:30], "categoryId": "22"},
+    lang = meta.get("language") or "en"
+    return {"snippet": {"title": meta["title"][:100], "description": desc[:5000], "tags": tags[:30], "categoryId": "1",  # Film & Animation
+                        "defaultLanguage": lang, "defaultAudioLanguage": lang},
             "status": status}
 
 
@@ -176,6 +179,15 @@ def _save_cache(sf: Path, cache: dict) -> None:
     os.replace(tmp, sf)
 
 
+def playlist_privacy_problem(channel: str, title: str, state_dir: Path = STATE_DIR) -> str | None:
+    """Text for the daily report when a series playlist could not be made public, else None."""
+    try:
+        e = json.loads(_state_file(channel, state_dir).read_text(encoding="utf-8")).get(title) or {}
+    except (OSError, ValueError):
+        return None
+    return f"playlist '{title}' is still {e.get('privacy')}: {e.get('privacy_error')}" if e.get("privacy_error") else None
+
+
 def ensure_playlist(service, channel: str, title: str, video_privacy: str = "public", state_dir: Path = STATE_DIR,
                     description: str | None = None) -> str:
     """Find or create the playlist `title`; public only when the video is public, otherwise private."""
@@ -188,9 +200,14 @@ def ensure_playlist(service, channel: str, title: str, video_privacy: str = "pub
     entry = cache.get(title)
     if entry:
         if want == "public" and entry.get("privacy") != "public":  # a public video must not sit in a private list
-            service.playlists().update(part="snippet,status", body={
-                "id": entry["id"], "snippet": {"title": title}, "status": {"privacyStatus": "public"}}).execute()
-            entry["privacy"] = "public"
+            try:
+                service.playlists().update(part="snippet,status", body={
+                    "id": entry["id"], "snippet": {"title": title}, "status": {"privacyStatus": "public"}}).execute()
+                entry["privacy"] = "public"
+                entry.pop("privacy_error", None)
+            except Exception as e:  # noqa: BLE001 - the video is still added; the daily report flags the private playlist
+                entry["privacy_error"] = f"{type(e).__name__}: {e}"[:200]
+                print(f"[youtube] !!! playlist '{title}' could not be made public: {e}", file=sys.stderr)
             _save_cache(sf, cache)
         return entry["id"]
     pid, privacy, token = None, want, None

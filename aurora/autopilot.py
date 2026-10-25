@@ -340,19 +340,24 @@ def idea_from_sidecar(side: dict) -> dict:
             "part": int(side["part"]) if side.get("part") else None, "chapter": chap.get("number"), "parts": chap.get("parts"),
             "playlist": side.get("playlist"), "story": side.get("story"), "recap": ser.get("recap", ""),
             "beat": (chap.get("beat") or {}).get("summary", ""), "caption": side.get("caption", ""), "hook": side.get("hook") or "",
-            "hashtags": list(COMIC_HASHTAGS)}
+            "events": [p.get("narration", "") for p in side.get("panels") or [] if isinstance(p, dict) and p.get("narration")][:6],
+            "hashtags": ["#anime", "#animestory"]}
 
 
-def _niche_keywords(ch: dict, idea: dict) -> list[str] | None:
-    """Curated niche phrases: channel `seo_keywords`, else the series pack's `seo_keywords`, else the module default."""
-    if ch.get("seo_keywords"):
-        return list(ch["seo_keywords"])
+def _pack_seo(ch: dict, idea: dict) -> dict:
+    """SEO data that is CONTENT, not code: the series pack's series.yaml (hashtag, main_keyword, seo_keywords, seo_misspellings,
+    seo_hashtags); channel `seo_keywords` wins for the keyword list. Missing keys fall back to seo.py defaults."""
+    data: dict = {}
     try:
-        from aurora.story import load_pack
+        if idea.get("story"):
+            from aurora.story import load_pack
 
-        return list(load_pack(idea["story"]).get("seo_keywords") or []) or None if idea.get("story") else None
+            data = dict(load_pack(idea["story"]).get("series") or {})
     except Exception:  # noqa: BLE001
-        return None
+        data = {}
+    if ch.get("seo_keywords"):
+        data["seo_keywords"] = list(ch["seo_keywords"])
+    return data
 
 
 def apply_seo(cfg: dict, ch: dict, idea: dict, meta: dict, service_factory=None, budget=None, client=None) -> dict:
@@ -366,17 +371,19 @@ def apply_seo(cfg: dict, ch: dict, idea: dict, meta: dict, service_factory=None,
             service = (service_factory or (lambda c: yt.build_service(c, expected_handle=ch.get("expected_handle"))))(ch["name"])
         except Exception as e:  # noqa: BLE001 - no token yet: SEO still works without competitor data
             print(f"[autopilot] {ch['name']}: SEO without competitor search ({e})", file=sys.stderr)
+        pack = _pack_seo(ch, idea)
         res = seo.build_metadata(idea.get("topic", ""), idea.get("series"), idea.get("part"), idea.get("recap") or idea.get("description", ""),
-                                 hashtags=idea.get("hashtags") or [h for h in meta.get("tags", []) if str(h).startswith("#")],
+                                 hashtags=pack.get("seo_hashtags") or idea.get("hashtags") or [h for h in meta.get("tags", []) if str(h).startswith("#")],
                                  fallback_title=meta["title"], service=service, budget=budget, client=client, cfg=cfg,
                                  duration_secs=meta.get("duration_secs"), chapters=meta.get("chapters"), chapter=idea.get("chapter"),
                                  beat=idea.get("beat", ""), caption=idea.get("caption", ""), parts=idea.get("parts"),
-                                 playlist=idea.get("playlist") or meta.get("playlist"), niche_keywords=_niche_keywords(ch, idea),
-                                 hook=idea.get("hook") or "")
+                                 playlist=idea.get("playlist") or meta.get("playlist"), niche_keywords=pack.get("seo_keywords") or None,
+                                 hook=idea.get("hook") or "", events=idea.get("events"), main_keyword=pack.get("main_keyword"),
+                                 series_hashtag_=pack.get("hashtag"), misspell=pack.get("seo_misspellings"))
         for w in res.get("warnings", []):
             print(f"[autopilot] {ch['name']}: SEO note: {w}", file=sys.stderr)
         title = meta["title"] if idea.get("chapter") and idea.get("part") else res["title"]  # "<Series> – Ch.N Part M: hook" is fixed, never rewritten
-        return {**meta, "title": title, "description": res["description"], "tags": res["tags"] or meta["tags"]}
+        return {**meta, "title": title, "description": res["description"], "tags": res["tags"] or meta["tags"], "language": "en"}
     except Exception as e:  # noqa: BLE001
         print(f"[autopilot] {ch['name']}: SEO failed, using plain metadata: {e}", file=sys.stderr)
         return meta
@@ -670,6 +677,9 @@ def _add_to_playlist(queue: PublishQueue, it: dict, video_id: str, service, play
         pid = (playlist_fn or yt.add_to_series_playlist)(service, it["channel"], it.get("playlist") or it["series"], video_id,
                                                          privacy or it.get("privacy", "public"), **extra)
         queue._update(it["id"], playlist_id=pid, playlist_error=None)
+        bad = yt.playlist_privacy_problem(it["channel"], it.get("playlist") or it["series"])
+        if bad:
+            _event("playlist_not_public", it["channel"], bad)
     except Exception as e:  # noqa: BLE001
         queue._update(it["id"], playlist_error=f"{type(e).__name__}: {e}"[:300])
         print(f"[autopilot] {it['channel']}: playlist step failed (video is published): {e}", file=sys.stderr)
