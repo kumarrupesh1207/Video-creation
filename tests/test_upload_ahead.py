@@ -162,3 +162,20 @@ def test_daily_report_lists_everything(q, workspace_tmp_path):
     text = out.read_text(encoding="utf-8")
     assert out.name == "2026-10-22.md" and "NIM credits used today: 12" in text and "1650 / 10000" in text
     assert "Rendered one" in text and "Scheduled on YouTube (1)" in text and "VIDB" in text and "boom" in text and "something broke" in text
+
+
+def test_tee_logs_writes_utf8_copy(workspace_tmp_path, monkeypatch, capsys):
+    import sys
+
+    monkeypatch.delenv("AURORA_NO_LOG_TEE", raising=False)
+    out0, err0 = sys.stdout, sys.stderr
+    try:
+        path = autopilot.tee_logs("render", workspace_tmp_path)
+        print("héllo – Part 1 ✓")
+        print("oops", file=sys.stderr)
+    finally:
+        sys.stdout, sys.stderr = out0, err0
+    raw = path.read_bytes()
+    assert b"\x00" not in raw and not raw.startswith((b"\xff\xfe", b"\xfe\xff"))  # not UTF-16
+    text = raw.decode("utf-8")
+    assert "héllo – Part 1 ✓" in text and "oops" in text and "autopilot render" in text

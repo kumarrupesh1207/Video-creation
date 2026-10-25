@@ -13,6 +13,7 @@ Research interface (aurora/research.py, built by Backend): generate_ideas(niche,
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 import types
@@ -670,6 +671,44 @@ def approvals_summary(queue: PublishQueue, channels: list[str] | None = None) ->
     }
 
 
+class _Tee:
+    """Mirror a text stream into a UTF-8 log file (PowerShell redirection from Task Scheduler writes UTF-16)."""
+
+    def __init__(self, stream, fh):
+        self.stream, self.fh = stream, fh
+
+    def write(self, text):
+        try:
+            self.fh.write(text)
+            self.fh.flush()
+        except Exception:  # noqa: BLE001 - logging must never break a run
+            pass
+        return self.stream.write(text) if self.stream else len(text)
+
+    def flush(self):
+        if self.stream:
+            self.stream.flush()
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+
+def tee_logs(cmd: str, log_dir: Path | None = None) -> Path | None:
+    """Append everything this run prints (stdout + stderr) to logs/autopilot_<cmd>.utf8.log as UTF-8. Returns the path."""
+    if os.environ.get("AURORA_NO_LOG_TEE"):
+        return None
+    try:
+        d = Path(log_dir or ROOT / "logs")
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / f"autopilot_{cmd}.utf8.log"
+        fh = open(path, "a", encoding="utf-8", newline="\n")
+        fh.write(f"\n===== {datetime.now().isoformat(timespec='seconds')} autopilot {cmd} =====\n")
+        sys.stdout, sys.stderr = _Tee(sys.stdout, fh), _Tee(sys.stderr, fh)
+        return path
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     from aurora import ensure_utf8_console, load_env
 
@@ -688,6 +727,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--at", help="publish-due: evaluate as of this ISO time (UTC), e.g. to preview a future run")
     ap.add_argument("--config", type=Path, default=ROOT / "config.yaml")
     a = ap.parse_args(argv)
+    if a.cmd in ("render", "publish-due", "analytics", "comments", "weekly-report", "daily-report", "publish-one"):
+        tee_logs(a.cmd)  # readable UTF-8 copy of the run in logs/autopilot_<cmd>.utf8.log
     cfg = yaml.safe_load(a.config.read_text(encoding="utf-8")) or {}
     q = PublishQueue(cfg=cfg)
     if a.cmd == "render":
