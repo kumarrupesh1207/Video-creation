@@ -375,13 +375,13 @@ let pubItems = [];
 function pubCard(it) {
   const st = it.stats || {};
   const acts = [];
-  if (it.status === 'scheduled') acts.push(`<button class="btn stop" data-act="veto" data-id="${esc(it.id)}" type="button">Stop</button>`);
+  if (['scheduled', 'uploaded_scheduled'].includes(it.status)) acts.push(`<button class="btn stop" data-act="veto" data-id="${esc(it.id)}" type="button">Stop</button>`);
   if (it.status === 'pending_approval') acts.push(`<button class="btn ok" data-act="approve" data-id="${esc(it.id)}" type="button">Approve</button><button class="btn" data-act="veto" data-id="${esc(it.id)}" type="button">Stop</button>`);
   if (it.status === 'vetoed') acts.push(`<button class="btn ok" data-act="approve" data-id="${esc(it.id)}" type="button">Restore</button>`);
   if (['scheduled', 'vetoed', 'failed', 'pending_approval'].includes(it.status)) acts.push(`<button class="btn ghost" data-act="resched" data-id="${esc(it.id)}" type="button">Reschedule</button>`);
   const resched = pubOpen.has(it.id) ? `<div class="row"><input type="datetime-local" id="rs-${esc(it.id)}"><button class="btn small" data-act="rsset" data-id="${esc(it.id)}" type="button">Set (IST)</button></div>` : '';
   return `<div class="pub" id="pub-${esc(it.id)}">
-    <span class="tag ${esc(it.status)}">${esc(it.status.replace('_', ' '))} · ${esc(it.channel)}</span>
+    <span class="tag ${esc(it.status)}">${esc(it.status === 'uploaded_scheduled' ? 'Scheduled on YouTube' : it.status.replace('_', ' '))} · ${esc(it.channel)}${it.kind === 'long' ? ' · long' : ''}</span>
     ${it.video_url ? `<video src="${it.video_url}#t=0.5" preload="metadata" controls playsinline></video>` : ''}
     <h3>${esc(it.title || '(untitled)')}</h3>
     <div class="when">${it.status === 'published' ? `Published · ${it.video_id ? `<a href="https://youtu.be/${esc(it.video_id)}" target="_blank" rel="noopener" style="color:var(--primary-h)">watch</a>` : ''}`
@@ -431,12 +431,13 @@ setInterval(() => { if (state.tab === 'queue') loadPublish(); }, 10000);
 setInterval(() => document.querySelectorAll('.cd').forEach((el) => { el.textContent = countdown(el.dataset.at); }), 1000);
 
 // ─── Approvals (videos waiting, comment replies, weekly report) ──
-const WAITING = ['scheduled', 'pending_approval', 'vetoed'];
+const WAITING = ['scheduled', 'uploaded_scheduled', 'pending_approval', 'vetoed'];
 async function loadApprovals() {
   try {
     const d = await getJson('/approvals');
     const vids = (d.queue || []).filter((i) => WAITING.includes(i.status));
     pubItems = vids;
+    loadDaily();
     $('apVideos').innerHTML = vids.map(pubCard).join('') || '<p class="empty">No videos waiting.</p>';
     const drafts = Object.entries(d.comment_drafts || {}).flatMap(([ch, list]) => list.map((c) => ({ ...c, channel: ch })));
     if (!document.activeElement?.closest?.('#apComments textarea')) {
@@ -466,3 +467,23 @@ $('apComments').addEventListener('click', async (e) => {
 });
 loadApprovals();
 setInterval(() => { if (state.tab === 'approvals') loadApprovals(); }, 15000);
+
+// Minimal markdown for the daily report: ## headings, - bullets, plain lines.
+function mdLite(src) {
+  let out = '', list = false;
+  for (const raw of src.split(/\r?\n/)) {
+    const line = raw.trim();
+    const bullet = line.match(/^[-*]\s+(.*)/);
+    if (!bullet && list) { out += '</ul>'; list = false; }
+    if (bullet) { if (!list) { out += '<ul>'; list = true; } out += `<li>${esc(bullet[1])}</li>`; }
+    else if (/^#{1,6}\s/.test(line)) out += `<h4>${esc(line.replace(/^#+\s*/, ''))}</h4>`;
+    else if (line) out += `<p>${esc(line)}</p>`;
+  }
+  return out + (list ? '</ul>' : '');
+}
+async function loadDaily() {
+  try {
+    const d = await getJson('/reports/daily/latest');
+    $('apDaily').innerHTML = d.text ? `<div class="pub daily"><b>Report · ${esc(d.date)}</b>${mdLite(d.text)}</div>` : '<p class="empty">No daily report yet.</p>';
+  } catch { /* ignore */ }
+}

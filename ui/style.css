@@ -147,3 +147,9 @@ details summary { cursor: pointer; min-height: 32px; }
 .nums div { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
 .nums b { display: block; font-size: 20px; }
 .nums span { font-size: 12px; color: var(--dim); }
+
+.daily h4 { font-size: 13px; margin: 8px 0 2px; color: var(--primary-h); }
+.daily p, .daily li { font-size: 13px; color: var(--dim); overflow-wrap: anywhere; }
+.daily ul { padding-left: 18px; }
+.tag.uploaded_scheduled { color: var(--ok); border-color: var(--ok); }
+.tag.long { color: var(--warn); border-color: var(--warn); }

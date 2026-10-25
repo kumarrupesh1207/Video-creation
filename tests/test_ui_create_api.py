@@ -221,3 +221,27 @@ def test_approvals_and_comment_endpoints(monkeypatch):
     monkeypatch.setattr(an, "latest_report", lambda ch: {"views": 5})
     assert server.report_latest("main") == {"report": {"views": 5}}
 
+
+def test_veto_approve_use_autopilot_and_daily_report(monkeypatch):
+    import tempfile
+    from pathlib import Path
+
+    import aurora.autopilot as ap
+
+    calls = []
+    monkeypatch.setattr(ap, "veto_item", lambda q, i: calls.append(("veto", i)) or {"id": i, "status": "vetoed"})
+    monkeypatch.setattr(ap, "approve_item", lambda q, i: (_ for _ in ()).throw(RuntimeError("quota")))
+    assert server.publish_veto("x1")["item"]["status"] == "vetoed" and calls == [("veto", "x1")]
+    with pytest.raises(server.HTTPException) as e:
+        server.publish_approve("x1")
+    assert e.value.status_code == 502 and "quota" in e.value.detail
+
+    tmp = tempfile.TemporaryDirectory()
+    monkeypatch.chdir(tmp.name)
+    assert server.daily_report() == {"date": None, "text": ""}
+    (Path(tmp.name) / "outputs" / "reports").mkdir(parents=True)
+    (Path(tmp.name) / "outputs" / "reports" / "2026-10-25.md").write_text("## Rendered\n- 2 reels\n", encoding="utf-8")
+    assert server.daily_report()["date"] == "2026-10-25"
+    monkeypatch.undo()
+    tmp.cleanup()
+

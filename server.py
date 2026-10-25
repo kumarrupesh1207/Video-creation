@@ -1310,14 +1310,34 @@ def _publish_action(fn_name: str, item_id: str, *args):
         raise HTTPException(status_code=400, detail=str(exc) or "Not allowed in the current state.")
 
 
+def _autopilot_action(fn_name: str, item_id: str):
+    """veto/approve through aurora.autopilot (handles items already uploaded to YouTube)."""
+    from aurora import autopilot
+    from aurora.publish.queue import PublishQueue
+    try:
+        return {"status": "success", "item": _publish_item(getattr(autopilot, fn_name)(PublishQueue(), item_id))}
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "Not allowed in the current state.")
+    except Exception as exc:  # noqa: BLE001 - YouTube/API failure: show it, don't crash
+        raise HTTPException(status_code=502, detail=f"YouTube update failed: {exc}")
+
+
 @app.post("/api/publish/{item_id}/veto")
 def publish_veto(item_id: str):
-    return _publish_action("veto", item_id)
+    return _autopilot_action("veto_item", item_id)
 
 
 @app.post("/api/publish/{item_id}/approve")
 def publish_approve(item_id: str):
-    return _publish_action("approve", item_id)
+    return _autopilot_action("approve_item", item_id)
+
+
+@app.get("/api/reports/daily/latest")
+def daily_report():
+    files = sorted((_output_root() / "reports").glob("*.md"))
+    if not files:
+        return {"date": None, "text": ""}
+    return {"date": files[-1].stem, "text": files[-1].read_text(encoding="utf-8")[:20000]}
 
 
 class RescheduleRequest(BaseModel):
