@@ -32,6 +32,7 @@ Runs on a CPU-only Windows PC (Ryzen 5 5600G, 16 GB, no NVIDIA GPU). History/sta
 ## Rules (each confirmed in code/commits)
 - Tests never call live Gemini: `tests/conftest.py` autouse fixture removes `GEMINI_API_KEY` (7adc20c).
 - ComfyUI `image_gen*` / `img2img*` workflows need a long CPU timeout (3600 s) — `comfy_orchestrator.py` (65e825f).
+- Comic `image_mode: nim` never touches ComfyUI (`comic.nim_comfy_fallback: false`); optional ComfyUI use is preflighted (`/system_stats`) and skipped with a warning, never a crash.
 - Comic `image_mode: comfy` never falls back to NIM; any NIM fallback must be explicit, capped and logged (65e825f).
 - Autopilot publish kill-switch `autopilot.publish.enabled` stays `false` until the user says go (ecf6a44).
 - Every upload carries the AI/synthetic disclosure (`containsSyntheticMedia: true`) — docs/AUTOPILOT.md.

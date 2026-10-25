@@ -187,7 +187,8 @@ def test_nim_failure_continues_on_comfy_ip_adapter_at_low_weight(workspace_tmp_p
     _Prov.calls = []
     monkeypatch.setattr(lc, "LocalComfyUIProvider", _Prov)
     board = _Board(workspace_tmp_path, fail_at=2)  # quota runs out on the 3rd panel
-    cfg = {"cost_dir": str(workspace_tmp_path / "costs"), "providers": {"local_comfyui": {"reference_weight": 0.4}}}
+    monkeypatch.setattr(comic, "_comfy_up", lambda cfg: True)
+    cfg = {"cost_dir": str(workspace_tmp_path / "costs"), "providers": {"local_comfyui": {"reference_weight": 0.4}}, "comic": {"nim_comfy_fallback": True}}
     imgs, timings, note, mode = comic._panel_images(cfg, board, _spec(workspace_tmp_path), 7, "j", (576, 1024))
     assert mode == "nim+comfy_fallback" and len(imgs) == 5 and "NIM failed after 2/5" in note and "insufficient credits" in note
     panels = [c for c in _Prov.calls if c[0] == "panel"]
@@ -204,7 +205,8 @@ def test_daily_cap_sends_remaining_panels_to_comfy(workspace_tmp_path, monkeypat
     monkeypatch.setattr(lc, "LocalComfyUIProvider", _Prov)
     log_credits("nvidia_nim", 10, workspace_tmp_path / "costs")  # today's cap already used
     board = _Board(workspace_tmp_path)
-    cfg = {"cost_dir": str(workspace_tmp_path / "costs")}
+    monkeypatch.setattr(comic, "_comfy_up", lambda cfg: True)
+    cfg = {"cost_dir": str(workspace_tmp_path / "costs"), "comic": {"nim_comfy_fallback": True}}
     imgs, timings, note, mode = comic._panel_images(cfg, board, _spec(workspace_tmp_path), 7, "j", (576, 1024))
     assert mode == "nim+comfy_fallback" and "daily NIM cap" in note and board.n == 0
     assert len([c for c in _Prov.calls if c[0] == "ref"]) == 1 and len(imgs) == 5
@@ -295,3 +297,93 @@ def test_nim_false_positive_words_are_rewritten():
     sheet = [{"name": "Kael", "description": "young man with violet eyes and a violet cape"}]
     p = research.panel_prompt({"shot": "wide", "image_prompt": "a lone wanderer beneath a cracked Violet sky"}, sheet)
     assert "violet" not in p.lower() and "purple eyes" in p and "purple sky" in p
+
+
+# ---------------------------------------------------------------- production bug: nim mode must never touch ComfyUI
+def _comfy_boom(monkeypatch):
+    """Any contact with ComfyUI explodes the way the scheduled run did (connection refused on :8188)."""
+    from backend.app.providers import local_comfyui as lc
+    import src.modules.video_engine as ve
+
+    touched = []
+
+    class Boom:
+        def __init__(self, *a, **k):
+            touched.append("provider")
+            raise ConnectionError("HTTPConnectionPool(host='127.0.0.1', port=8188): Max retries exceeded with url: /upload/image (connection refused)")
+
+    def boom_upload(*a, **k):
+        touched.append("upload")
+        raise ConnectionError("connection refused 127.0.0.1:8188")
+
+    monkeypatch.setattr(lc, "LocalComfyUIProvider", Boom)
+    monkeypatch.setattr(ve, "upload_image", boom_upload)
+    monkeypatch.setattr(comic, "_comfy_up", lambda cfg: False)  # system_stats unreachable
+    return touched
+
+
+def test_nim_mode_reel_renders_with_comfyui_down_and_a_locked_cast_reference(workspace_tmp_path, monkeypatch):
+    import subprocess
+
+    from aurora import cast as cast_mod, comic_layout
+
+    touched = _comfy_boom(monkeypatch)
+    ref = workspace_tmp_path / "hero_ref.png"
+    Image.new("RGB", (64, 96), (9, 9, 9)).save(ref)
+    monkeypatch.setattr(cast_mod, "reference_image", lambda channel, root=None: ref)  # a locked-cast reference EXISTS (it used to feed IP-Adapter)
+    monkeypatch.setattr(cast_mod, "save_new_members", lambda *a, **k: [])
+    monkeypatch.setattr(comic_layout, "foreground_mask", lambda p: None)
+
+    def fake_tts(text, out, lang=None, options=None):
+        wav = Path(out).with_suffix(".wav")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=f=300:d=1.0", str(wav)], check=True)
+        return wav, "fake"
+
+    monkeypatch.setattr(comic, "synthesize_voiceover", fake_tts)
+    for name, val in (("PANEL_MIN_S", 1.5), ("COVER_S", 1.5), ("END_S", 1.5)):
+        monkeypatch.setattr(comic, name, val)
+    spec = research.research_comic("repro", "a swordsman", panels=5, cfg={}, series_dir=workspace_tmp_path / "s")["comic"]
+    cfg = {"comic": {"cast_lock": True, "image_mode": "nim"}, "cost_dir": str(workspace_tmp_path / "costs")}
+    class ImgBoard(_Board):  # like _Board but the "NIM" images really exist on disk
+        def generate(self, prompt, style, res, job, negative_prompt="", seed=None):
+            r = super().generate(prompt, style, res, job, negative_prompt, seed)
+            Image.new("RGB", (576, 1024), (40, 70, 120)).save(r.output_path)
+            return r
+
+    res = comic.make_comic_reel("repro", "x", workspace_tmp_path / "out", cfg=cfg, comic=spec, switchboard=ImgBoard(workspace_tmp_path),
+                                music=False, series_dir=workspace_tmp_path / "ser")
+    side = json.loads(Path(res["sidecar"]).read_text(encoding="utf-8"))
+    assert Path(res["video"]).exists() and side["image_mode"] == "nim" and "NIM" in side["image_note"]
+    assert touched == []  # ComfyUI (provider / upload) was never contacted
+
+
+def test_nim_failure_with_the_fallback_off_stops_clearly_without_touching_comfyui(workspace_tmp_path, monkeypatch):
+    touched = _comfy_boom(monkeypatch)
+    cfg = {"cost_dir": str(workspace_tmp_path / "costs"), "comic": {"image_mode": "nim"}}  # nim_comfy_fallback defaults to False
+    with pytest.raises(RuntimeError, match="ComfyUI fallback is OFF") as e:
+        comic._panel_images(cfg, _Board(workspace_tmp_path, fail_at=2), _spec(workspace_tmp_path), 7, "j", (576, 1024), cast_ref=Path("hero.png"))
+    assert "insufficient credits" in str(e.value) and "NIM failed after 2/5" in str(e.value)
+    assert touched == []  # no connection-refused crash, no ComfyUI contact
+
+
+def test_optional_comfyui_fallback_is_preflighted_and_skipped_with_a_warning_when_down(workspace_tmp_path, monkeypatch, capsys):
+    touched = _comfy_boom(monkeypatch)
+    cfg = {"cost_dir": str(workspace_tmp_path / "costs"), "comic": {"image_mode": "nim", "nim_comfy_fallback": True}}
+    with pytest.raises(RuntimeError, match="not reachable"):
+        comic._panel_images(cfg, _Board(workspace_tmp_path, fail_at=1), _spec(workspace_tmp_path), 7, "j", (576, 1024))
+    assert "WARNING" in capsys.readouterr().out and touched == []  # logged, preflight said down, ComfyUI never called
+
+
+def test_comfy_preflight_uses_system_stats_then_queue(monkeypatch):
+    import requests
+
+    calls = []
+
+    def fake_get(url, timeout=3):
+        calls.append(url.rsplit("/", 1)[-1])
+        if url.endswith("/system_stats"):
+            raise requests.ConnectionError("down")
+        return SimpleNamespace(ok=False)
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    assert comic._comfy_up({}) is False and calls == ["system_stats", "queue"]

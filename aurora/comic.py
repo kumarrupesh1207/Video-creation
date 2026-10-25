@@ -481,7 +481,13 @@ def _comfy_up(cfg: dict) -> bool:
 
     try:
         url = cfg.get("models", {}).get("comfyui", {}).get("api_url", "http://127.0.0.1:8188")
-        return requests.get(f"{url}/queue", timeout=3).ok
+        for path in ("/system_stats", "/queue"):  # newer builds expose system_stats; older ones only /queue
+            try:
+                if requests.get(f"{url}{path}", timeout=3).ok:
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
     except Exception:  # noqa: BLE001
         return False
 
@@ -600,6 +606,12 @@ def _panel_images(cfg, switchboard, comic, seed, job, nim_res, image_mode=None, 
             return images, timings, "NIM (Flux), consistent via fixed seed + character sheet text", "nim"
         except Exception as exc:  # noqa: BLE001 - quota/credit/API failure -> ComfyUI for the REMAINING panels
             why = f"NIM failed after {len(images)}/{len(panels)} panels ({str(exc)[:120]})"
+            if not cfg.get("comic", {}).get("nim_comfy_fallback", False):  # default: nim mode NEVER touches ComfyUI
+                raise RuntimeError(f"{why}; ComfyUI fallback is OFF (comic.nim_comfy_fallback: false), so the reel stops here "
+                                   "(text-only locked cast on NIM; retry later or after the NIM cap resets)") from exc
+            if not _comfy_up(cfg):  # optional enhancement: preflight, never crash on a dead server
+                print(f"[comic] WARNING: {why}; ComfyUI fallback is on but ComfyUI is not reachable (system_stats) -> no fallback possible")
+                raise RuntimeError(f"{why}; ComfyUI fallback is on but ComfyUI is not reachable") from exc
             print(f"[comic] FALLBACK to ComfyUI IP-Adapter: {why}")
             ref = cast_ref or (images[0] if images else None)  # the locked hero reference beats a panel
             more, t2, _ = _comfy_panels(cfg, sheet, panels, len(images), seed, job, neg, ref_path=ref)
