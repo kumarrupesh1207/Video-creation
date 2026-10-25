@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 QUEUE_PATH = ROOT / "outputs" / "publish_queue.json"
 IST = timezone(timedelta(hours=5, minutes=30), "IST")
 DEFAULTS = {"enabled": False, "upload_ahead": False, "approval": "veto", "veto_hours": 6.0, "slots": ["19:00"], "timezone": "Asia/Kolkata", "max_attempts": 3}
-EXTRA_KEYS = ("captions_srt", "thumbnail", "duration_secs", "part", "chapters")  # render outputs the publisher uses
+EXTRA_KEYS = ("captions_srt", "thumbnail", "duration_secs", "part", "chapters", "chapter", "playlist")  # render outputs the publisher uses
 ACTIVE = {"pending_approval", "scheduled", "uploaded_scheduled", "publishing", "published"}  # statuses that block re-enqueueing a sha
 _lock = threading.RLock()
 
@@ -161,6 +161,9 @@ class PublishQueue:
                 "veto_until": (now + timedelta(hours=float(self.s["veto_hours"]) if mode == "veto" else 0)).isoformat(),
                 "attempts": 0, "video_id": None, "error": None, "stats": None,
             }
+            if meta.get("publish_at_hint"):  # e.g. chapter compilation: Saturday 18:00 IST, never inside the veto window
+                earliest = now + timedelta(hours=float(self.s["veto_hours"]) if mode == "veto" else 0)
+                item["publish_at"] = max(datetime.fromisoformat(meta["publish_at_hint"]), earliest).isoformat()
             items.append(item)
             self._save(items)
             return item

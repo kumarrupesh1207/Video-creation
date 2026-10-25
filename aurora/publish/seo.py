@@ -117,7 +117,8 @@ def build_description(hook: str, recap: str, keywords: list[str], hashtags: list
 
 def build_metadata(topic: str, series: str | None, part: int | None, recap: str, hashtags: list[str] | None = None,
                    fallback_title: str | None = None, service=None, budget=None, client=None, cfg: dict | None = None,
-                   duration_secs: float | None = None, chapters: list[dict] | None = None, state_dir: Path | None = None) -> dict:
+                   duration_secs: float | None = None, chapters: list[dict] | None = None, state_dir: Path | None = None,
+                   chapter: int | None = None) -> dict:
     """Title (best of 3 by keyword score, else the caller's own), SEO description and tags. Never raises."""
     research = {"titles": [], "tags": []}
     if service is not None:
@@ -128,7 +129,13 @@ def build_metadata(topic: str, series: str | None, part: int | None, recap: str,
     kws = keywords_from(research["titles"] + research["tags"], extra=re.findall(r"[A-Za-z0-9']{3,}", series or topic)[:3])
     opts = generate_options(series or topic, part or 1, recap, research, kws, client, cfg)
     best = pick_best(opts["titles"], kws)
-    if best and series and part and f"part {part}" not in best.lower():
+    if best and series and chapter and part:  # "... – Ch.N Part M" must survive the title rewrite
+        need = f"Ch.{chapter} Part {part}"
+        if need.lower() not in best.lower():
+            best = f"{best[:100 - len(f' – {need}')]} – {need}"
+    elif best and series and chapter and f"chapter {chapter}" not in best.lower() and f"ch.{chapter}" not in best.lower():
+        best = f"{best[:100 - len(f' – Chapter {chapter}')]} – Chapter {chapter}"  # the full-chapter compilation
+    elif best and series and part and f"part {part}" not in best.lower():
         best = f"{best[:100 - len(f' – Part {part}')]} – Part {part}"
     title = best or fallback_title or topic
     tags = list(dict.fromkeys([k for k in kws if len(k) > 2] + [t.lstrip('#') for t in (hashtags or [])]))[:25]

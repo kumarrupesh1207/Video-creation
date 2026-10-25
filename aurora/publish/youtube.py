@@ -230,9 +230,25 @@ def _retry_404(call, what: str, sleep=time.sleep, delays: tuple = (2, 5, 10)):
             sleep(delays[i])
 
 
+def compute_position(service, playlist_id: str, our_key: tuple, key_by_video: dict, budget=None, sleep=time.sleep) -> int:
+    """Index at which a video with sort key `our_key` belongs: after every item that sorts before it. Videos Aurora does not
+    know (e.g. older pilot uploads) count as earlier, so they stay at the top and are never treated as parts."""
+    vids, token = [], None
+    while True:
+        if budget:
+            budget.spend("playlistItems.list")
+        r = _retry_404(lambda: service.playlistItems().list(part="snippet", playlistId=playlist_id, maxResults=50,
+                                                           pageToken=token).execute(), f"playlist {playlist_id} items", sleep)
+        vids += [i["snippet"]["resourceId"]["videoId"] for i in r.get("items", [])]
+        token = r.get("nextPageToken")
+        if not token:
+            break
+    return sum(1 for v in vids if v not in key_by_video or tuple(key_by_video[v]) < tuple(our_key))
+
+
 def add_to_series_playlist(service, channel: str, series: str, video_id: str, video_privacy: str = "public",
                            state_dir: Path = STATE_DIR, description: str | None = None, part: int | None = None,
-                           budget=None, sleep=time.sleep) -> str:
+                           budget=None, sleep=time.sleep, order_key: tuple | None = None, key_by_video: dict | None = None) -> str:
     """Add the video to its series playlist unless already there, at position part-1 (parts stay in order)."""
     pid = ensure_playlist(service, channel, series, video_privacy, state_dir, description)
     pl = service.playlistItems()
@@ -243,7 +259,9 @@ def add_to_series_playlist(service, channel: str, series: str, video_id: str, vi
     if have:
         return pid
     snippet = {"playlistId": pid, "resourceId": {"kind": "youtube#video", "videoId": video_id}}
-    if part and part > 0:
+    if order_key is not None:  # chapter ordering: (chapter, part), the chapter compilation sorts after its parts
+        snippet["position"] = compute_position(service, pid, order_key, key_by_video or {}, budget, sleep)
+    elif part and part > 0:
         if budget:
             budget.spend("playlistItems.list")
         total = _retry_404(lambda: pl.list(part="id", playlistId=pid, maxResults=1).execute(),

@@ -145,6 +145,47 @@ def shorts_needed(queue: PublishQueue, ch: dict, now: datetime | None = None) ->
     return max(0, min(per_day - made_today, per_day * int(ch.get("lookahead_days", 2)) - pending))
 
 
+def render_chapters(cfg: dict, queue: PublishQueue, ch: dict, compile_fn=None, pending_fn=None, root: Path | None = None,
+                    seo_service_factory=None) -> list[dict]:
+    """Compile chapters whose parts are all done (0 NIM credits), then queue every chapter.json not queued yet, at its
+    publish_at_hint (Saturday 18:00 IST, never inside the veto window). Its playlist is the series playlist, after its parts."""
+    import json as _json
+
+    try:
+        from aurora import chapter as chapter_mod
+
+        for n in (pending_fn or chapter_mod.pending)(ch["name"]):
+            try:
+                (compile_fn or chapter_mod.compile_chapter)(ch["name"], n, cfg)
+            except Exception as e:  # noqa: BLE001 - never blocks the daily Shorts
+                print(f"[autopilot] {ch['name']}: chapter {n} compile failed: {e}", file=sys.stderr)
+                _event("chapter_compile_failed", ch["name"], f"chapter {n}: {e}")
+        base = Path(root) if root else chapter_mod.FINAL_ROOT / ch["name"] / "chapters"
+    except Exception as e:  # noqa: BLE001
+        print(f"[autopilot] {ch['name']}: chapters unavailable: {e}", file=sys.stderr)
+        return []
+    out = []
+    for f in sorted(base.glob("ch*/chapter.json")):
+        side = _json.loads(f.read_text(encoding="utf-8"))
+        if side.get("status") != "ok":
+            continue
+        meta = {"title": side["title"][:100], "description": side["description"], "ai_disclosure": True, "kind": "chapter",
+                "tags": [k for k in side.get("keywords", [])] + [h.lstrip("#") for h in side.get("hashtags", [])],
+                "sha256": side["video"]["sha256"], "captions_srt": side.get("captions_srt"), "thumbnail": side.get("thumbnail"),
+                "duration_secs": side["video"]["duration_secs"], "chapters": side.get("chapters"), "series": side.get("series"),
+                "playlist": side.get("playlist") or side.get("series"), "chapter": side.get("chapter"),
+                "publish_at_hint": side.get("publish_at_hint")}
+        if ch.get("seo"):
+            meta = apply_seo(cfg, ch, {"topic": side["title"], "series": side.get("series"), "chapter": side.get("chapter")}, meta,
+                             seo_service_factory)
+        for platform in ch["platforms"]:
+            item = queue.enqueue(ch["name"], side["video"]["path"], meta, platform=platform)
+            if item:
+                out.append(item)
+                print(f"[autopilot] {ch['name']}/{platform}: queued CHAPTER {item['id']} (publish_at {item['publish_at']})")
+    return out
+
+
 def render_long(cfg: dict, queue: PublishQueue, ch: dict, episode_fn=None, now: datetime | None = None) -> list[dict]:
     """Advance / finish the channel's long episode (aurora.episode, resumable under the NIM cap) and queue it plus its Shorts.
     Skipped while a long episode is already queued for a future slot."""
@@ -233,6 +274,8 @@ def run_render(cfg: dict, queue: PublishQueue, only: str | None = None, limit: i
                 if item:
                     queued.append(item)
                     print(f"[autopilot] {ch['name']}/{platform}: queued {item['id']} ({item['status']}, publish_at {item['publish_at']})")
+        if ch.get("format") == "comic" and not limit:  # finished chapters -> one 16:9 compilation per chapter
+            queued += render_chapters(cfg, queue, ch, seo_service_factory=seo_service_factory)
         if ch.get("long_episode") and not limit:  # weekly long episode: uses what is left of the daily NIM cap after the Shorts
             queued += render_long(cfg, queue, ch, episode_fn, now)
     return queued
@@ -242,6 +285,8 @@ def _sidecar_extras(sidecar: dict) -> dict:
     """Render outputs the publisher needs: SRT captions (path or text), thumbnail, duration, part number."""
     return {"captions_srt": sidecar.get("captions_srt"), "thumbnail": sidecar.get("thumbnail"),
             "duration_secs": (sidecar.get("reel") or {}).get("duration_secs"), "part": sidecar.get("part"),
+            "chapter": (sidecar.get("chapter") or {}).get("number") if isinstance(sidecar.get("chapter"), dict) else sidecar.get("chapter"),
+            "playlist": sidecar.get("playlist"),
             "chapters": sidecar.get("chapters")}
 
 
@@ -257,7 +302,8 @@ def apply_seo(cfg: dict, ch: dict, idea: dict, meta: dict, service_factory=None,
             print(f"[autopilot] {ch['name']}: SEO without competitor search ({e})", file=sys.stderr)
         res = seo.build_metadata(idea.get("topic", ""), idea.get("series"), idea.get("part"), meta.get("description", "")[:600],
                                  hashtags=meta.get("tags"), fallback_title=meta["title"], service=service, budget=budget,
-                                 client=client, cfg=cfg, duration_secs=meta.get("duration_secs"), chapters=meta.get("chapters"))
+                                 client=client, cfg=cfg, duration_secs=meta.get("duration_secs"), chapters=meta.get("chapters"),
+                                 chapter=idea.get("chapter"))
         return {**meta, "title": res["title"], "description": res["description"], "tags": res["tags"] or meta["tags"]}
     except Exception as e:  # noqa: BLE001
         print(f"[autopilot] {ch['name']}: SEO failed, using plain metadata: {e}", file=sys.stderr)
@@ -502,16 +548,29 @@ def write_daily_report(queue: PublishQueue, budget=None, now: datetime | None = 
     return out
 
 
+def order_key(it: dict) -> tuple:
+    """Playlist sort key: (chapter, part); a chapter compilation sorts after all parts of its chapter."""
+    return (int(it.get("chapter") or 0), 10_000 if it.get("kind") == "chapter" else int(it.get("part") or 0))
+
+
+def _keys_by_video(queue: PublishQueue, it: dict) -> dict:
+    name = it.get("playlist") or it.get("series")
+    return {i["video_id"]: order_key(i) for i in queue.list(it["channel"]) if i.get("video_id")
+            and i.get("platform", "youtube") == "youtube" and (i.get("playlist") or i.get("series")) == name}
+
+
 def _add_to_playlist(queue: PublishQueue, it: dict, video_id: str, service, playlist_fn=None, privacy: str | None = None,
                      budget=None) -> None:
     """Series videos go into a per-series playlist. A playlist failure never un-publishes the item."""
-    if not it.get("series"):
+    if not (it.get("series") or it.get("playlist")):
         return
     from aurora.publish import youtube as yt
 
     try:
         extra = {"part": it.get("part"), "budget": budget} if playlist_fn is None else {}
-        pid = (playlist_fn or yt.add_to_series_playlist)(service, it["channel"], it["series"], video_id,
+        if playlist_fn is None and it.get("chapter"):  # ONE playlist per series, ordered by chapter then part
+            extra.update(order_key=order_key(it), key_by_video=_keys_by_video(queue, it))
+        pid = (playlist_fn or yt.add_to_series_playlist)(service, it["channel"], it.get("playlist") or it["series"], video_id,
                                                          privacy or it.get("privacy", "public"), **extra)
         queue._update(it["id"], playlist_id=pid, playlist_error=None)
     except Exception as e:  # noqa: BLE001

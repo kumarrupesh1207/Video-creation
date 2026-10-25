@@ -15,3 +15,6 @@ each one ~30 s comic Short (unchanged format, locked cast).
 - Replaces the weekly `aurora.episode` long video (`long_episode` commented out in config.yaml; the module stays for manual use).
 - Pilots: `research.reset_for_chapters` backs up the old state to `<channel>.pilot-backup.json`, keeps cast/seed and the old story as `background` only.
 - Gotcha: the sidecar's `character_sheet` entries need `description` (not `look`) for `Comic` validation.
+
+## Publisher side (autopilot)
+One playlist per series, ordered by `(chapter, part)`; the compilation sorts after its parts (`autopilot.order_key`). The insert position comes from the live playlist (`youtube.compute_position`): videos Aurora does not know (pilots) count as earlier, so they never get mixed into the parts. `render_chapters` queues each `chapter.json` once at `publish_at_hint` (queue honours it but never earlier than the veto window).
