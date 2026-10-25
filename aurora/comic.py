@@ -180,7 +180,49 @@ def _place_text(d, text: str, occ, blocked, hi: int, lo: int, widths, pad_x: int
     return best[2:], best[1]
 
 
-def _overlay_free(path: Path, narration: str, bubble: str, title: str, subtitle: str, border: bool, occ, head, L, head_zone=None) -> Path:
+def _dashed_rrect(d, box, r, fill, width=5, dash=18, gap=12):
+    """Dashed rounded-rectangle outline (whisper bubbles)."""
+    import math
+
+    x0, y0, x1, y1 = box
+    pts = []
+    for cx, cy, a0 in ((x1 - r, y0 + r, -90), (x1 - r, y1 - r, 0), (x0 + r, y1 - r, 90), (x0 + r, y0 + r, 180)):
+        pts += [(cx + r * math.cos(math.radians(a0 + k * 6)), cy + r * math.sin(math.radians(a0 + k * 6))) for k in range(16)]
+    pts.append(pts[0])
+    run, on = 0.0, True
+    for p, q in zip(pts, pts[1:]):
+        seg = math.dist(p, q)
+        if on:
+            d.line([p, q], fill=fill, width=width)
+        run += seg
+        if run >= (dash if on else gap):
+            run, on = 0.0, not on
+
+
+def _bubble_body(d, box, style: str) -> None:
+    """speech: round white bubble; shout: spiky burst; whisper: dashed outline."""
+    import math
+
+    x0, y0, x1, y1 = box
+    bw, bh = x1 - x0, y1 - y0
+    if style == "shout":
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        pts = []
+        for k in range(32):
+            a = k * 2 * math.pi / 32
+            f = 1.0 if k % 2 == 0 else 0.84
+            pts.append((cx + math.cos(a) * (bw / 2 + 34) * f, cy + math.sin(a) * (bh / 2 + 30) * f))
+        d.polygon(pts, fill=(255, 255, 255, 255), outline=(20, 20, 20, 255), width=7)
+    elif style == "whisper":
+        r = min(bh // 2, 56)
+        d.rounded_rectangle(list(box), radius=r, fill=(250, 250, 250, 255))
+        _dashed_rrect(d, box, r, (60, 60, 60, 255))
+    else:
+        d.rounded_rectangle(list(box), radius=min(bh // 2, 56), fill=(255, 255, 255, 255), outline=(20, 20, 20, 255), width=6)
+
+
+def _overlay_free(path: Path, narration: str, bubble: str, title: str, subtitle: str, border: bool, occ, head, L, head_zone=None,
+                  bubble_style: str = "speech", narr_style: str = "caption") -> Path:
     """Full-bleed art: narration box and speech bubble go where the characters are NOT (occupancy from the segmentation mask
     + faces over the whole Ken-Burns move), inside the platform-UI safe zones; the tail points at the speaker's head."""
     import numpy as np
@@ -208,9 +250,12 @@ def _overlay_free(path: Path, narration: str, bubble: str, title: str, subtitle:
                 d.text((40, 10 + k * lh), l, font=f, fill=(20, 20, 20, 255))
         else:
             narr_box = (x0, y0, x0 + bw, y0 + bh)
-            d.rectangle(list(narr_box), fill=(255, 243, 196, 255), outline=(20, 20, 20, 255), width=5)
+            verse = narr_style == "verse"  # parchment box with a double rule; captions keep the yellow box
+            d.rectangle(list(narr_box), fill=(232, 208, 160, 255) if verse else (255, 243, 196, 255), outline=(110, 70, 30, 255) if verse else (20, 20, 20, 255), width=5)
+            if verse:
+                d.rectangle([x0 + 9, y0 + 9, x0 + bw - 9, y0 + bh - 9], outline=(110, 70, 30, 255), width=2)
             for k, l in enumerate(lines):
-                d.text((x0 + 28, y0 + 22 + k * lh), l, font=f, fill=(20, 20, 20, 255))
+                d.text((x0 + 28, y0 + 22 + k * lh), l, font=f, fill=(60, 35, 10, 255) if verse else (20, 20, 20, 255))
         blocked.append(narr_box)
     if bubble:
         placed = _place_text(d, bubble, occ, blocked, 54, 30, (900, 760, 600, 480, 380, 300), 46, 28, head_zone)
@@ -248,13 +293,14 @@ def _overlay_free(path: Path, narration: str, bubble: str, title: str, subtitle:
                 tip = (base[0] + ux * L_t, base[1] + uy * L_t)
                 nx, ny = -uy * 24, ux * 24
                 tail = [(base[0] + nx, base[1] + ny), tip, (base[0] - nx, base[1] - ny)]
-        d.rounded_rectangle([x0, y0, x0 + bw, y0 + bh], radius=min(bh // 2, 56), fill=(255, 255, 255, 255), outline=(20, 20, 20, 255), width=6)
+        _bubble_body(d, (x0, y0, x0 + bw, y0 + bh), bubble_style)
         if tail:
             d.polygon(tail, fill=(255, 255, 255, 255))
             d.line([tail[0], tail[1], tail[2]], fill=(20, 20, 20, 255), width=6)
             d.line([tail[0], tail[2]], fill=(255, 255, 255, 255), width=9)
         for k, l in enumerate(lines):
-            d.text((x0 + (bw - d.textlength(l, font=f)) / 2, y0 + 28 + k * lh), l, font=f, fill=(20, 20, 20, 255))
+            d.text((x0 + (bw - d.textlength(l, font=f)) / 2, y0 + 28 + k * lh), l, font=f,
+                   fill=(70, 70, 70, 255) if bubble_style == "whisper" else (20, 20, 20, 255))
     if title:  # cover / end card over the (dimmed) art, centred in the safe area
         f, lines, lh = fit_text(d, title, S[2] - S[0] - 20, 400, 110, 56)
         y = int(H * 0.36)
@@ -271,13 +317,14 @@ def _overlay_free(path: Path, narration: str, bubble: str, title: str, subtitle:
 
 
 def make_overlay(path: Path, narration: str = "", bubble: str = "", title: str = "", subtitle: str = "", border: bool = True,
-                 speaker_x: int | None = None, layout: "comic_layout.Layout | None" = None, occ=None, head=None, head_zone=None) -> Path:
+                 speaker_x: int | None = None, layout: "comic_layout.Layout | None" = None, occ=None, head=None, head_zone=None,
+                 bubble_style: str = "speech", narr_style: str = "caption") -> Path:
     """Text overlay PNG. Default: full-bleed art with segmentation-aware placement (`occ`, `head`); layout.bands=True keeps
     the reserved-band layout."""
     L = layout or comic_layout.Layout()
     if L.bands:
         return _overlay_bands(path, narration, bubble, title, subtitle, border, speaker_x, L)
-    return _overlay_free(path, narration, bubble, title, subtitle, border, occ, head, L, head_zone)
+    return _overlay_free(path, narration, bubble, title, subtitle, border, occ, head, L, head_zone, bubble_style, narr_style)
 
 
 def _zoompan(motion: str, frames: int) -> str:
@@ -298,7 +345,7 @@ def _run(cmd: list[str], timeout: int = 900) -> None:
 
 
 def render_clip(ffmpeg: str, image: Path, overlay: Path, seconds: float, motion: str, out: Path, dim: bool = False,
-                layout: "comic_layout.Layout | None" = None) -> Path:
+                layout: "comic_layout.Layout | None" = None, extra=()) -> Path:
     """Image + Ken Burns inside the art window only; dark bands elsewhere (text is drawn there by the overlay)."""
     L = layout or comic_layout.Layout()
     frames = max(2, round(seconds * FPS))
@@ -306,8 +353,15 @@ def render_clip(ffmpeg: str, image: Path, overlay: Path, seconds: float, motion:
           f"zoompan={_zoompan(motion, frames)}:d={frames}:s={W}x{L.art_h}:fps={FPS},"
           f"noise=alls=7:allf=t,eq=saturation=1.08{',eq=brightness=-0.28' if dim else ''}[art];"
           f"color=c=0x15151f:s={W}x{H}:r={FPS}[bg];[bg][art]overlay=0:{L.art_y}:shortest=1[v];"
-          f"[v][1:v]overlay=0:0,format=yuv420p[o]")
-    _run([ffmpeg, "-y", "-v", "error", "-loop", "1", "-i", str(image), "-loop", "1", "-i", str(overlay), "-filter_complex", vf,
+          f"[v][1:v]overlay=0:0[o0]")
+    ins, last = [], "o0"
+    for k, (png, a, b) in enumerate(extra):  # extra overlays (manga: tone / speed lines always on; bubbles only while spoken)
+        ins += ["-loop", "1", "-i", str(png)]
+        en = "" if a is None else f":enable='between(t,{a:.2f},{b:.2f})'"
+        vf += f";[{last}][{k + 2}:v]overlay=0:0{en}[o{k + 1}]"
+        last = f"o{k + 1}"
+    vf += f";[{last}]format=yuv420p[o]"
+    _run([ffmpeg, "-y", "-v", "error", "-loop", "1", "-i", str(image), "-loop", "1", "-i", str(overlay), *ins, "-filter_complex", vf,
           "-map", "[o]", "-frames:v", str(frames), "-r", str(FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "17", str(out)])
     return out
 
@@ -370,7 +424,7 @@ def _duration(path: Path) -> float:
 def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, work: Path, voice: str = "en-US-AvaNeural",
                  music: bool = True, language: str = "English", layout_aware: bool = True, layout: dict | None = None,
                  cover: bool = True, end_card="default", music_text: str = "epic anime orchestral battle hero",
-                 max_words: int | None = None, cover_label: str = "PART") -> dict:
+                 max_words: int | None = None, cover_label: str = "PART", voices: dict | None = None) -> dict:
     """Panels (+images) -> final mp4. Returns {"seconds", "voice_notes", "music", "panel_times"}.
     cover=False drops the title card; end_card=None drops the end card, a (title, subtitle) tuple customises it."""
     work.mkdir(parents=True, exist_ok=True)
@@ -378,7 +432,7 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
     part = series["part"]
     L = comic_layout.Layout.from_cfg(layout)
     clips: list[tuple[Path, float]] = []  # (clip, seconds)
-    voices: list[tuple[Path | None, float]] = []  # (voice file, start seconds)
+    voices_t: list[tuple[Path | None, float]] = []  # (voice file, start seconds)
     notes, t, panel_times = [], 0.0, []
 
     def fitted(img, name):  # bands mode only: art-window-shaped crop (full-bleed uses the whole image)
@@ -391,20 +445,30 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
             return Path(img)
 
     if cover:
-        cover_clip = render_clip(ffmpeg, fitted(images[0], "cover"), make_overlay(work / "ov_cover.png", title=series["title"], subtitle=f"{cover_label} {part}", layout=L),
+        cover_clip = render_clip(ffmpeg, fitted(images[0], "cover"), make_overlay(work / "ov_cover.png", title=series["title"], subtitle=f"{cover_label} {part}",
+                                                                                   narration=comic.get("cover_note", ""), layout=L),
                                  COVER_S, "zoom_in", work / "clip_cover.mp4", dim=True, layout=L)
         clips.append((cover_clip, COVER_S))
-        voices.append((None, 0.0))
+        voices_t.append((None, 0.0))
         t += COVER_S - XF
     for i, (p, img) in enumerate(zip(panels, images)):
         p = {**p, "narration": trim_words(p["narration"], max_words or MAX_NARRATION_WORDS)}
-        vfile, note = synthesize_voiceover(p["narration"], work / f"voice_{i}.wav",
-                                           options={"voice_engine": "edge", "voice": voice, "language": "hi" if language.lower().startswith("hi") else "en"})
-        notes.append(note)
-        vdur = _duration(vfile) if vfile else 0.0
-        secs = max((vdur if vfile else 3.0) + PAD, PANEL_MIN_S)
+        mlines = p.get("lines") or []
+        if mlines:  # manga: every line is spoken by its own character voice; panel time = lines + 0.4 s
+            from aurora import manga
+
+            la = manga.panel_audio(ffmpeg, mlines, work, i, voices or manga.DEFAULT_VOICES)
+            notes += la["notes"]
+            vfile, vdur, secs = None, 0.0, la["secs"]
+        else:
+            vfile, note = synthesize_voiceover(p["narration"], work / f"voice_{i}.wav",
+                                               options={"voice_engine": "edge", "voice": voice, "language": "hi" if language.lower().startswith("hi") else "en"})
+            notes.append(note)
+            vdur = _duration(vfile) if vfile else 0.0
+            secs = max((vdur if vfile else 3.0) + PAD, PANEL_MIN_S)
         motion = "punch" if p.get("action") else MOTIONS[i % len(MOTIONS)]
         sx, occ, head, head_zone = None, None, None, None
+        faces_img, iw, ih = [], 0, 0
         if layout_aware and not L.bands:  # full-bleed: where are the characters over the whole move? (mask + faces)
             try:
                 with Image.open(img) as im0:
@@ -421,11 +485,35 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
                 sx = comic_layout.speaker_x(comic_layout.detect_faces(Path(img)), iw, ih, W, L.art_h)
             except Exception as exc:  # noqa: BLE001
                 notes.append(f"panel {i}: face detection skipped ({str(exc)[:60]})")
-        ov = make_overlay(work / f"ov_{i}.png", narration=p["narration"], bubble=p.get("bubble", ""), speaker_x=sx, layout=L, occ=occ, head=head, head_zone=head_zone)
-        clips.append((render_clip(ffmpeg, fitted(img, str(i)), ov, secs, motion, work / f"clip_{i}.mp4", layout=L), secs))
-        voices.append((vfile, t + 0.05))
-        panel_times.append({"i": i, "start": round(t, 2), "voice_start": round(t + 0.05, 2), "voice_end": round(t + 0.05 + vdur, 2),
-                            "end": round(t + secs - XF, 2), "narration": p["narration"]})
+        if mlines:
+            from aurora import manga
+
+            extra = [(manga.tone_png(work / f"tone_{i}.png", W, H, bool(p.get("action"))), None, None)]
+            for k, it in enumerate(la["items"]):
+                ln = it["line"]
+                spk_head = manga.speaker_head(ln["speaker"], p, faces_img, iw, ih, motion, occ, head_zone) if ln["kind"] in ("speech", "shout", "whisper") else None
+                boxed = ln["kind"] in ("verse", "caption")
+                bpng = make_overlay(work / f"ov_{i}_{k}.png", narration=ln["text"] if boxed else "", bubble="" if boxed else ln["text"], border=False,
+                                    layout=L, occ=occ, head=spk_head, head_zone=head_zone,
+                                    bubble_style=ln["kind"] if ln["kind"] in ("shout", "whisper") else "speech", narr_style=ln["kind"])
+                nxt = la["items"][k + 1]["start"] if k + 1 < len(la["items"]) else secs
+                extra.append((bpng, it["start"], max(it["end"] + 0.3, min(nxt, it["end"] + 0.3))))
+            ov = make_overlay(work / f"ov_{i}.png", layout=L, occ=occ, head=head, head_zone=head_zone)  # panel border only
+            clips.append((render_clip(ffmpeg, fitted(img, str(i)), ov, secs, motion, work / f"clip_{i}.mp4", layout=L, extra=extra), secs))
+            for it in la["items"]:
+                if it["file"]:
+                    voices_t.append((it["file"], t + it["start"]))
+            first, last_ = la["items"][0], la["items"][-1]
+            panel_times.append({"i": i, "start": round(t, 2), "voice_start": round(t + first["start"], 2), "voice_end": round(t + last_["end"], 2),
+                                "end": round(t + secs - XF, 2), "narration": " ".join(it["line"]["text"] for it in la["items"]),
+                                "lines": [{"speaker": it["line"]["speaker"], "kind": it["line"]["kind"], "start": round(t + it["start"], 2),
+                                           "end": round(t + it["end"], 2), "text": it["line"]["text"]} for it in la["items"]]})
+        else:
+            ov = make_overlay(work / f"ov_{i}.png", narration=p["narration"], bubble=p.get("bubble", ""), speaker_x=sx, layout=L, occ=occ, head=head, head_zone=head_zone)
+            clips.append((render_clip(ffmpeg, fitted(img, str(i)), ov, secs, motion, work / f"clip_{i}.mp4", layout=L), secs))
+            voices_t.append((vfile, t + 0.05))
+            panel_times.append({"i": i, "start": round(t, 2), "voice_start": round(t + 0.05, 2), "voice_end": round(t + 0.05 + vdur, 2),
+                                "end": round(t + secs - XF, 2), "narration": p["narration"]})
         t += secs - XF
     final = part >= int(series.get("total_parts", 1))
     if end_card is not None:
@@ -437,7 +525,7 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
 
     # video: xfade chain; audio: per-panel voices placed on the timeline, music ducked under them
     voice_track = None
-    vlist = [(f, st) for f, st in voices if f]
+    vlist = [(f, st) for f, st in voices_t if f]
     if vlist:
         ins, parts = [], []
         for k, (f, st) in enumerate(vlist):
@@ -683,7 +771,10 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
     ffmpeg = FFmpegKenBurns().ffmpeg
     extra = {}
     if chapter:  # end cards "Part M+1 tomorrow" / "Chapter N finale"; cover "CH.N PART M"
-        extra = {"end_card": research.end_card_for(chapter["number"], chapter["part"], chapter["parts"]), "cover_label": f"CH.{chapter['number']} PART"}
+        extra = {"end_card": tuple(comic["end_card"]) if comic.get("end_card") else research.end_card_for(chapter["number"], chapter["part"], chapter["parts"]),
+                 "cover_label": f"CH.{chapter['number']} PART"}
+    if cfg.get("comic", {}).get("voices"):  # manga: per-character voices
+        extra["voices"] = cfg["comic"]["voices"]
     info = render_comic(ffmpeg, comic, images, mp4, ROOT / "outputs" / "comic_work" / slug, voice, music, language,
                         layout=cfg.get("comic", {}).get("layout"), **extra)
     rep = validate_video(mp4, W, H, fps=FPS, require_audio=True, deep=True)

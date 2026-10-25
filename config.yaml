@@ -267,3 +267,13 @@ autopilot:
       format: comic
       seo: true             # SEO-researched title/description/tags (aurora/publish/seo.py); falls back to plain metadata
       panels: 6             # cast: assets/characters/shinobi (copy of main's locked cast, Kaelen)
+
+# Manga-dialogue series (aurora/manga.py). Script: docs/stories/<series>/CHAPTER_NN.md. NOT queued/published until the user says go.
+manga_series:
+  veer:
+    channel: shinobi
+    title: "VEER – Wrath of the Forgotten God"
+    playlist: "VEER – Wrath of the Forgotten God"
+    script_dir: docs/stories/veer
+    reserve_credits: 14              # NIM credits/day kept for Echoes of the Aether (2 parts/day); Veer only renders with what is left
+    enabled: false                   # autopilot does not schedule it yet

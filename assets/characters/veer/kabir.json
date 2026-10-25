@@ -1,0 +1,16 @@
+{
+  "name": "Kabir",
+  "role": "best friend",
+  "description": "stocky 19-year-old Indian man, short curly hair, easy grin, orange hoodie with a drone-pilot harness, small drone hovering nearby",
+  "distinguishing_marks": "curly hair, orange hoodie, harness, drone",
+  "personality": "street-smart, loyal, jokes when scared",
+  "voice_notes": "street-smart, loyal, jokes when scared",
+  "voice": {
+    "voice": "en-GB-RyanNeural",
+    "rate": "+6%",
+    "pitch": "+2Hz"
+  },
+  "seed": 20261025,
+  "first_story": "VEER – Wrath of the Forgotten God",
+  "references": []
+}

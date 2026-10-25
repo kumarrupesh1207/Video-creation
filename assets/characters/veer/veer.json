@@ -1,0 +1,16 @@
+{
+  "name": "Veer",
+  "role": "protagonist",
+  "description": "lean tall 19-year-old Indian man, sharp jaw, messy black hair with one silver streak, dark brown eyes, rust-red scarf, dusty grey work kurta-jacket, copper bracelet on the wrist",
+  "distinguishing_marks": "silver streak in the hair, rust-red scarf, copper bracelet; eyes flash gold when triggered",
+  "personality": "warm, quick, sarcastic under stress",
+  "voice_notes": "warm, quick, sarcastic under stress",
+  "voice": {
+    "voice": "en-IN-PrabhatNeural",
+    "rate": "+4%",
+    "pitch": "+0Hz"
+  },
+  "seed": 20261025,
+  "first_story": "VEER – Wrath of the Forgotten God",
+  "references": []
+}

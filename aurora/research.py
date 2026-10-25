@@ -203,8 +203,8 @@ def panel_prompt(panel: dict, sheet: list[dict], max_chars: int = MAX_PROMPT_CHA
     """Final image prompt: style + the FIXED character descriptions for this panel + shot + scene + composition/no-text suffix.
     Kept under max_chars (NIM limit): character descriptions and the scene are shortened first; the suffix and shot never are."""
     names = {n.lower() for n in panel.get("characters", [])}
-    chars = [c for c in sheet if not names or c["name"].lower() in names] or sheet[:1]
-    head = "cel-shaded anime illustration, single panel, "
+    chars = [] if panel.get("scenery") else ([c for c in sheet if not names or c["name"].lower() in names] or sheet[:1])
+    head = panel.get("style_head") or "cel-shaded anime illustration, single panel, "
     shot = f", {panel.get('shot', 'medium')} shot, "
     for desc_n, scene_n in ((10_000, 10_000), (170, 260), (120, 200), (80, 150), (50, 100)):
         who = ", ".join(f"{c['name']}: {_cut(c['description'], desc_n)}" for c in chars)

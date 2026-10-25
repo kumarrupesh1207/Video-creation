@@ -46,6 +46,7 @@ Runs on a CPU-only Windows PC (Ryzen 5 5600G, 16 GB, no NVIDIA GPU). History/sta
 - Tokens/client secrets live in git-ignored `outputs/tokens/` (c16483c).
 - Stories are Series -> Chapter N -> Part M, >= 10 parts per chapter (`comic.chapter_parts`); the finished chapter is compiled to ONE 16:9 video from cached parts, 0 NIM credits (`aurora/chapter.py`); the weekly `aurora.episode` long video is off.
 - Stories are CONTENT, not code: a new series, chapter or character must never need a code change. Story packs (series meta, characters, chapter scripts, world rules) are data files read by a generic engine and validated before render (user requirement, 2026-10-25; see docs/STORY_PACKS.md once built).
+- VEER (manga series, `aurora/manga.py`): docs/stories/veer respect charter + style guide are hard rules (`manga.check_charter`); never queue/publish it until the user says go; it only renders with NIM credits left after Echoes (`reserve_credits`).
 - Core architecture rules (cheapest tier first, structured JSON logs, fail loud) — `AURORA.md` "CORE ARCHITECTURE RULES".
 
 ## Workflow (Compound loop)
