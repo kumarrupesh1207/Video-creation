@@ -5,3 +5,4 @@
   symbols, weapons and legend. No religion is hurt or ranked; other cultures' gods are "echoes". No prophets are depicted.
 - Power = recalling past lives; every recall erases one present memory (Vinimay). Veer is never claimed to be the prophesied saviour.
 - Full bible: STORY_BIBLE.md in this folder.
+- PERMANENT RULE (owner's mandate, never changes under any condition): Hridyansh Singh and Hrithvika Rao must NEVER have any romantic relationship, interest, tension or hint anywhere in the story. Hridyansh is like an elder brother to Hrithvika.

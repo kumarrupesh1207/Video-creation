@@ -22,7 +22,8 @@ into a 5,000-year-old wall — and learns that every scripture on Earth is a mem
 4. **No religion or faith is hurt or ranked.** Other cultures' gods are shown as **"echoes"** of the same lost memory, never as "X was really Y". [AGREED / DECIDED-C]
 5. **No depiction of prophets** of any faith that forbids it; those traditions enter only through shared motifs (e.g., the great flood). [DECIDED-C]
 6. Real scripture names (Vedas, Gita, Bible, Quran…) are **not** called "just memory files". The story's scriptures are **fictional texts inspired by** them (the *Smriti Sutras*). [DECIDED-C]
-7. Opening card on every episode: *"A work of fiction inspired by the world's mythologies, told with respect."*
+7. **PERMANENT RULE (owner's mandate, never changes under any condition): Hridyansh Singh and Hrithvika Rao must NEVER have any romantic relationship, interest, tension or hint anywhere in the story. Hridyansh is like an elder brother to Hrithvika.** [AGREED — mandatory, permanent]
+8. Opening card on every episode: *"A work of fiction inspired by the world's mythologies, told with respect."*
 
 ## 3. The world
 ### 3.1 The First Age — *Satya-Kalpa* [DECIDED-C]
@@ -57,7 +58,7 @@ Whoever opens it decides how much of the past returns.
 ## 4. Characters
 ### Veer Pratap Rao — protagonist [AGREED core · DECIDED-C details]
 - **19**, temple-restoration apprentice in Navkashi; quit an archaeology degree to raise his sister.
-- **Want:** keep his little sister Meera safe and give her a normal life.
+- **Want:** keep his little sister Hrithvika safe and give her a normal life.
 - **Need:** accept that he is more than one life — and choose who he wants to be.
 - **Wound:** father (archaeologist Dr Aditya Rao) vanished on a dig 6 years ago; mother died soon after.
 - **Triggers [AGREED]:** sacred symbols make him hear a war-drum in his chest; old scripts become readable for a second; his hands move with a warrior's training he never had.
@@ -65,14 +66,14 @@ Whoever opens it decides how much of the past returns.
 - **Visual lock:** lean, tall, sharp jaw, messy black hair with one silver streak (grows with each recall), dark brown eyes that flash gold when triggered, rust-red scarf, dusty grey work kurta-jacket, a copper bracelet from his father.
 - **Voice:** warm, quick, sarcastic under stress; English with a light Indian accent.
 
-### Meera Rao — sister, 12 [DECIDED-C]
+### Hrithvika Rao — sister, 12 [DECIDED-C]
 - Bright, stubborn, draws everything. **First Smriti-flood victim (Ch. 3):** wakes as a First-Age priestess who doesn't recognise Veer. Saving *her* present self drives Arc 1.
 
 ### Tara Iyer — linguist, 21 [DECIDED-C]
 - Prodigy of dead scripts at Navkashi University; sceptic who wants proof. Decodes the Smriti Sutras.
 - **Secondary romance [AGREED secondary]:** she remembers Veer from a past life before he remembers her — and is angry about it.
 
-### Kabir Sheikh — best friend, 19 [DECIDED-C]
+### Hridyansh Singh — best friend, 19 [DECIDED-C]
 - Street-smart drone pilot and comic relief, loyal to the bone. **Dies at the end of Arc 3** protecting civilians during a city-wide Smriti-flood. ("Anyone can die" — AGREED.)
 
 ### Acharya Vyom — the mentor [DECIDED-C]
@@ -97,7 +98,7 @@ Each believes in Smaran for a personal reason; at least one turns.
 
 ## 5. Power system — *Smriti* (memory is power) [DECIDED-C]
 - Powers come from **recalling a past life**. Each recall grants an **Ansh** (fragment) — a skill, weapon or astra from that life.
-- **The cost (Vinimay — "exchange"):** every recall **erases one memory of the present life** (a birthday, a friend's voice, Meera's laugh). Power and identity trade against each other — that is the theme.
+- **The cost (Vinimay — "exchange"):** every recall **erases one memory of the present life** (a birthday, a friend's voice, Hrithvika's laugh). Power and identity trade against each other — that is the theme.
 - **Tiers** (mid-level start → god-level [AGREED trajectory]):
   1. **Jagrit** (Awakened) — triggers, reflexes. *(Veer at Ch. 1)*
   2. **Smrit** (Recalled) — one past-life skill at will.
@@ -110,7 +111,7 @@ Each believes in Smaran for a personal reason; at least one turns.
 | # | Reveal | Where |
 |---|---|---|
 | R1 | Veer's face is carved on a 5,000-year-old wall | Ch. 1 cliffhanger |
-| R2 | A Smriti Sutra verse describes Meera's flood — written millennia ago | Ch. 3 |
+| R2 | A Smriti Sutra verse describes Hrithvika's flood — written millennia ago | Ch. 3 |
 | R3 | **Scriptures are memories of previous civilisations** [AGREED] | Ch. 10 (Arc 1 finale) |
 | R4 | The same memories appear in every culture's myths — the Setu links them | Arc 2 |
 | R5 | **Humanity chose to forget** (the Vismriti Yajna) [AGREED] | Arc 3 midpoint |
@@ -122,15 +123,15 @@ Each believes in Smaran for a personal reason; at least one turns.
 - Smaran wants to **shatter** the Veil (truth with no mercy). The old way is to **re-seal** it (mercy with no truth).
 - Veer's answer: open the Smritilaya so humanity keeps **the lessons, not the pain** — every person receives their past lives as **story**, not as flood. "We wrote myths so we could remember without breaking."
 - **Cost:** to carry the full memory through the Setu, Veer spends his own past lives — he becomes *only* Veer again, and loses his First-Age self and powers. Smaran dies in his arms, at peace, seeing humanity choose to remember gently.
-- Kabir's death and the destruction stay real. The ending is hopeful, not reset.
+- Hridyansh's death and the destruction stay real. The ending is hopeful, not reset.
 - **The prophesied saviour of the dark age** (the early "Kali Avatar" idea): the story **never claims** Veer is that saviour and never claims the prophecy is fulfilled. It is left as a revered future promise. [DECIDED-C, out of respect]
 
 ## 8. Structure
 | Arc | Title | Chapters | Core |
 |---|---|---|---|
-| 1 | **Awakening** | 1–10 | Navkashi; triggers; Meera's flood; Jalaghna; R1–R3 |
+| 1 | **Awakening** | 1–10 | Navkashi; triggers; Hrithvika's flood; Jalaghna; R1–R3 |
 | 2 | **The Echoes** | 11–20 | Egypt, Greece; the Setu; Tara's past; Agnira; R4 |
-| 3 | **The Crack** | 21–30 | World floods; the Vismriti Yajna; Kabir's death; R5 |
+| 3 | **The Crack** | 21–30 | World floods; the Vismriti Yajna; Hridyansh's death; R5 |
 | 4 | **The Unforgotten** | 31–40 | Smaran's truth; Taraka; Veer's First-Age self; R6–R7 |
 | 5 | **The Choice** | 41–50 | Smritilaya; final battle; the Third Path; R8 |
 

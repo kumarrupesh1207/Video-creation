@@ -26,3 +26,7 @@ extra_voices:
 reserve_credits: 14
 rules:
   banned_words: []
+  forbidden_relationships:
+    - pair: [Hridyansh, Hrithvika]
+      type: romantic
+      note: "PERMANENT RULE (owner's mandate, never changes under any condition): Hridyansh Singh and Hrithvika Rao must NEVER have any romantic relationship, interest, tension or hint anywhere in the story. Hridyansh is like an elder brother to Hrithvika."

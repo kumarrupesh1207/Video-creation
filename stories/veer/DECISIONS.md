@@ -13,9 +13,11 @@
 | C1 | 2026-10-25 | Divine + scientific (never "only technology"); other gods as echoes; no prophet depictions; fictional *Smriti Sutras* | Claude |
 | C2 | 2026-10-25 | Manga canon separate from the early game; Chiranjivi idea kept as "the Seven Who Remember" with fictional names | Claude |
 | C3 | 2026-10-25 | Veil rules (6 previous cycles, collective consent at the Setu, objects survive, Smriti-flood) | Claude |
-| C4 | 2026-10-25 | Veer 19, sister Meera 12 (personal stake), opening = his face carved in stone | Claude |
+| C4 | 2026-10-25 | Veer 19, sister Hrithvika 12 (personal stake), opening = his face carved in stone | Claude |
 | C5 | 2026-10-25 | Power = memory recall with Vinimay cost (each recall erases a present memory); 5 tiers | Claude |
 | C6 | 2026-10-25 | Villain name SMARAN "the Unforgotten" (Veer's First-Age brother); Heralds Jalaghna / Agnira / Taraka | Claude |
-| C7 | 2026-10-25 | Twist: Veer proposed the Veil; ending = Third Path (lessons as story, not flood); Kabir dies end of Arc 3 | Claude |
+| C7 | 2026-10-25 | Twist: Veer proposed the Veil; ending = Third Path (lessons as story, not flood); Hridyansh dies end of Arc 3 | Claude |
 | C8 | 2026-10-25 | "Kali Avatar"/prophesied saviour is never claimed as Veer or as fulfilled (respect) | Claude |
 | C9 | 2026-10-25 | English dialogue with Indian names; 5 arcs × 10 chapters; 1 chapter = 10 Shorts + Saturday compilation | Claude |
+| D10 | 2026-10-25 | Renames: Kabir Sheikh → **Hridyansh Singh**, Meera → **Hrithvika** | Rupesh |
+| D11 | 2026-10-25 | **PERMANENT:** Hridyansh and Hrithvika never romantic, under any condition (elder-brother bond) | Rupesh |
