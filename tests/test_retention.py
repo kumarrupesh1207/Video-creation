@@ -97,6 +97,16 @@ def test_hook_first_opening_recap_from_part_2_and_publisher_fields(packs, worksp
 def test_recap_card_text_stays_inside_the_frame(workspace_tmp_path, recap):
     p = comic.make_hook_overlay(workspace_tmp_path / "r.png", label="Previously…", recap=recap)
     x0, y0, x1, y1 = Image.open(p).getchannel("A").getbbox()
-    assert x0 >= 60 and x1 <= comic.W - 60 and y1 < 700  # >= 60 px margins both sides, at most ~3 lines in the top band
+    assert x0 >= 60 and x1 <= comic.W - 60 and 450 < y0 and y1 < 900  # >= 60 px margins both sides; block centred in the upper-middle, at most ~3 lines
     tag = Image.open(comic.make_hook_overlay(workspace_tmp_path / "t.png", tag="Echoes of the Aether · CH.1 PART 9")).getchannel("A").getbbox()
     assert tag[0] >= 60 and tag[2] <= comic.W - 60
+
+
+def test_recap_backdrop_is_blurred_and_dimmed_so_no_face_is_sharp(workspace_tmp_path):
+    import numpy as np
+
+    src = workspace_tmp_path / "a.png"
+    Image.effect_noise((600, 600), 90).convert("RGB").save(src)  # maximum detail
+    out = comic.recap_backdrop(src, workspace_tmp_path / "b.png")
+    a, b = np.asarray(Image.open(src).convert("L"), float), np.asarray(Image.open(out).convert("L"), float)
+    assert b.std() < a.std() * 0.2 and b.mean() <= a.mean() * 0.45  # no sharp detail left, ~60% dimmer

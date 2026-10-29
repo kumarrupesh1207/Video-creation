@@ -357,6 +357,16 @@ def pick_hook_line(comic: dict, idx: int, words: int = 8) -> str:
     return trim_words(" ".join(text.split()), words)
 
 
+def recap_backdrop(src: Path, out: Path, blur: int = 38, keep: float = 0.4) -> Path:
+    """The recap card's backdrop: the panel heavily blurred and ~60% dimmed, so no sharp face (or any detail) ever sits under the text."""
+    from PIL import ImageEnhance, ImageFilter
+
+    with Image.open(src) as im:
+        bg = ImageEnhance.Brightness(im.convert("RGB").filter(ImageFilter.GaussianBlur(blur))).enhance(keep)
+    bg.save(out)
+    return out
+
+
 RECAP_X, RECAP_W, RECAP_STROKE = 60, 880, 6  # >= 60 px left margin; 60+880 = 940 keeps clear of the platform UI strip on the right
 
 
@@ -399,9 +409,11 @@ def make_hook_overlay(path: Path, tag: str = "", line: str = "", label: str = ""
             y += lh
     if recap:
         fl = _font(52, label)
-        d.text((RECAP_X + RECAP_STROKE, S[1] + 40), label, font=fl, fill=(255, 214, 80, 255), stroke_width=5, stroke_fill=(0, 0, 0, 255))
         f, lines, lh = _fit_lines(d, recap, RECAP_W - 2 * RECAP_STROKE, 3, 76, 34)  # wrapped to the frame width, shrinks to <= 3 lines
-        y = S[1] + 120
+        block = 90 + len(lines) * lh
+        y = int(H * 0.34 - block / 2)  # centred in the upper-middle of the (blurred, dimmed) card
+        d.text((RECAP_X + RECAP_STROKE, y), label, font=fl, fill=(255, 214, 80, 255), stroke_width=5, stroke_fill=(0, 0, 0, 255))
+        y += 90
         for l in lines:
             d.text((RECAP_X + RECAP_STROKE, y), l, font=f, fill=(255, 255, 255, 255), stroke_width=RECAP_STROKE, stroke_fill=(0, 0, 0, 255))
             y += lh
@@ -543,7 +555,7 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
         if rc["previously"] and part >= 2 and prev:
             rs = min(float(rc["previously_s"]), 1.2)
             rov = make_hook_overlay(work / "ov_recap.png", label="Previously…", recap=trim_words(prev, 14))
-            clips.append((render_clip(ffmpeg, fitted(images[0], "recap"), rov, rs, "zoom_in", work / "clip_recap.mp4", dim=True, layout=L), rs))
+            clips.append((render_clip(ffmpeg, recap_backdrop(fitted(images[0], "recap"), work / "recap_bg.png"), rov, rs, "zoom_in", work / "clip_recap.mp4", layout=L), rs))
             voices_t.append((None, 0.0))
             t += rs - XF
             intro["previously_s"] = rs
