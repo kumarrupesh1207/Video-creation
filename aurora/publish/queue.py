@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 QUEUE_PATH = ROOT / "outputs" / "publish_queue.json"
 IST = timezone(timedelta(hours=5, minutes=30), "IST")
 DEFAULTS = {"enabled": False, "upload_ahead": False, "approval": "veto", "veto_hours": 6.0, "slots": ["19:00"], "timezone": "Asia/Kolkata", "max_attempts": 3}
-EXTRA_KEYS = ("captions_srt", "thumbnail", "duration_secs", "part", "chapters", "chapter", "playlist", "story")  # render outputs the publisher uses
+EXTRA_KEYS = ("captions_srt", "thumbnail", "duration_secs", "part", "chapters", "chapter", "playlist", "story", "engagement_question")  # render outputs the publisher uses
 ACTIVE = {"pending_approval", "scheduled", "uploaded_scheduled", "publishing", "published"}  # statuses that block re-enqueueing a sha
 _lock = threading.RLock()
 

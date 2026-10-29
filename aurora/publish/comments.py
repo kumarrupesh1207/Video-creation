@@ -154,3 +154,13 @@ def send_approved(service, channel: str, budget=None, state_dir: Path = STATE_DI
         save(channel, state, state_dir)  # persist per reply so a crash cannot double-send
         sent.append(cid)
     return sent
+
+
+def post_engagement_comment(service, video_id: str, text: str, budget=None) -> str:
+    """ONE top-level comment from the channel on its own video (the engagement question). Returns the comment id.
+    The Data API cannot pin it: the daily report lists it so the user can pin it in Studio. Quota: commentThreads.insert 50."""
+    if budget:
+        budget.spend("commentThreads.insert")
+    r = service.commentThreads().insert(part="snippet", body={"snippet": {
+        "videoId": video_id, "topLevelComment": {"snippet": {"textOriginal": text.strip()[:500]}}}}).execute()
+    return r["snippet"]["topLevelComment"]["id"] if r.get("snippet") else r.get("id", "")

@@ -308,6 +308,8 @@ def run_render(cfg: dict, queue: PublishQueue, only: str | None = None, limit: i
             meta.update(_sidecar_extras(sidecar))
             meta["story"] = idea.get("story")
             if ch.get("seo"):
+                idea = {**idea, "hook_title": sidecar.get("hook_title") or idea.get("hook_title") or "",
+                        "engagement_question": sidecar.get("engagement_question") or idea.get("engagement_question") or ""}
                 meta = apply_seo(cfg, ch, idea, meta, seo_service_factory)
             for platform in ch["platforms"]:
                 item = queue.enqueue(ch["name"], sidecar["reel"]["path"], meta, platform=platform)
@@ -341,6 +343,7 @@ def idea_from_sidecar(side: dict) -> dict:
             "part": int(side["part"]) if side.get("part") else None, "chapter": chap.get("number"), "parts": chap.get("parts"),
             "playlist": side.get("playlist"), "story": side.get("story"), "recap": ser.get("recap", ""),
             "beat": (chap.get("beat") or {}).get("summary", ""), "caption": side.get("caption", ""), "hook": side.get("hook") or "",
+            "hook_title": side.get("hook_title") or "", "engagement_question": side.get("engagement_question") or "",
             "events": [p.get("narration", "") for p in side.get("panels") or [] if isinstance(p, dict) and p.get("narration")][:6],
             "hashtags": ["#anime", "#animestory"]}
 
@@ -380,11 +383,16 @@ def apply_seo(cfg: dict, ch: dict, idea: dict, meta: dict, service_factory=None,
                                  beat=idea.get("beat", ""), caption=idea.get("caption", ""), parts=idea.get("parts"),
                                  playlist=idea.get("playlist") or meta.get("playlist"), niche_keywords=pack.get("seo_keywords") or None,
                                  hook=idea.get("hook") or "", events=idea.get("events"), main_keyword=pack.get("main_keyword"),
-                                 series_hashtag_=pack.get("hashtag"), misspell=pack.get("seo_misspellings"))
+                                 series_hashtag_=pack.get("hashtag"), misspell=pack.get("seo_misspellings"),
+                                 hook_title=idea.get("hook_title") or "", engagement_question=idea.get("engagement_question") or "")
         for w in res.get("warnings", []):
             print(f"[autopilot] {ch['name']}: SEO note: {w}", file=sys.stderr)
-        title = meta["title"] if idea.get("chapter") and idea.get("part") else res["title"]  # "<Series> – Ch.N Part M: hook" is fixed, never rewritten
-        return {**meta, "title": title, "description": res["description"], "tags": res["tags"] or meta["tags"], "language": "en"}
+        # chapter parts without a hook keep Backend's "<Series> – Ch.N Part M: hook" title; hook-first titles replace it
+        title = meta["title"] if idea.get("chapter") and idea.get("part") and not res.get("hook_title_used") else res["title"]
+        out = {**meta, "title": title, "description": res["description"], "tags": res["tags"] or meta["tags"], "language": "en"}
+        if res.get("engagement_question"):
+            out["engagement_question"] = res["engagement_question"]
+        return out
     except Exception as e:  # noqa: BLE001
         print(f"[autopilot] {ch['name']}: SEO failed, using plain metadata: {e}", file=sys.stderr)
         return meta
@@ -458,7 +466,8 @@ def compose_meta(idea: dict, sha256: str) -> dict:
 
 # ---- publish ---------------------------------------------------------
 def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | None = None, service_factory=None,
-                uploader=None, dry_run: bool = False, ig_publisher=None, playlist_fn=None, budget=None) -> dict:
+                uploader=None, dry_run: bool = False, ig_publisher=None, playlist_fn=None, budget=None, comment_fn=None,
+                playlist_public_fn=None) -> dict:
     """Upload every eligible, non-vetoed item. Stops a channel on quota; failures retry up to max_attempts.
     With autopilot.publish.upload_ahead the upload happens as soon as the veto window passed: private + publishAt=<slot>
     (YouTube publishes it itself, PC may be off); a slot that is already past is published public right away."""
@@ -502,7 +511,7 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
         return result
     services: dict[str, object] = {}
     blocked: set[str] = set()
-    reconcile(queue, now, service_factory, services, blocked)
+    reconcile(queue, now, service_factory, services, blocked, budget, comment_fn, playlist_public_fn)
     for it in todo:
         ch = it["channel"]
         if not queue.publish_enabled(ch) or not queue.story_enabled(ch, it.get("story")):
@@ -551,6 +560,8 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
                 print(f"[autopilot] {ch}: published {vid}")
             # a scheduled video is meant to become public, so its series playlist is public too
             _post_upload(queue, it, vid, services[ch], playlist_fn, privacy="public" if schedule else privacy, budget=budget)
+            if not schedule and privacy == "public":
+                went_public(queue, {**it, "video_id": vid}, services[ch], budget, comment_fn, playlist_public_fn)
         except yt.QuotaExceeded as e:
             queue.hold(it["id"], f"YouTube quota: {e}")
             blocked.add(ch)
@@ -563,7 +574,36 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
     return result
 
 
-def reconcile(queue: PublishQueue, now: datetime, service_factory, services: dict, blocked: set) -> int:
+def went_public(queue: PublishQueue, it: dict, service, budget=None, comment_fn=None, playlist_public_fn=None) -> None:
+    """A video of ours is now PUBLIC: post the engagement question as ONE top-level comment (once; the Data API cannot pin it, so
+    the daily report asks the user to pin it in Studio) and make its series playlist public. Each step fails independently."""
+    from aurora.publish import comments, youtube as yt
+
+    ch, vid = it["channel"], it.get("video_id")
+    if not vid or it.get("platform", "youtube") != "youtube":
+        return
+    q = (it.get("engagement_question") or "").strip()
+    if q and not it.get("engagement_comment_id"):
+        try:
+            cid = (comment_fn or comments.post_engagement_comment)(service, vid, q, budget=budget)
+            queue._update(it["id"], engagement_comment_id=cid or "posted", engagement_commented_at=datetime.now(timezone.utc).isoformat(),
+                          engagement_comment_error=None)
+        except Exception as e:  # noqa: BLE001 - quota/auth: the video is live, retried at the next reconcile only if still unposted
+            queue._update(it["id"], engagement_comment_error=f"{type(e).__name__}: {e}"[:300])
+            _event("engagement_comment_failed", ch, f"{it['title'][:50]}: {e}")
+    name = it.get("playlist") or it.get("series")
+    if name:
+        try:
+            (playlist_public_fn or yt.ensure_playlist)(service, ch, name, "public")
+            bad = yt.playlist_privacy_problem(ch, name)
+            if bad:
+                _event("playlist_not_public", ch, bad)
+        except Exception as e:  # noqa: BLE001
+            _event("playlist_not_public", ch, f"playlist '{name}' could not be made public: {e}")
+
+
+def reconcile(queue: PublishQueue, now: datetime, service_factory, services: dict, blocked: set, budget=None, comment_fn=None,
+              playlist_public_fn=None) -> int:
     """uploaded_scheduled items whose slot has passed: confirm YouTube made them public -> published. Returns count."""
     done = 0
     for it in queue.list(status="uploaded_scheduled"):
@@ -581,6 +621,7 @@ def reconcile(queue: PublishQueue, now: datetime, service_factory, services: dic
         status = r[0]["status"]["privacyStatus"] if r else "missing"
         if status == "public":
             queue.mark_published(it["id"], it["video_id"])
+            went_public(queue, it, services[ch], budget, comment_fn, playlist_public_fn)
             done += 1
         elif now > datetime.fromisoformat(it["publish_at"]) + timedelta(hours=1):
             queue._update(it["id"], error=f"still {status} an hour after its slot")
@@ -655,6 +696,7 @@ def write_daily_report(queue: PublishQueue, budget=None, now: datetime | None = 
     upcoming = sorted((i for i in items if i["status"] == "uploaded_scheduled"), key=lambda i: i["publish_at"])
     waiting = [i for i in items if i["status"] in ("scheduled", "pending_approval")]
     failed = [i for i in items if i["status"] == "failed" or i.get("error")]
+    pins = [i for i in items if i.get("engagement_comment_id") and is_today(i.get("engagement_commented_at"))]
     f = (events_dir or EVENTS_DIR) / f"events_{now.date().isoformat()}.json"
     events = _json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
     if nim_credits is None:
@@ -674,6 +716,8 @@ def write_daily_report(queue: PublishQueue, budget=None, now: datetime | None = 
           f"## Uploaded / published today ({len(uploaded)})", *(map(line, uploaded) or ["- none"]),
           f"## Scheduled on YouTube ({len(upcoming)})", *(map(line, upcoming) or ["- none"]),
           f"## Waiting for veto window / approval ({len(waiting)})", *(map(line, waiting) or ["- none"]),
+          f"## Pin these comments in YouTube Studio ({len(pins)}) - the API cannot pin",
+          *([f"- [{i['channel']}] {i['title'][:60]}: \"{i.get('engagement_question', '')}\" (video {i.get('video_id')})" for i in pins] or ["- none"]),
           f"## Failures and problems ({len(failed) + len(events)})",
           *([f"- {i['title'][:50]}: {i.get('error')}" for i in failed] + [f"- {e['at'][11:16]} {e['kind']} [{e['channel']}] {e['msg']}" for e in events] or ["- none"])]
     out = (report_dir or REPORT_DIR) / f"{today}.md"
@@ -766,6 +810,8 @@ def publish_one(queue: PublishQueue, item_id: str, privacy: str = "private", con
     done = queue.mark_published(item_id, vid)
     print(f"[autopilot] {ch}: published {vid} as {privacy}")
     _post_upload(queue, done, vid, service, playlist_fn, privacy, budget)
+    if privacy == "public":
+        went_public(queue, done, service, budget)
     return queue.get(item_id)
 
 

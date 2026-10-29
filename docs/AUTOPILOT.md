@@ -134,3 +134,13 @@ Phone layout: three sections (Videos waiting: preview + Stop/Approve; Comment re
 
 ## Updating the text of a video that is already on YouTube
 `python -m aurora.autopilot update-metadata <queue_id> --dry-run` shows the freshly generated title / description / tags (from the part's sidecar). `... --i-confirm` applies them with `videos.update` **snippet only** (title, description, tags, categoryId 1, defaultLanguage/defaultAudioLanguage en; the current snippet is merged in because an update replaces it) and never sends the status, so privacy and a scheduled `publishAt` stay as they are; the queue item is updated too. Works for `uploaded_scheduled` and `published` items; refuses without `--i-confirm`. Never run automatically: it edits a live video (50 + 1 quota units).
+
+## Hook-first titles and engagement comment (from analytics: 85 % of views come from the Shorts feed)
+- Series parts are titled `<hook_title> | <Series> Pt <M>` (<= 70 chars, hook shortened at a word boundary, series never cut). The chapter number
+  moves to the description ("Chapter N, Part M of K."). `hook_title` and `engagement_question` come from the render sidecar (Backend);
+  missing -> the part's `hook` / a generic question, with a `[autopilot] SEO note` warning.
+- Description line 1 = `<engagement question> 👇`, then hook + main keyword, unique body, next-part/playlist lines, ONE disclosure line, 3 hashtags.
+- When a video becomes public (reconcile, or an immediate public upload) the publisher posts ONE top-level comment with the question
+  (`commentThreads.insert`, 50 units, never twice) and makes the series playlist public. The Data API cannot pin: the daily report lists
+  "Pin these comments in YouTube Studio". Failures never un-publish; see `engagement_comment_error` / events.
+- Already published videos are never touched; `update-metadata <id> --i-confirm` applies the new format to one video on request.

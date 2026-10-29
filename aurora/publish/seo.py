@@ -231,11 +231,28 @@ def _sentences(text: str) -> str:
     return re.sub(r"\s*(Part \d+ tomorrow|Chapter \d+ finale)\.?\s*$", "", text.strip(), flags=re.I).strip()
 
 
+TITLE_MAX = 70
+FALLBACK_QUESTION = "What would you have done?"
+
+
+def hook_first_title(hook: str, series: str, part: int, limit: int = TITLE_MAX) -> str:
+    """'<hook> | <Series> Pt <M>' (<= limit chars): the hook leads because the Shorts feed shows the first words; the hook is
+    shortened at a word boundary, the series suffix is never cut. The chapter number lives in the description."""
+    suffix = f" | {series} Pt {part}"
+    h = re.sub(r"\s+", " ", hook or "").strip().strip("\"'").rstrip(" .:;-")
+    room = limit - len(suffix)
+    if len(h) > room:
+        h = h[:room].rsplit(" ", 1)[0].rstrip(" ,.:;-") if " " in h[:room] else h[:room]
+    return f"{h}{suffix}" if h else ""
+
+
 def build_description(hook: str, summary: str, hashtags: list[str], chapters_text: str = "", ai_note: str = AI_NOTE,
-                      next_line: str = "", playlist_line: str = "") -> str:
-    """Hook (+ main keyword), a unique 2-3 sentence body, at most 2 short boilerplate lines (next part, playlist), ONE disclosure
-    line, then the hashtags last. No keyword lists."""
-    parts = [hook, summary, chapters_text and f"Chapters:\n{chapters_text}", "\n".join(x for x in (next_line, playlist_line) if x), ai_note,
+                      next_line: str = "", playlist_line: str = "", question: str = "") -> str:
+    """Line 1 = the engagement question + 👇 (when given), then hook (+ main keyword), a unique 2-3 sentence body, at most 2 short
+    boilerplate lines (next part, playlist), ONE disclosure line, then the hashtags last. No keyword lists."""
+    q = question.strip()
+    q = q and (q if q.endswith("👇") else f"{q} 👇")
+    parts = [q, hook, summary, chapters_text and f"Chapters:\n{chapters_text}", "\n".join(x for x in (next_line, playlist_line) if x), ai_note,
              " ".join(hashtags)]
     return "\n\n".join(p.strip() for p in parts if p and p.strip())[:4900]
 
@@ -258,8 +275,11 @@ def build_metadata(topic: str, series: str | None, part: int | None, recap: str,
                    chapter: int | None = None, *, beat: str = "", caption: str = "", parts: int | None = None,
                    playlist: str | None = None, niche_keywords: list[str] | None = None, hook: str = "",
                    cache_dir: Path | None = None, events: list[str] | None = None, main_keyword: str | None = None,
-                   series_hashtag_: str | None = None, misspell: list[str] | None = None) -> dict:
-    """Title, SEO description, 5-10 tags and 3 hashtags. Never raises; failures are logged loudly and the template is used."""
+                   series_hashtag_: str | None = None, misspell: list[str] | None = None, hook_title: str = "",
+                   engagement_question: str = "") -> dict:
+    """Title, SEO description, 5-10 tags and 3 hashtags. Never raises; failures are logged loudly and the template is used.
+    Series parts get a hook-first title '<hook_title> | <Series> Pt <M>' (fallback: the part's hook) and an engagement-question
+    first line; the result carries `hook_title_used` and the `engagement_question` that went into the description."""
     is_short = (duration_secs or 0) < LONG_SECS
     niche = list(niche_keywords or DEFAULT_NICHE)
     main = (main_keyword or niche[0]).lower()
@@ -289,21 +309,35 @@ def build_metadata(topic: str, series: str | None, part: int | None, recap: str,
     elif best and series and part and f"part {part}" not in best.lower():
         best = f"{best[:100 - len(f' – Part {part}')]} – Part {part}"
     title = best or fallback_title or topic
+    hooked = ""
+    if series and part:  # hook FIRST (the Shorts feed truncates), series after; no Gemini title for story parts
+        hooked = hook_first_title(hook_title or hook, series, part)
+        if not hook_title:
+            warnings.append("no hook_title in the render sidecar: part hook used for the title")
+        if hooked:
+            title = hooked
     # line 1-2: hook + ONE main keyword; body: unique to this part
     body = opts["summary"] or _body_from_events(beat, events or [], caption, recap)
     first = opts["hook"] or hook or _sentences(caption) or title
     if main not in (first + " " + body).lower():
         first = f"{first.rstrip('. ')}. Original {main}."
     nxt = ""
+    where = f"Chapter {chapter}, Part {part}" + (f" of {parts}" if parts else "") + "." if hooked and chapter and part else ""
     if part and parts and part < parts:
         nxt = f"Watch Part {part + 1} next → a new part every day."
     elif part and parts and part >= parts:
         nxt = f"That was the final part of Chapter {chapter or 1}."
+    nxt = " ".join(x for x in (where, nxt) if x)
+    question = (engagement_question or "").strip()
+    if hooked and not question:
+        question = FALLBACK_QUESTION
+        warnings.append("no engagement_question in the render sidecar: generic question used")
     pl = f"All parts in order: the \"{playlist or series}\" playlist." if (playlist or series) else ""
     hts = clean_hashtags([series_hashtag_ or series_hashtag(series)] + [h for h in (hashtags or [])], is_short)
     name = (series or "").lower()
     tag_pool = ([name] if name else []) + misspellings(series, misspell) + list(niche) + list(kws) + [t.lstrip("#") for t in (hashtags or [])]
     tags = clean_tags(tag_pool, exclude)
-    desc = build_description(first, body, hts, format_chapters(chapters, duration_secs), next_line=nxt, playlist_line=pl)
+    desc = build_description(first, body, hts, format_chapters(chapters, duration_secs), next_line=nxt, playlist_line=pl,
+                             question=question if hooked else "")
     return {"title": title[:100], "description": desc, "tags": tags, "source": opts["source"], "keywords": kws, "warnings": warnings,
-            "hashtags": hts}
+            "hashtags": hts, "hook_title_used": bool(hooked), "engagement_question": question if hooked else ""}

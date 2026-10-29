@@ -44,7 +44,8 @@ def test_template_follows_youtube_guidelines_when_gemini_and_search_are_down(cap
                            main_keyword="dark fantasy anime", series_hashtag_="#EchoesOfTheAether",
                            misspell=["echos of the aether", "echoes of aether"])
     d = m["description"]
-    first_two = " ".join(d.split("\n\n")[0].splitlines())
+    assert d.split("\n\n")[0].endswith("👇")  # line 1 = engagement question (generic fallback here: none supplied)
+    first_two = " ".join(d.split("\n\n")[1].splitlines())
     assert first_two.startswith("Kaelen awakens the ruin") and "dark fantasy anime" in first_two.lower()  # hook + main keyword up top
     assert "Kaelen finds a pulsating obsidian sphere." in d and "The shadows form a claw." in d  # unique body from THIS part's events
     assert "Watch Part 3 next" in d and "playlist" in d
@@ -146,11 +147,11 @@ def test_update_metadata_sends_snippet_only_and_never_status(workspace_tmp_path)
     assert call["part"] == "snippet" and "status" not in call["body"] and call["body"]["id"] == "VID2"  # publishAt/privacy untouched
     sn = call["body"]["snippet"]
     assert sn["categoryId"] == "1" and sn["defaultLanguage"] == "en" and sn["defaultAudioLanguage"] == "en"
-    assert sn["title"] == it["title"] and sn["description"].rstrip().endswith("#EchoesOfTheAether #anime #animestory") and 5 <= len(sn["tags"]) <= 10
+    assert sn["title"] == "Awakening | Echoes of the Aether Pt 2" and sn["description"].rstrip().endswith("#EchoesOfTheAether #anime #animestory") and 5 <= len(sn["tags"]) <= 10
     assert "channelId" not in sn and "publishedAt" not in sn  # read-only fields are not sent back
     got = q.get(it["id"])
     assert got["description"] == sn["description"] and got["tags"] == sn["tags"] and got["metadata_updated_at"] and got["status"] == "uploaded_scheduled"
-    assert out["after"]["title"] == it["title"]
+    assert out["after"]["title"] == "Awakening | Echoes of the Aether Pt 2"
 
 
 def test_update_metadata_needs_confirm_and_dry_run_touches_nothing(workspace_tmp_path):
