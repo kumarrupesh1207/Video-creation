@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 STORIES_ROOT = ROOT / "stories"
 FORMATS = ("comic", "manga")
 DEFAULTS = {"language": "English", "format": "comic", "parts_per_chapter": 10, "style_head": "", "action_style": "", "palette": [], "opening_card": "",
-            "narrator": {"voice": "en-US-AvaNeural"}, "extra_voices": {}, "reserve_credits": 0, "rules": {}, "channel": "", "playlist": ""}
+            "narrator": {"voice": "en-US-AvaNeural"}, "extra_voices": {}, "reserve_credits": 0, "rules": {}, "channel": "", "playlist": "", "retention": {}}
 BANNED = r"nude|naked|sexual|sexy|porn\w*|rape\w*|gore|gory|dismember\w*|decapitat\w*"  # always banned in scripts (all-ages channel)
 VOICE_RE = re.compile(r"^[a-z]{2,3}-[A-Z]{2}-\w+Neural$")
 
@@ -165,6 +165,22 @@ def lint(key: str, root: Path | None = None, series_dir: Path | None = None) -> 
         for ref in m.get("references") or []:
             if not (Path(m["_dir"]) / str(ref.get("file", ""))).exists():
                 err(f"{rel}/characters/{f}: reference image '{ref.get('file')}' is missing from characters/")
+    # retention (hook-first opening)
+    ret = s.get("retention")
+    if ret is not None:
+        known = {"hook_first": bool, "previously": bool, "punch_zoom": bool, "hook_s": (int, float), "title_s": (int, float), "previously_s": (int, float)}
+        if not isinstance(ret, dict):
+            err(f"{rel}/series.yaml: retention must be a mapping like {{hook_first: true, hook_s: 1.5, previously: true, previously_s: 1.2}}")
+        else:
+            for k, v in ret.items():
+                if k not in known:
+                    err(f"{rel}/series.yaml: retention.{k} is not a setting (use {', '.join(known)})")
+                elif not isinstance(v, known[k]) or isinstance(v, bool) != (known[k] is bool):
+                    err(f"{rel}/series.yaml: retention.{k} must be {'true/false' if known[k] is bool else 'a number of seconds'}")
+                elif k in ("hook_s", "title_s") and not 0.5 <= v <= 1.5:
+                    err(f"{rel}/series.yaml: retention.{k} must be between 0.5 and 1.5 seconds (first-frame hook)")
+                elif k == "previously_s" and not 0.5 <= v <= 1.2:
+                    err(f"{rel}/series.yaml: retention.previously_s must be between 0.5 and 1.2 seconds")
     # hard rules
     rules = s.get("rules") or {}
     cnames = {str(m["name"]).split()[0].lower(): str(m["name"]) for m in chars} | {str(m["name"]).lower(): str(m["name"]) for m in chars}
@@ -434,6 +450,11 @@ def sync_chapter_md(pack: dict, state: dict, number: int | None = None) -> Path 
     return path
 
 
+def comic_mod_retention(series: dict) -> dict:
+    """The series-pack `retention:` block (hook-first opening, Previously… card); empty/absent -> the classic cover card."""
+    return dict(series.get("retention") or {})
+
+
 def _research_to_lines(comic: dict, pack: dict) -> dict:
     """Researched panels (narration + bubble) -> the authored schema (`lines`) for a manga series; style head applied for any format."""
     names = {str(m["name"]).upper(): m for m in pack["characters"]}
@@ -502,7 +523,8 @@ def render_next(key: str, cfg: dict | None = None, out_dir: Path | None = None, 
     if ch is not None:
         state["chapter"] = ch
     research._write_state(sk, state, sdir)
-    cfg = {**cfg, "comic": {**cfg.get("comic", {}), "chapter_parts": parts, "voices": pack_voices(pack)}}
+    cfg = {**cfg, "comic": {**cfg.get("comic", {}), "chapter_parts": parts, "voices": pack_voices(pack),
+                                                   "retention": comic_mod_retention(s)}}
     cast = cast_mod.load_cast(sk)
     m = int((state.get("chapter") or {}).get("parts_done", 0)) + 1
     spart = next((p for p in (script or {}).get("parts", []) if p["number"] == m), None)
@@ -510,6 +532,7 @@ def render_next(key: str, cfg: dict | None = None, out_dir: Path | None = None, 
     if authored:
         comic_dict = manga.part_to_comic(script, spart, cast, s["title"], style_head=s["style_head"], action_style=s["action_style"],
                                          opening_card=s["opening_card"], mode=s["format"])
+        research.finish_retention(comic_dict, (ch or {}).get("recaps", []), m)
         info = {"number": int(ch["number"]), "title": ch["title"], "part": m, "parts": int(ch["parts"]),
                 "beat": {"role": "script", "summary": spart["title"]}, "series_title": s["title"], "final": m >= int(ch["parts"])}
     else:

@@ -14,6 +14,7 @@ One line per solved problem. Update an existing note instead of adding a duplica
 - [long-episode-resumable.md](long-episode-resumable.md) — 45-panel 16:9 episodes + Shorts across days under the 25/day NIM cap: persisted state, counted credits, act-by-act cached render.
 - [nim-mode-never-touches-comfyui.md](nim-mode-never-touches-comfyui.md) — scheduled run crashed on dead ComfyUI in nim mode: fallback off by default, optional ComfyUI is preflighted.
 - [chapters-series-parts.md](chapters-series-parts.md) — Series/Chapter/Part structure, >=10 parts per chapter, 16:9 chapter compilation
+- [hook-first-opening.md](hook-first-opening.md) — retention opening: hook panel + punch-zoom, small title tag, Part 2+ "Previously…" card, series.yaml `retention:`
 - [partial-research-chapter.md](partial-research-chapter.md) — research write-back writes the whole chapter atomically; lint repairs gaps from series state; lint failures raise events
 - [veer-manga-dialogue.md](veer-manga-dialogue.md) — scripted manga series: per-character voices, timed bubbles, respect-charter guard
 - [STORY_PACKS.md](../STORY_PACKS.md) — content-driven series: packs, lint, cadence, zero-code new series

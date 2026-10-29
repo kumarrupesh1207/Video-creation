@@ -327,6 +327,66 @@ def make_overlay(path: Path, narration: str = "", bubble: str = "", title: str =
     return _overlay_free(path, narration, bubble, title, subtitle, border, occ, head, L, head_zone, bubble_style, narr_style)
 
 
+RETENTION_DEFAULTS = {"hook_first": False, "hook_s": 1.5, "title_s": 1.5, "previously": True, "previously_s": 1.2, "punch_zoom": True}
+
+
+def retention_cfg(raw: dict | None) -> dict:
+    """Series-pack `retention:` block merged over the defaults (hook_first is opt-in per series)."""
+    return {**RETENTION_DEFAULTS, **{k: v for k, v in (raw or {}).items() if k in RETENTION_DEFAULTS}}
+
+
+def pick_hook_panel(comic: dict) -> int:
+    """0-based index of the panel that opens the Short: research's `hook_panel` (1-based) when valid, else the action+sfx panel, any action
+    panel, any sfx panel, else the last-but-one panel (the build-up to the cliffhanger)."""
+    panels = comic["panels"]
+    hp = int(comic.get("hook_panel") or 0)
+    if 1 <= hp <= len(panels):
+        return hp - 1
+    for test in (lambda p: p.get("action") and p.get("sfx"), lambda p: p.get("action"), lambda p: p.get("sfx")):
+        for i, p in enumerate(panels):
+            if test(p):
+                return i
+    return max(0, len(panels) - 2)
+
+
+def pick_hook_line(comic: dict, idx: int, words: int = 8) -> str:
+    """The strongest short line for the opening frame: research's `hook_line`, else the panel's speech, sfx, last spoken line or narration."""
+    p = comic["panels"][idx]
+    lines = p.get("lines") or []
+    text = comic.get("hook_line") or p.get("bubble") or p.get("sfx") or (lines[-1]["text"] if lines else "") or p.get("narration") or ""
+    return trim_words(" ".join(text.split()), words)
+
+
+def make_hook_overlay(path: Path, tag: str = "", line: str = "", label: str = "", recap: str = "") -> Path:
+    """Opening-frame text: a small series/part tag pinned to the top safe edge, a big punchy line in the lower third (hook), or a
+    'Previously…' label + recap line at the top (recap card). Layout independent (stays inside comic_layout.SAFE)."""
+    S = comic_layout.SAFE
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    if tag:
+        f = _font(40, tag)
+        tw = int(d.textlength(tag, font=f))
+        x0 = S[0] + 10
+        d.rounded_rectangle([x0, S[1] + 10, x0 + tw + 44, S[1] + 82], radius=18, fill=(0, 0, 0, 170))
+        d.text((x0 + 22, S[1] + 18), tag, font=f, fill=(255, 214, 80, 255), stroke_width=2, stroke_fill=(0, 0, 0, 255))
+    if line:
+        f, lines, lh = fit_text(d, line.upper(), S[2] - S[0] - 20, 420, 118, 62)
+        y = int(H * 0.60)
+        for l in lines:
+            d.text((S[0] + (S[2] - S[0] - d.textlength(l, font=f)) / 2, y), l, font=f, fill=(255, 255, 255, 255), stroke_width=9, stroke_fill=(0, 0, 0, 255))
+            y += lh
+    if recap:
+        fl = _font(52, label)
+        d.text((S[0] + 10, S[1] + 40), label, font=fl, fill=(255, 214, 80, 255), stroke_width=5, stroke_fill=(0, 0, 0, 255))
+        f, lines, lh = fit_text(d, recap, S[2] - S[0] - 20, 520, 76, 40)
+        y = S[1] + 120
+        for l in lines:
+            d.text((S[0] + 10, y), l, font=f, fill=(255, 255, 255, 255), stroke_width=6, stroke_fill=(0, 0, 0, 255))
+            y += lh
+    img.save(path)
+    return path
+
+
 def _zoompan(motion: str, frames: int) -> str:
     c = "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
     return {
@@ -424,7 +484,8 @@ def _duration(path: Path) -> float:
 def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, work: Path, voice: str = "en-US-AvaNeural",
                  music: bool = True, language: str = "English", layout_aware: bool = True, layout: dict | None = None,
                  cover: bool = True, end_card="default", music_text: str = "epic anime orchestral battle hero",
-                 max_words: int | None = None, cover_label: str = "PART", voices: dict | None = None) -> dict:
+                 max_words: int | None = None, cover_label: str = "PART", voices: dict | None = None,
+                 retention: dict | None = None) -> dict:
     """Panels (+images) -> final mp4. Returns {"seconds", "voice_notes", "music", "panel_times"}.
     cover=False drops the title card; end_card=None drops the end card, a (title, subtitle) tuple customises it."""
     work.mkdir(parents=True, exist_ok=True)
@@ -444,7 +505,27 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
             notes.append(f"art crop skipped for {name}: {str(exc)[:60]}")
             return Path(img)
 
-    if cover:
+    rc = retention_cfg(retention)
+    intro = None
+    if rc["hook_first"] and cover:  # retention opening: most dramatic panel + punch-zoom + small title tag, then (Part 2+) a one-line recap
+        hi = pick_hook_panel(comic)
+        hline = pick_hook_line(comic, hi)
+        hs = min(float(rc["hook_s"]), 1.5)
+        tag = f"{series['title']} · {cover_label} {part}"
+        hov = make_hook_overlay(work / "ov_hook.png", tag=tag[:60], line=hline)
+        clips.append((render_clip(ffmpeg, fitted(images[hi], "hook"), hov, hs, "punch" if rc["punch_zoom"] else "zoom_in", work / "clip_hook.mp4", layout=L), hs))
+        voices_t.append((None, 0.0))
+        t += hs - XF
+        intro = {"hook_panel": hi + 1, "hook_line": hline, "hook_s": hs}
+        prev = " ".join(str(comic.get("previously") or "").split())
+        if rc["previously"] and part >= 2 and prev:
+            rs = min(float(rc["previously_s"]), 1.2)
+            rov = make_hook_overlay(work / "ov_recap.png", label="Previously…", recap=trim_words(prev, 16))
+            clips.append((render_clip(ffmpeg, fitted(images[0], "recap"), rov, rs, "zoom_in", work / "clip_recap.mp4", dim=True, layout=L), rs))
+            voices_t.append((None, 0.0))
+            t += rs - XF
+            intro["previously_s"] = rs
+    elif cover:
         cover_clip = render_clip(ffmpeg, fitted(images[0], "cover"), make_overlay(work / "ov_cover.png", title=series["title"], subtitle=f"{cover_label} {part}",
                                                                                    narration=comic.get("cover_note", ""), layout=L),
                                  COVER_S, "zoom_in", work / "clip_cover.mp4", dim=True, layout=L)
@@ -561,7 +642,7 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
             "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-maxrate", "6M", "-bufsize", "12M", "-pix_fmt", "yuv420p", "-af", "apad", "-c:a", "aac", "-b:a", "160k",
             "-movflags", "+faststart", "-shortest", str(out_mp4)]
     _run(cmd, timeout=1800)
-    return {"seconds": round(total, 2), "voice_notes": notes, "music": bool(music_wav), "panel_times": panel_times}
+    return {"seconds": round(total, 2), "voice_notes": notes, "music": bool(music_wav), "panel_times": panel_times, **({"intro": intro} if intro else {})}
 
 
 def _comfy_up(cfg: dict) -> bool:
@@ -778,6 +859,8 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
                  "cover_label": f"CH.{chapter['number']} PART"}
     if cfg.get("comic", {}).get("voices"):  # manga: per-character voices
         extra["voices"] = cfg["comic"]["voices"]
+    if cfg.get("comic", {}).get("retention"):  # series-pack `retention:` (hook-first opening, Previously… card)
+        extra["retention"] = cfg["comic"]["retention"]
     info = render_comic(ffmpeg, comic, images, mp4, ROOT / "outputs" / "comic_work" / slug, voice, music, language,
                         layout=cfg.get("comic", {}).get("layout"), **extra)
     rep = validate_video(mp4, W, H, fps=FPS, require_audio=True, deep=True)
@@ -795,7 +878,8 @@ def make_comic_reel(channel: str, premise: str, out_dir: Path, cfg: dict | None 
         side["cast"] = {"locked": [m["name"] for m in cast_mod.load_cast(channel)], "added": cast_mod.save_new_members(channel, comic, images)}
     if chapter:
         side.update(chapter=chapter, playlist=comic.get("playlist") or comic["series"]["title"], hook=comic.get("hook", ""), panel_times=info["panel_times"],
-                    panel_images=[str(p) for p in images], cover_s=COVER_S)
+                    panel_images=[str(p) for p in images], cover_s=COVER_S,
+                    hook_title=comic.get("hook_title", ""), engagement_question=comic.get("engagement_question", ""), intro=info.get("intro"))
     sidecar = mp4.with_suffix(".json")
     sidecar.write_text(json.dumps(side, indent=2, ensure_ascii=False), encoding="utf-8")
     compiled = None

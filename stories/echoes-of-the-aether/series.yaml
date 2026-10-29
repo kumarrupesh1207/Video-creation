@@ -28,3 +28,9 @@ seo_misspellings:
 - echos of the aether
 - echoes of aether
 - ecoes of the aether
+retention:                     # analytics 2026-10: Part 3 opened on a power moment (108% retention), slow-open Parts 1-2 (44%/31%)
+  hook_first: true             # first 1.5 s = the part's most dramatic panel + punch-zoom; series/part title is a small top tag
+  hook_s: 1.5
+  previously: true             # one-line "Previously..." card from Part 2 onward
+  previously_s: 1.2
+  punch_zoom: true

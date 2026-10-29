@@ -5,7 +5,7 @@ Stories are content. The engine (`aurora/story.py`, `comic.py`, `manga.py`, `res
 ## Layout
 ```
 stories/<slug>/
-  series.yaml            title, channel, playlist, language, format (comic|manga), parts_per_chapter (>= 10), style_head, opening_card, narrator, state_key ...
+  series.yaml            retention: {hook_first, previously, ...} (see solutions/hook-first-opening.md), title, channel, playlist, language, format (comic|manga), parts_per_chapter (>= 10), style_head, opening_card, narrator, state_key ...
   characters/<name>.yaml locked look (description), role, seed, voice {voice, rate, pitch, fx}, optional reference images
   chapters/CH_01.md ...  authored script (below). Missing chapters are written by research IN THE SAME FORMAT and saved back here: edit them any time.
   world.md               optional canon rules fed into research prompts
