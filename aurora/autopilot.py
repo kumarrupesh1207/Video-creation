@@ -445,6 +445,9 @@ def reseo_item(queue: PublishQueue, item_id: str, cfg: dict, service_factory=Non
     before = {k: it.get(k) for k in ("title", "description", "tags")}
     if apply:
         queue._update(item_id, **after)
+        side = _json.loads(Path(it["path"]).with_suffix(".json").read_text(encoding="utf-8"))
+        if side.get("engagement_question"):  # the question that went into the description is also posted as the comment
+            queue._update(item_id, engagement_question=side["engagement_question"])
     return {"before": before, "after": after}
 
 

@@ -502,7 +502,7 @@ def guard_text(comic: dict) -> str:
     return "\n".join(b for b in bits if b)
 
 
-HOOK_TITLE_MAX = 45
+HOOK_TITLE_MAX = 38  # <= 45 by spec; 38 leaves room for " | <Series> Pt N" inside the 70-char YouTube title
 
 
 def finish_retention(comic: dict, recaps: list[str], part: int) -> dict:
