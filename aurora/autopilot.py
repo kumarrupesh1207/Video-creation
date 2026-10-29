@@ -117,7 +117,8 @@ def render_idea(cfg: dict, switchboard, channel: dict, idea: dict) -> dict:
             from aurora import story
 
             res = story.render_for_channel(cfg, channel, switchboard, ROOT / "outputs" / "final" / channel["name"] / "comic",
-                                           voice=channel.get("voice"), panels=int(channel.get("panels", 6)))
+                                           voice=channel.get("voice"), panels=int(channel.get("panels", 6)),
+                                           on_event=lambda kind, msg: _event(kind, channel["name"], msg))
         if res is None:
             res = make_comic_reel(channel["name"], idea["topic"], ROOT / "outputs" / "final" / channel["name"] / "comic", cfg=cfg,
                                   language=LANGS.get(str(channel.get("language", "en")).lower(), "English"),

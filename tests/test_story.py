@@ -236,3 +236,55 @@ def test_a_part_that_keeps_violating_is_never_returned(packs, workspace_tmp_path
                                rules=story.pack_rules(pack), guard=story.make_guard(pack))
     # live attempts all violated -> offline fallback (clean, generic text) is used, and it is guarded too
     assert r["source"] == "topic_fallback" and "part fallback" in r["note"] and "kisses" not in " ".join(p["narration"] for p in r["comic"]["panels"])
+
+
+def _research_env(tmp, monkeypatch):
+    monkeypatch.setattr(research, "_call_json", lambda client, model, prompt, schema: client.generate(prompt, schema))
+    monkeypatch.setattr(comic_layout, "foreground_mask", lambda p: None)
+    monkeypatch.setattr(cast_mod, "save_new_members", lambda *a, **k: [])
+
+    def tts(text, out, lang=None, options=None):
+        wav = Path(out).with_suffix(".wav")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=f=300:d=0.6", str(wav)], check=True)
+        return wav, "fake"
+
+    monkeypatch.setattr(comic, "synthesize_voiceover", tts)
+    for name, val in (("PANEL_MIN_S", 1.2), ("COVER_S", 1.2), ("END_S", 1.2)):
+        monkeypatch.setattr(comic, name, val)
+    return {"comic": {"cast_lock": False, "image_mode": "nim"}, "research": {}, "cost_dir": str(tmp / "costs"), "providers": {"nvidia_nim": {"max_credits_per_day": 50}}}
+
+
+def test_partial_research_chapter_is_repaired_from_the_series_state_not_skipped(packs, workspace_tmp_path, monkeypatch):
+    """Production bug 2026-10-29: research wrote only '## Part 3' to CH_01.md and lint then skipped the whole series."""
+    tmp = workspace_tmp_path
+    d = make_pack(packs, "demo", parts=0)
+    cfg = _research_env(tmp, monkeypatch)
+    sd, board, client = tmp / "ser", Board(tmp), FakeClient()
+    for _ in range(3):
+        story.render_next("demo", cfg, tmp / "out", board, music=False, series_dir=sd, client=client)
+    md_path = d / "chapters" / "CH_01.md"
+    nums = lambda: [p["number"] for p in manga.parse_chapter(md_path.read_text(encoding="utf-8"))["parts"]]  # noqa: E731
+    assert nums() == [1, 2, 3]  # the WHOLE chapter so far, in order (not just the latest part)
+    assert not list(md_path.parent.glob("*.tmp"))  # atomic write leaves no temp file
+    # simulate the bad file: header + only Part 3, no research marker
+    full = md_path.read_text(encoding="utf-8")
+    part3 = full[full.index("## Part 3"):]
+    md_path.write_text('# Demo Saga — Chapter 1: "Dawn"\n\n' + part3, encoding="utf-8")
+    rep = story.lint("demo", series_dir=sd)
+    assert rep["errors"] == [] and any("parts [1, 2] are missing" in w for w in rep["warnings"])  # warning, not an error
+    ch = {"name": "c", "series": [{"slug": "demo", "per_day": 9}]}
+    entry, reports, invalid = story.pick_series(ch, sd, "2026-10-29")
+    assert entry["slug"] == "demo" and not invalid  # the series is NOT skipped
+    r4 = story.render_next("demo", cfg, tmp / "out", board, music=False, series_dir=sd, client=client)
+    assert r4["chapter"]["part"] == 4 and nums() == [1, 2, 3, 4]  # repaired + extended
+    assert not any("missing" in w for w in story.lint("demo", series_dir=sd)["warnings"])
+
+
+def test_authored_chapter_with_a_gap_stays_strict_and_a_lint_failure_is_reported(packs, workspace_tmp_path):
+    tmp = workspace_tmp_path
+    d = make_pack(packs, "demo", parts=0)
+    (d / "chapters" / "CH_01.md").write_text('# Demo — Chapter 1: "Dawn"\n\n' + PART.format(n=1) + "\n" + PART.format(n=3), encoding="utf-8")
+    assert any("parts must be numbered 1..2 in order (found [1, 3])" in e for e in story.lint("demo", series_dir=tmp / "ser")["errors"])
+    events = []
+    out = story.render_for_channel({}, {"name": "c", "series": ["demo"]}, None, tmp, series_dir=tmp / "ser", on_event=lambda k, m: events.append((k, m)))
+    assert out is None and events and events[0][0] == "pack_lint_failed" and "demo skipped" in events[0][1] and "parts must be numbered" in events[0][1]

@@ -107,7 +107,7 @@ def pack_voices(pack: dict) -> dict[str, dict]:
 
 
 # ----------------------------------------------------------------------------- lint
-def lint(key: str, root: Path | None = None) -> dict:
+def lint(key: str, root: Path | None = None, series_dir: Path | None = None) -> dict:
     """{"errors": [...], "warnings": [...], "info": [...]}: friendly messages, never raises for content problems."""
     from aurora import manga
 
@@ -218,8 +218,15 @@ def lint(key: str, root: Path | None = None) -> dict:
         if not ch["parts"]:
             err(f"{where}: no parts found; each part starts with a line like: ## Part 1 — \"Title\"")
             continue
-        if [p["number"] for p in ch["parts"]] != list(range(1, len(ch["parts"]) + 1)):
-            err(f"{where}: parts must be numbered 1..{len(ch['parts'])} in order (found {[p['number'] for p in ch['parts']]})")
+        found = [p["number"] for p in ch["parts"]]
+        if found != list(range(1, len(found) + 1)):
+            missing = [k for k in range(1, max(found) + 1) if k not in found]
+            st_ch = _state_chapter(research.load_series(pack["state_key"], Path(series_dir or research.SERIES_DIR)), n) or {}
+            known = {int(r["part"]) for r in st_ch.get("rendered", [])}
+            if len(set(found)) == len(found) and found == sorted(found) and (RESEARCH_MARK in f.read_text(encoding="utf-8") or (missing and set(missing) <= known)):
+                warn(f"{where}: parts {missing} are missing; they are rebuilt from the series state before the next render (research-written chapter)")
+            else:
+                err(f"{where}: parts must be numbered 1..{len(found)} in order (found {found})")
         if len(ch["parts"]) > ppc:
             err(f"{where}: {len(ch['parts'])} parts but parts_per_chapter is {ppc}")
         elif len(ch["parts"]) < ppc:
@@ -348,7 +355,7 @@ def pick_series(channel: dict, series_dir: Path | None = None, today: str | None
     for e in entries(channel):
         if not e["enabled"] or int(e["per_day"]) <= 0:
             continue
-        rep = lint(e["slug"], root)
+        rep = lint(e["slug"], root, sdir)
         if rep["errors"]:
             invalid = True
             reports.append(format_report(e["slug"], rep))
@@ -361,15 +368,13 @@ def pick_series(channel: dict, series_dir: Path | None = None, today: str | None
 
 
 # ----------------------------------------------------------------------------- saving researched parts back into the pack
-def append_part_md(pack: dict, number: int, chapter_title: str, part: int, comic: dict) -> Path:
-    """Write a researched part into chapters/CH_NN.md in the authored schema (the user can edit it later)."""
-    path = Path(pack["dir"]) / "chapters" / f"CH_{number:02d}.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    text = path.read_text(encoding="utf-8") if path.exists() else f"# {pack['series']['title']} — Chapter {number}: \"{chapter_title}\"\n"
-    if re.search(rf"^##\s+Part\s+{part}\b", text, re.M):
-        return path
+RESEARCH_MARK = "<!-- written-by: research (edit freely; parts missing here are rebuilt from the series state) -->"
+
+
+def _part_block(pack: dict, part: int, comic: dict) -> str:
+    """One `## Part N` block in the authored schema."""
     names = {str(m["name"]).upper() for m in pack["characters"]}
-    out = [f"\n## Part {part} — \"{(comic.get('hook') or f'Part {part}').strip().rstrip('.')}\""]
+    out = [f"## Part {part} — \"{(comic.get('hook') or f'Part {part}').strip().rstrip('.')}\""]
     for i, p in enumerate(comic["panels"], 1):
         out.append("%d. %s" % (i, " ".join(p["image_prompt"].split())))
         if p.get("lines"):
@@ -383,10 +388,49 @@ def append_part_md(pack: dict, number: int, chapter_title: str, part: int, comic
                 who, _, said = p["bubble"].partition(":")
                 spk = who.strip().upper() if said and who.strip().upper() in names else (str(pack['characters'][0]['name']).upper() if pack["characters"] else "NARRATOR")
                 out.append(f"   **{spk}**: \"{(said if said and who.strip().upper() in names else p['bubble']).strip()}\"")
-    cta = comic.get("cta") or ""
-    if cta:
-        out.append(f"End card: *{cta}*")
-    path.write_text(text.rstrip("\n") + "\n" + "\n".join(out) + "\n", encoding="utf-8")
+    if comic.get("cta"):
+        out.append(f"End card: *{comic['cta']}*")
+    return "\n".join(out) + "\n"
+
+
+def _state_chapter(state: dict, number: int) -> dict | None:
+    ch = (state.get("chapters") or {}).get(str(number))
+    cur = state.get("chapter")
+    return ch or (cur if cur and int(cur.get("number", 0)) == number else None)
+
+
+def sync_chapter_md(pack: dict, state: dict, number: int | None = None) -> Path | None:
+    """Make chapters/CH_NN.md contain EVERY part the series state has rendered, in order (atomic write). Parts already in the file are kept
+    verbatim (authored or edited); missing ones are rebuilt from the part sidecars. Returns the path when the file was (re)written."""
+    cur = state.get("chapter") or {}
+    number = int(number if number is not None else cur.get("number", 0) or 0)
+    ch = _state_chapter(state, number) if number else None
+    if not ch or not ch.get("rendered"):
+        return None
+    path = Path(pack["dir"]) / "chapters" / f"CH_{number:02d}.md"
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    chunks = re.split(r"(?m)^(?=##\s+Part\s+\d+\b)", text)
+    head = chunks[0] if text else f"# {pack['series']['title']} — Chapter {number}: \"{ch.get('title') or number}\"\n{RESEARCH_MARK}\n"
+    blocks = {int(re.match(r"##\s+Part\s+(\d+)", c).group(1)): c.strip("\n") + "\n" for c in chunks[1:]}
+    added = False
+    for r in sorted(ch["rendered"], key=lambda r: int(r["part"])):
+        n = int(r["part"])
+        if n in blocks:
+            continue
+        try:
+            side = json.loads(Path(r["sidecar"]).read_text(encoding="utf-8"))
+        except (OSError, ValueError, KeyError):
+            continue  # the sidecar is gone: that part stays a gap (lint warns, the series state still drives rendering)
+        cta = f"Part {n + 1} tomorrow" if n < int(ch["parts"]) else f"Chapter {number} finale"
+        blocks[n] = _part_block(pack, n, {"hook": side.get("hook"), "panels": side["panels"], "cta": cta})
+        added = True
+    if not added and path.exists():
+        return None
+    body = head.rstrip("\n") + "\n\n" + "\n".join(blocks[k] for k in sorted(blocks))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".md.tmp")
+    tmp.write_text(body, encoding="utf-8")
+    os.replace(tmp, path)  # atomic: a crash never leaves a half-written chapter
     return path
 
 
@@ -430,12 +474,17 @@ def render_next(key: str, cfg: dict | None = None, out_dir: Path | None = None, 
 
     cfg = cfg if cfg is not None else yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
     panels_n = int(kw.pop("panels", 6) or 6)
-    rep = lint(key, root)
+    sdir = Path(series_dir) if series_dir else research.SERIES_DIR
+    try:  # repair a chapter file with missing parts from the series state BEFORE linting (never skip a series over a gap)
+        pre = load_pack(key, root)
+        sync_chapter_md(pre, research.load_series(pre["state_key"], sdir))
+    except Exception as exc:  # noqa: BLE001 - the lint below reports real problems
+        print(f"[story] {key}: chapter repair skipped ({str(exc)[:80]})", file=sys.stderr)
+    rep = lint(key, root, sdir)
     if rep["errors"]:
         raise PackError(format_report(key, rep))
     pack = load_pack(key, root)
     s, sk = pack["series"], pack["state_key"]
-    sdir = Path(series_dir) if series_dir else research.SERIES_DIR
     state = research.load_series(sk, sdir)
     ch = state.get("chapter")
     parts = int(s["parts_per_chapter"])
@@ -456,12 +505,13 @@ def render_next(key: str, cfg: dict | None = None, out_dir: Path | None = None, 
     cfg = {**cfg, "comic": {**cfg.get("comic", {}), "chapter_parts": parts, "voices": pack_voices(pack)}}
     cast = cast_mod.load_cast(sk)
     m = int((state.get("chapter") or {}).get("parts_done", 0)) + 1
-    authored = bool(script) and m <= len(script["parts"])
+    spart = next((p for p in (script or {}).get("parts", []) if p["number"] == m), None)
+    authored = spart is not None
     if authored:
-        comic_dict = manga.part_to_comic(script, script["parts"][m - 1], cast, s["title"], style_head=s["style_head"], action_style=s["action_style"],
+        comic_dict = manga.part_to_comic(script, spart, cast, s["title"], style_head=s["style_head"], action_style=s["action_style"],
                                          opening_card=s["opening_card"], mode=s["format"])
         info = {"number": int(ch["number"]), "title": ch["title"], "part": m, "parts": int(ch["parts"]),
-                "beat": {"role": "script", "summary": script["parts"][m - 1]["title"]}, "series_title": s["title"], "final": m >= int(ch["parts"])}
+                "beat": {"role": "script", "summary": spart["title"]}, "series_title": s["title"], "final": m >= int(ch["parts"])}
     else:
         r = research.research_part(sk, "", language=s["language"], panels=panels_n, cfg=cfg, client=client, series_dir=sdir, world=pack["world"], rules=pack_rules(pack), guard=make_guard(pack))
         comic_dict, info = _research_to_lines(r["comic"], pack), r["chapter"]
@@ -482,8 +532,8 @@ def render_next(key: str, cfg: dict | None = None, out_dir: Path | None = None, 
     side = json.loads(side_path.read_text(encoding="utf-8"))
     side.update(story=pack["slug"], series_key=sk, channel=s["channel"] or side.get("channel"), playlist=s["playlist"])
     side_path.write_text(json.dumps(side, indent=2, ensure_ascii=False), encoding="utf-8")
-    if not authored:
-        append_part_md(pack, info["number"], info["title"], info["part"], comic_dict)
+    if not authored:  # write the WHOLE chapter so far (all parts of the series state, in order), atomically
+        sync_chapter_md(pack, research.load_series(sk, sdir), info["number"])
     st = research.load_series(sk, sdir)
     daily = st.setdefault("daily", {})
     daily[date.today().isoformat()] = int(daily.get(date.today().isoformat(), 0)) + 1
@@ -491,12 +541,16 @@ def render_next(key: str, cfg: dict | None = None, out_dir: Path | None = None, 
     return {**res, "story": pack["slug"], "authored": authored}
 
 
-def render_for_channel(cfg: dict, channel: dict, switchboard, out_dir: Path, voice: str | None = None, series_dir: Path | None = None, **kw):
+def render_for_channel(cfg: dict, channel: dict, switchboard, out_dir: Path, voice: str | None = None, series_dir: Path | None = None,
+                       on_event=None, **kw):
     """Scheduler entry. Returns the render result, or None to let the caller run the channel's legacy flow (no usable series).
     Raises RuntimeError when every series of the channel has had its daily parts."""
     entry, reports, invalid = pick_series(channel, series_dir)
     for line in reports:
         print(line, file=sys.stderr)
+        if on_event:  # daily report / Approve tab: a skipped series is never silent
+            first = next((l.strip() for l in line.splitlines()[1:] if "ERROR" in l), line.splitlines()[0])
+            on_event("pack_lint_failed", line.splitlines()[0].split(":")[0].replace("[story] ", "") + " skipped: " + first.replace("ERROR", "").strip())
     if entry is None:
         if invalid:
             return None
