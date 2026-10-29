@@ -357,6 +357,28 @@ def pick_hook_line(comic: dict, idx: int, words: int = 8) -> str:
     return trim_words(" ".join(text.split()), words)
 
 
+RECAP_X, RECAP_W, RECAP_STROKE = 60, 880, 6  # >= 60 px left margin; 60+880 = 940 keeps clear of the platform UI strip on the right
+
+
+def _fit_lines(d, text: str, max_w: int, max_lines: int, hi: int, lo: int):
+    """Largest font whose greedy wrap fits max_w in <= max_lines lines; if even `lo` does not fit, words are dropped (with '…')."""
+    words = text.split()
+    while True:
+        cur = " ".join(words) + ("…" if len(words) < len(text.split()) else "")
+        for size in range(hi, lo - 1, -2):
+            f = _font(size, cur)
+            lines = _wrap(d, cur, f, max_w)
+            if len(lines) <= max_lines and all(d.textlength(l, font=f) <= max_w for l in lines):
+                return f, lines, int(size * 1.22)
+        if len(words) <= 2:  # a single unbreakable word wider than the box: cut it with an ellipsis, never let it cross the margin
+            f = _font(lo, cur)
+            w = words[0] if words else ""
+            while len(w) > 1 and d.textlength(w + "…", font=f) > max_w:
+                w = w[:-1]
+            return f, [w + "…"], int(lo * 1.22)
+        words = words[:-1]
+
+
 def make_hook_overlay(path: Path, tag: str = "", line: str = "", label: str = "", recap: str = "") -> Path:
     """Opening-frame text: a small series/part tag pinned to the top safe edge, a big punchy line in the lower third (hook), or a
     'Previously…' label + recap line at the top (recap card). Layout independent (stays inside comic_layout.SAFE)."""
@@ -366,7 +388,7 @@ def make_hook_overlay(path: Path, tag: str = "", line: str = "", label: str = ""
     if tag:
         f = _font(40, tag)
         tw = int(d.textlength(tag, font=f))
-        x0 = S[0] + 10
+        x0 = RECAP_X
         d.rounded_rectangle([x0, S[1] + 10, x0 + tw + 44, S[1] + 82], radius=18, fill=(0, 0, 0, 170))
         d.text((x0 + 22, S[1] + 18), tag, font=f, fill=(255, 214, 80, 255), stroke_width=2, stroke_fill=(0, 0, 0, 255))
     if line:
@@ -377,11 +399,11 @@ def make_hook_overlay(path: Path, tag: str = "", line: str = "", label: str = ""
             y += lh
     if recap:
         fl = _font(52, label)
-        d.text((S[0] + 10, S[1] + 40), label, font=fl, fill=(255, 214, 80, 255), stroke_width=5, stroke_fill=(0, 0, 0, 255))
-        f, lines, lh = fit_text(d, recap, S[2] - S[0] - 20, 520, 76, 40)
+        d.text((RECAP_X + RECAP_STROKE, S[1] + 40), label, font=fl, fill=(255, 214, 80, 255), stroke_width=5, stroke_fill=(0, 0, 0, 255))
+        f, lines, lh = _fit_lines(d, recap, RECAP_W - 2 * RECAP_STROKE, 3, 76, 34)  # wrapped to the frame width, shrinks to <= 3 lines
         y = S[1] + 120
         for l in lines:
-            d.text((S[0] + 10, y), l, font=f, fill=(255, 255, 255, 255), stroke_width=6, stroke_fill=(0, 0, 0, 255))
+            d.text((RECAP_X + RECAP_STROKE, y), l, font=f, fill=(255, 255, 255, 255), stroke_width=RECAP_STROKE, stroke_fill=(0, 0, 0, 255))
             y += lh
     img.save(path)
     return path
@@ -520,7 +542,7 @@ def render_comic(ffmpeg: str, comic: dict, images: list[Path], out_mp4: Path, wo
         prev = " ".join(str(comic.get("previously") or "").split())
         if rc["previously"] and part >= 2 and prev:
             rs = min(float(rc["previously_s"]), 1.2)
-            rov = make_hook_overlay(work / "ov_recap.png", label="Previously…", recap=trim_words(prev, 16))
+            rov = make_hook_overlay(work / "ov_recap.png", label="Previously…", recap=trim_words(prev, 14))
             clips.append((render_clip(ffmpeg, fitted(images[0], "recap"), rov, rs, "zoom_in", work / "clip_recap.mp4", dim=True, layout=L), rs))
             voices_t.append((None, 0.0))
             t += rs - XF

@@ -518,7 +518,9 @@ def finish_retention(comic: dict, recaps: list[str], part: int) -> dict:
     prev = " ".join((comic.get("previously") or "").split()) if part >= 2 else ""
     if part >= 2 and not prev and recaps:
         prev = " ".join(str(recaps[-1]).split())
-    comic["previously"] = (prev[:110].rsplit(" ", 1)[0] if len(prev) > 110 else prev) if part >= 2 else ""
+    if len(prev.split()) > 14:  # <= 14 words, ends on a clean sentence stop
+        prev = " ".join(prev.split()[:14]).rstrip(" ,;:-") + "."
+    comic["previously"] = prev if part >= 2 else ""
     return comic
 
 
@@ -684,7 +686,7 @@ def research_part(channel: str, premise: str, language: str = "English", panels:
                       f"This is Part {m} of {ch['parts']} (one ~30 s episode). Beat for this part ({beat['role']}): {beat['summary']} "
                       f"Previous parts so far: {json.dumps(ch['recaps'], ensure_ascii=False)[:1800]}. Series background: {state.get('background', '')[:400]}. World canon (obey): {world[:1500]} {rules_text}"
                       f"Write exactly {n} panels. Return: series {{title='{series_title}', part={m}, total_parts={ch['parts']}, recap = ONE line of what happens in THIS part}}, "
-                      f"hook (3-6 words that tease this part, for the video title), hook_panel (1-based number of the single most dramatic panel), hook_line (its strongest line or sfx, <= 8 words), hook_title (<= 45 chars, curiosity-driven, must be true to what this part shows), engagement_question (short, specific to THIS part, e.g. 'Would you touch the relic?'), previously (ONE line, <= 14 words, of the story so far; empty for Part 1), character_sheet (locked cast verbatim + any new characters with a fixed look; style '{COMIC_STYLE}'), "
+                      f"hook (3-6 words that tease this part, for the video title), hook_panel (1-based number of the single most dramatic panel), hook_line (its strongest line or sfx, <= 8 words), hook_title (<= 45 chars, curiosity-driven, must be true to what this part shows), engagement_question (short, specific to THIS part, e.g. 'Would you touch the relic?'), previously (ONE line, at most 14 words, of the story so far; empty for Part 1), character_sheet (locked cast verbatim + any new characters with a fixed look; style '{COMIC_STYLE}'), "
                       "panels (each: shot close-up|wide|medium|action, characters present, image_prompt = the scene only in English, narration of 8-12 words, optional short bubble, "
                       "sfx/mood tag, action true for fights/chases), "
                       + ("this is the CHAPTER FINALE: resolve this chapter's main conflict but open a hook for the next chapter; cta = 'Chapter " + str(ch['number']) + " finale'. "

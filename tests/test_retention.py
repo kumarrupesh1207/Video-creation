@@ -53,7 +53,7 @@ def test_finish_retention_limits_and_previously_only_from_part_2():
     assert out["hook_panel"] == 0 and len(out["hook_title"]) <= 45 and out["previously"] == "" and out["engagement_question"]
     out = research.finish_retention({**c, "previously": ""}, ["Part one recap line."], 2)
     assert out["previously"] == "Part one recap line."  # falls back to the series state
-    assert len(research.finish_retention({**c, "previously": "word " * 60}, [], 3)["previously"]) <= 110
+    assert len(research.finish_retention({**c, "previously": "word " * 60}, [], 3)["previously"].split()) <= 14
 
 
 def test_retention_settings_are_linted(packs):
@@ -88,3 +88,15 @@ def test_hook_first_opening_recap_from_part_2_and_publisher_fields(packs, worksp
     classic = story.render_next("classic", cfg, tmp / "out", board, music=False, series_dir=sd, client=HookClient())
     sc = json.loads(Path(classic["sidecar"]).read_text(encoding="utf-8"))
     assert sc["intro"] is None and sc["panel_times"][0]["start"] == pytest.approx(comic.COVER_S - comic.XF, abs=0.02)  # packs without retention keep the cover card
+
+
+@pytest.mark.parametrize("recap", [
+    "Kaelen's massive energy strike collides with the Spectral Guardian, shattering its armor.",
+    "Supercalifragilisticexpialidocious-and-antidisestablishmentarianism " * 3,
+    "word " * 40])
+def test_recap_card_text_stays_inside_the_frame(workspace_tmp_path, recap):
+    p = comic.make_hook_overlay(workspace_tmp_path / "r.png", label="Previously…", recap=recap)
+    x0, y0, x1, y1 = Image.open(p).getchannel("A").getbbox()
+    assert x0 >= 60 and x1 <= comic.W - 60 and y1 < 700  # >= 60 px margins both sides, at most ~3 lines in the top band
+    tag = Image.open(comic.make_hook_overlay(workspace_tmp_path / "t.png", tag="Echoes of the Aether · CH.1 PART 9")).getchannel("A").getbbox()
+    assert tag[0] >= 60 and tag[2] <= comic.W - 60
