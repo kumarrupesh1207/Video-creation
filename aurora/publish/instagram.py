@@ -13,8 +13,9 @@ from pathlib import Path
 
 from aurora.publish.youtube import TOKEN_DIR
 
-GRAPH = "https://graph.facebook.com/v21.0"
+GRAPH = "https://graph.facebook.com/v26.0"
 RATE_LIMIT_CODES = {4, 17, 32, 613, 9}  # app/user/page call limits; 9 = Reels publish limit (about 25/day)
+YOUTUBE_ONLY = re.compile(r"playlist|https?://|youtu\.?be|ai-generated", re.I)  # dropped from Meta captions
 
 
 class InstagramError(Exception):
@@ -40,11 +41,18 @@ def load_account(channel: str) -> dict:
 
 
 def build_caption(meta: dict) -> str:
-    tags = " ".join(t if t.startswith("#") else f"#{t}" for t in meta.get("tags", []))
-    parts = [meta.get("title", ""), meta.get("description", ""), tags]
-    if meta.get("ai_disclosure", True) and "ai-generated" not in " ".join(parts).lower():
-        parts.append("AI-generated content")
-    return "\n\n".join(p for p in parts if p).strip()[:2200]
+    """Instagram/Facebook text from the YouTube metadata: no playlist lines or links; hashtags and the one disclosure line last."""
+    desc = meta.get("description", "")
+    lines = desc.splitlines()
+    is_tags = lambda ln: bool(ln.strip()) and all(w.startswith("#") for w in ln.split())  # noqa: E731
+    text = "\n".join(ln for ln in lines if not is_tags(ln) and not YOUTUBE_ONLY.search(ln))
+    disclose = meta.get("ai_disclosure", True) or "ai-generated" in desc.lower()
+    tags = list(dict.fromkeys(w for ln in lines if is_tags(ln) for w in ln.split())) or [
+        t if t.startswith("#") else f"#{t}" for t in meta.get("tags", []) if " " not in t]
+    tail = ("AI-generated content" if disclose else "", " ".join(tags))
+    body = "\n\n".join(p.strip() for p in re.split(r"\n\s*\n", text) if p.strip())
+    limit = 2200 - sum(len(t) + 2 for t in tail)
+    return "\n\n".join(p for p in (meta.get("title", ""), body) if p)[:limit].strip() + "".join(f"\n\n{t}" for t in tail if t)
 
 
 def _check(resp) -> dict:

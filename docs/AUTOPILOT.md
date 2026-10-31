@@ -75,7 +75,19 @@ Free option: **Cloudflare R2** (10 GB free, no egress fees). Alternative without
 8. Cloudflare R2: dash.cloudflare.com -> R2 -> create bucket (e.g. `aurora-tmp`, keep **private**), add a lifecycle rule "delete objects after 1 day" as a backstop; R2 -> Manage API tokens -> Object Read & Write for that bucket. Put in `.env`:
    `HOST_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com`, `HOST_BUCKET=aurora-tmp`, `HOST_ACCESS_KEY=...`, `HOST_SECRET_KEY=...`
 9. Test safely: `python -m aurora.autopilot render --limit 1`, then `python -m aurora.autopilot publish-due --dry-run --at <future ISO>` shows the exact caption it would post.
-Facebook Reels (`/{page-id}/video_reels`) is not built; same hosting + queue would apply.
+
+## Facebook Reels (code ready, never posted live in tests)
+Add `facebook` to a channel's `platforms:`. Code: `aurora/publish/facebook.py` (start -> upload to rupload.facebook.com -> finish PUBLISHED with `is_ai_generated` -> poll status); no public hosting needed. Pages only, 3-90 s, 30 API posts per 24 h. A Reel outside 3-90 s is parked as `failed` with the reason in the daily report, never retried. Once Meta has accepted `finish`, a status failure or slow processing does not re-post.
+Instagram and Facebook share one caption (`instagram.build_caption`): title, description without YouTube-only lines, "AI-generated content", hashtag line. Chapter compilations and long episodes stay YouTube-only (16:9).
+
+### One-time setup (Facebook) — user steps
+1. Use the Page from the Instagram setup (or create one) and the same Meta app.
+2. In Graph API Explorer add `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, generate a token, then use the Page's `access_token` from `GET /me/accounts` (derived from a long-lived user token it does not expire).
+3. Save `outputs/tokens/facebook_<channel>.json` as `{"page_id": "123...", "access_token": "EAAG..."}`.
+
+## Start a platform from Part 1 (backfill)
+`python -m aurora.autopilot backfill --channel shinobi --platform instagram --story echoes-of-the-aether --dry-run` lists the finished YouTube parts in order; drop `--dry-run` to queue them (normal slots + veto window; `--limit 1` for a first live test). Parts already there are skipped, so it resumes safely; a disabled series (VEER) is refused. Reels post when the PC is on at or after the slot; check them with `publish-due --dry-run --at <future ISO>`.
+Add the platform to `platforms:` in config.yaml only after the live test, so new parts follow automatically.
 
 ## Series / comic titles
 If an idea carries `series`, `part`, `hook`, `series_hashtags` (comic format), the title becomes "<Series> – Part N: <hook>", series hashtags + the AI-generated line go in the description, and the platform AI flag stays on.

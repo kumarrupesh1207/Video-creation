@@ -87,7 +87,7 @@ def _chapter_json(root, n, ok=True):
         "status": "ok" if ok else "failed", "kind": "chapter", "title": f"Echoes – Chapter {n}: Dawn", "series": "Echoes", "playlist": "Echoes",
         "chapter": n, "description": "full chapter\n\n0:00 Part 1", "keywords": ["anime story"], "hashtags": ["#anime"],
         "chapters": [{"start": 0, "title": "Part 1"}], "captions_srt": "c.srt", "thumbnail": "t.jpg",
-        "video": {"path": str(video), "sha256": f"sha{n}", "duration_secs": 300}, "publish_at_hint": "2026-10-31T12:30:00+00:00"}), encoding="utf-8")
+        "video": {"path": str(video), "sha256": f"sha{n}", "duration_secs": 300}, "publish_at_hint": "2099-10-31T12:30:00+00:00"}), encoding="utf-8")
 
 
 def test_render_chapters_compiles_pending_then_queues_each_once(q, workspace_tmp_path):
@@ -101,8 +101,16 @@ def test_render_chapters_compiles_pending_then_queues_each_once(q, workspace_tmp
     assert compiled == [("shinobi", 3)] and len(out) == 1
     it = out[0]
     assert it["kind"] == "chapter" and it["chapter"] == 1 and it["playlist"] == "Echoes" and it["series"] == "Echoes"
-    assert it["publish_at"].startswith("2026-10-31T12:30") and it["thumbnail"] == "t.jpg" and it["duration_secs"] == 300
+    assert it["publish_at"].startswith("2099-10-31T12:30") and it["thumbnail"] == "t.jpg" and it["duration_secs"] == 300
     assert autopilot.render_chapters(CFG, q, CH, compile_fn=lambda *a: None, pending_fn=lambda c: [], root=root, state_keys=keys) == []  # not twice
+
+
+def test_chapter_compilation_is_youtube_only(q, workspace_tmp_path):
+    root = workspace_tmp_path / "chapters"
+    _chapter_json(root / "shinobi", 1)
+    ch = {**CH, "platforms": ["youtube", "instagram", "facebook"]}
+    out = autopilot.render_chapters(CFG, q, ch, compile_fn=lambda *a: None, pending_fn=lambda c: [], root=root, state_keys={"shinobi": None})
+    assert [i["platform"] for i in out] == ["youtube"]
 
 
 def test_failed_chapter_compile_does_not_stop_queueing(q, workspace_tmp_path):

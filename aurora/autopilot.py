@@ -5,6 +5,7 @@
     python -m aurora.autopilot analytics
     python -m aurora.autopilot status | veto ID | approve ID
     python -m aurora.autopilot publish-one ID --privacy private --i-confirm   (bypasses the kill-switch for ONE item)
+    python -m aurora.autopilot backfill --channel NAME --platform instagram --story SLUG [--limit N] [--dry-run]
 
 Config (config.yaml) `autopilot:` section, see docs/AUTOPILOT.md. Channels never mix: own token file + queue tag.
 Research interface (aurora/research.py, built by Backend): generate_ideas(niche, language, n, channel=None) ->
@@ -23,10 +24,11 @@ from pathlib import Path
 
 import yaml
 
-from aurora.publish.queue import PublishQueue
+from aurora.publish.queue import ACTIVE, PublishQueue
 
 ROOT = Path(__file__).resolve().parents[1]
 QUOTA_BACKOFF = timedelta(hours=12)
+META_PLATFORMS = ("instagram", "facebook")  # vertical Reels only, no scheduling ahead
 
 
 def channels_from(cfg: dict) -> list[dict]:
@@ -218,6 +220,8 @@ def render_chapters(cfg: dict, queue: PublishQueue, ch: dict, compile_fn=None, p
                 meta = apply_seo(cfg, ch, {"topic": side["title"], "series": side.get("series"), "chapter": side.get("chapter")}, meta,
                                  seo_service_factory)
             for platform in ch["platforms"]:
+                if platform in META_PLATFORMS:  # 16:9 compilation: not a Reel
+                    continue
                 item = queue.enqueue(ch["name"], side["video"]["path"], meta, platform=platform)
                 if item:
                     out.append(item)
@@ -255,6 +259,8 @@ def render_long(cfg: dict, queue: PublishQueue, ch: dict, episode_fn=None, now: 
     if ch.get("seo"):
         meta = apply_seo(cfg, ch, {"topic": side["title"], "part": side.get("episode")}, meta)
     for platform in ch["platforms"]:
+        if platform in META_PLATFORMS:  # 16:9 episode: not a Reel
+            continue
         item = queue.enqueue(ch["name"], side["video"]["path"], meta, platform=platform)
         if item:
             out.append(item)
@@ -470,7 +476,7 @@ def compose_meta(idea: dict, sha256: str) -> dict:
 # ---- publish ---------------------------------------------------------
 def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | None = None, service_factory=None,
                 uploader=None, dry_run: bool = False, ig_publisher=None, playlist_fn=None, budget=None, comment_fn=None,
-                playlist_public_fn=None) -> dict:
+                playlist_public_fn=None, fb_publisher=None) -> dict:
     """Upload every eligible, non-vetoed item. Stops a channel on quota; failures retry up to max_attempts.
     With autopilot.publish.upload_ahead the upload happens as soon as the veto window passed: private + publishAt=<slot>
     (YouTube publishes it itself, PC may be off); a slot that is already past is published public right away."""
@@ -494,14 +500,14 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
 
     todo = sorted([i for i in (queue.uploadable(now, only) if ahead else queue.due(now, only))
                    if i.get("platform", "youtube") == "youtube"], key=priority) + [
-        i for i in queue.due(now, only) if i.get("platform", "youtube") == "instagram"]  # IG cannot schedule ahead
+        i for i in queue.due(now, only) if i.get("platform", "youtube") in META_PLATFORMS]  # Meta posts at the slot
     if dry_run:  # log what WOULD be sent; no auth, no upload, queue untouched
         result["would_publish"] = []
         for it in todo:
-            if it.get("platform", "youtube") == "instagram":
+            if it.get("platform", "youtube") in META_PLATFORMS:
                 from aurora.publish import instagram as ig
 
-                print(f"[autopilot] DRY-RUN {it['channel']}/instagram: would host + publish {it['path']} caption={ig.build_caption(it)!r}")
+                print(f"[autopilot] DRY-RUN {it['channel']}/{it['platform']}: would publish {it['path']} caption={ig.build_caption(it)!r}")
                 result["would_publish"].append(it["id"])
                 continue
             body = yt.build_body(it, it.get("privacy", "public"))
@@ -520,8 +526,8 @@ def publish_due(queue: PublishQueue, only: str | None = None, now: datetime | No
         if not queue.publish_enabled(ch) or not queue.story_enabled(ch, it.get("story")):
             result["skipped_disabled"].append(it["id"])
             continue
-        if it.get("platform", "youtube") == "instagram":
-            _publish_instagram(queue, it, result, ig_publisher)
+        if it.get("platform", "youtube") in META_PLATFORMS:
+            _publish_meta(queue, it, result, fb_publisher if it["platform"] == "facebook" else ig_publisher)
             continue
         if ch in blocked:
             continue
@@ -710,8 +716,11 @@ def write_daily_report(queue: PublishQueue, budget=None, now: datetime | None = 
         except Exception:  # noqa: BLE001
             nim_credits = 0
 
+    def where(i: dict) -> str:
+        return i["channel"] + (f"/{i['platform']}" if i.get("platform", "youtube") != "youtube" else "")
+
     def line(i: dict) -> str:
-        return f"- [{i['channel']}] {i['title'][:70]} ({i['status']}, slot {i['publish_at'][:16]}Z)" + (f" id {i['video_id']}" if i.get("video_id") else "")
+        return f"- [{where(i)}] {i['title'][:70]} ({i['status']}, slot {i['publish_at'][:16]}Z)" + (f" id {i['video_id']}" if i.get("video_id") else "")
 
     md = [f"# Aurora daily report - {today}", "",
           f"NIM credits used today: {nim_credits} | YouTube quota used: {budget.used() if budget else '?'} / 10000 units", "",
@@ -722,7 +731,7 @@ def write_daily_report(queue: PublishQueue, budget=None, now: datetime | None = 
           f"## Pin these comments in YouTube Studio ({len(pins)}) - the API cannot pin",
           *([f"- [{i['channel']}] {i['title'][:60]}: \"{i.get('engagement_question', '')}\" (video {i.get('video_id')})" for i in pins] or ["- none"]),
           f"## Failures and problems ({len(failed) + len(events)})",
-          *([f"- {i['title'][:50]}: {i.get('error')}" for i in failed] + [f"- {e['at'][11:16]} {e['kind']} [{e['channel']}] {e['msg']}" for e in events] or ["- none"])]
+          *([f"- [{where(i)}] {i['title'][:50]}: {i.get('error')}" for i in failed] + [f"- {e['at'][11:16]} {e['kind']} [{e['channel']}] {e['msg']}" for e in events] or ["- none"])]
     out = (report_dir or REPORT_DIR) / f"{today}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(md) + "\n", encoding="utf-8")
@@ -818,8 +827,9 @@ def publish_one(queue: PublishQueue, item_id: str, privacy: str = "private", con
     return queue.get(item_id)
 
 
-def _publish_instagram(queue: PublishQueue, it: dict, result: dict, ig_publisher=None) -> None:
-    from aurora.publish import hosting, instagram as ig
+def _publish_meta(queue: PublishQueue, it: dict, result: dict, publisher=None) -> None:
+    """Instagram (Meta fetches a temporary public URL) or Facebook (direct upload)."""
+    from aurora.publish import facebook as fb, hosting, instagram as ig
 
     if not Path(it["path"]).exists():
         queue.mark_failed(it["id"], "video file missing", retry_in=None)
@@ -827,15 +837,20 @@ def _publish_instagram(queue: PublishQueue, it: dict, result: dict, ig_publisher
         return
     queue.mark_publishing(it["id"])
     try:
-        if ig_publisher:
-            media_id = ig_publisher(it)
+        if publisher:
+            media_id = publisher(it)
+        elif it["platform"] == "facebook":
+            media_id = fb.publish_reel(fb.load_account(it["channel"]), it["path"], it)
         else:
             account = ig.load_account(it["channel"])
             with hosting.temporary_public_url(it["path"]) as url:
                 media_id = ig.publish_reel(account, url, it)
         queue.mark_published(it["id"], media_id)
         result["published"].append(it["id"])
-        print(f"[autopilot] {it['channel']}/instagram: published {media_id}")
+        print(f"[autopilot] {it['channel']}/{it['platform']}: published {media_id}")
+    except fb.ReelOutOfRange as e:  # logged and parked: never retried
+        queue.mark_failed(it["id"], str(e), retry_in=None)
+        result["failed"].append(it["id"])
     except ig.RateLimited as e:
         queue.defer(it["id"], QUOTA_BACKOFF, f"rate limit: {e}")
         result["deferred"].append(it["id"])
@@ -847,14 +862,48 @@ def _publish_instagram(queue: PublishQueue, it: dict, result: dict, ig_publisher
         result["failed"].append(it["id"])
 
 
-def collect_analytics(queue: PublishQueue, service_factory=None, stats_fn=None, ig_stats_fn=None) -> int:
+def backfill(queue: PublishQueue, channel: str, platform: str, story: str, limit: int = 0, dry_run: bool = False,
+             now: datetime | None = None) -> list[dict]:
+    """Queue a series' finished YouTube parts for a Meta platform, Part 1 first, so new viewers can start at the beginning.
+    Normal slots and the veto window apply; a part already queued or posted there is skipped; a disabled series is refused."""
+    if platform not in META_PLATFORMS:
+        raise ValueError(f"backfill platform must be one of {META_PLATFORMS}")
+    if not queue.series_entry(channel, story) or not queue.story_enabled(channel, story):
+        raise PermissionError(f"series '{story}' is not enabled on channel '{channel}'")
+    mine = [i for i in queue.list(channel) if i.get("platform", "youtube") == "youtube" and i.get("kind") == "short"
+            and i["status"] in ("published", "uploaded_scheduled") and i.get("chapter") and i.get("part")]
+    names = {i.get("series") for i in mine if i.get("story") == story} - {None}
+    there = {i["sha256"] for i in queue.list(channel) if i.get("platform", "youtube") == platform and i["status"] in ACTIVE}
+    keep =("title", "description", "tags", "ai_disclosure", "sha256", "kind", "series", "chapter", "part", "duration_secs",
+            "engagement_question")
+    out = []
+    for i in sorted((i for i in mine if i.get("story") == story or (not i.get("story") and i.get("series") in names)), key=order_key):
+        if limit and len(out) >= limit:
+            break
+        if i["sha256"] in there:
+            continue
+        if not Path(i["path"]).exists():
+            print(f"[autopilot] backfill: file missing, skipped: {i['title']}", file=sys.stderr)
+            continue
+        if dry_run:
+            print(f"[autopilot] DRY-RUN backfill {channel}/{platform}: would queue Ch.{i['chapter']} Part {i['part']}: {i['title']}")
+            out.append(i)
+            continue
+        item = queue.enqueue(channel, i["path"], {**{k: i[k] for k in keep if i.get(k) is not None}, "story": story}, now, platform)
+        if item:
+            out.append(item)
+            print(f"[autopilot] {channel}/{platform}: queued {item['id']} (publish_at {item['publish_at']}): {item['title']}")
+    return out
+
+
+def collect_analytics(queue: PublishQueue, service_factory=None, stats_fn=None, ig_stats_fn=None, fb_stats_fn=None) -> int:
     from aurora.publish import youtube as yt
 
     service_factory = service_factory or yt.build_service
     stats_fn = stats_fn or yt.fetch_stats
     n = 0
     for ch in sorted({i["channel"] for i in queue.list(status="published")}):
-        for platform in ("youtube", "instagram"):
+        for platform in ("youtube", *META_PLATFORMS):
             items = [i for i in queue.list(ch, "published") if i.get("video_id") and i.get("platform", "youtube") == platform]
             if not items:
                 continue
@@ -862,6 +911,10 @@ def collect_analytics(queue: PublishQueue, service_factory=None, stats_fn=None, 
             try:
                 if platform == "youtube":
                     stats = stats_fn(service_factory(ch), ids)
+                elif platform == "facebook":
+                    from aurora.publish import facebook as fb
+
+                    stats = (fb_stats_fn or fb.fetch_stats)(fb.load_account(ch), ids)
                 else:
                     from aurora.publish import instagram as ig
 
@@ -965,7 +1018,10 @@ def main(argv: list[str] | None = None) -> int:
     load_env()
     ap = argparse.ArgumentParser(description="Aurora autopilot")
     ap.add_argument("cmd", choices=["render", "publish-due", "publish-one", "analytics", "status", "veto", "approve", "comments",
-                                    "comment-approve", "comment-reject", "weekly-report", "approvals", "daily-report", "reseo", "update-metadata"])
+                                    "comment-approve", "comment-reject", "weekly-report", "approvals", "daily-report", "reseo", "update-metadata",
+                                    "backfill"])
+    ap.add_argument("--platform", choices=META_PLATFORMS, help="backfill only")
+    ap.add_argument("--story", help="backfill: series slug")
     ap.add_argument("--reply", help="comment-approve: edited reply text")
     ap.add_argument("--privacy", default="private", choices=["private", "unlisted", "public"], help="publish-one only")
     ap.add_argument("--i-confirm", action="store_true", help="publish-one: required; bypasses the kill-switch for this ONE item")
@@ -993,6 +1049,14 @@ def main(argv: list[str] | None = None) -> int:
                           dry_run=a.dry_run, budget=budget))
         if not a.dry_run:
             print(f"[autopilot] daily report: {write_daily_report(q, budget)}")
+    elif a.cmd == "backfill":
+        if not (a.channel and a.platform and a.story):
+            ap.error("backfill needs --channel, --platform and --story")
+        try:
+            print(f"[autopilot] backfill: {len(backfill(q, a.channel, a.platform, a.story, a.limit, a.dry_run))} part(s)")
+        except PermissionError as e:
+            print(f"[autopilot] refused: {e}", file=sys.stderr)
+            return 2
     elif a.cmd == "update-metadata":
         import json as _json
 

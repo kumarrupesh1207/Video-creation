@@ -228,6 +228,113 @@ def test_instagram_flow_and_errors():
         ig.publish_reel(acct, "u", {"title": "T"}, http=http)
 
 
+def _meta_resp(js, code=200):
+    r = MagicMock(); r.json.return_value = js; r.content = b"x"; r.status_code = code; r.text = str(js)
+    return r
+
+
+def test_meta_caption_drops_youtube_lines_and_keeps_one_disclosure():
+    from aurora.publish import instagram as ig
+
+    desc = ("Who lived there? \U0001F447\n\nThe city falls.\n\nChapter 1, Part 10 of 10.\nAll parts in order: the \"Echoes\" playlist.\n\n"
+            "This story and its visuals are AI-generated (synthetic media).\n\n#EchoesOfTheAether #anime #animestory")
+    cap = ig.build_caption({"title": "T | Echoes Pt 10", "description": desc, "tags": ["echoes of the aether", "anime story"]})
+    assert cap.startswith("T | Echoes Pt 10\n\nWho lived there?") and "The city falls." in cap and "Chapter 1, Part 10 of 10." in cap
+    assert "playlist" not in cap and "synthetic media" not in cap and cap.lower().count("ai-generated") == 1
+    assert cap.endswith("AI-generated content\n\n#EchoesOfTheAether #anime #animestory")
+    assert "#echoes of" not in cap  # keyword tags with spaces are not hashtags
+    prose = ig.build_caption({"title": "T", "description": "Rule #2 holds.\n\n#anime"})
+    assert "Rule #2 holds." in prose and prose.endswith("AI-generated content\n\n#anime")
+    long = ig.build_caption({"title": "T", "description": "x" * 5000 + "\n\n#tag"})
+    assert len(long) <= 2200 and long.endswith("AI-generated content\n\n#tag")
+
+
+def test_facebook_flow_flags_ai_and_uploads_directly(vid):
+    from aurora.publish import facebook as fb
+
+    http = MagicMock()
+    http.post.side_effect = [_meta_resp({"video_id": "V1"}), _meta_resp({"success": True}), _meta_resp({"success": True})]
+    http.get.side_effect = [_meta_resp({"status": {"video_status": "processing", "publishing_phase": {"status": "in_progress"}}}),
+                            _meta_resp({"status": {"video_status": "ready", "publishing_phase": {"publish_status": "published"}}})]
+    acct = {"page_id": "P", "access_token": "TOK"}
+    assert fb.publish_reel(acct, vid, {"title": "T", "duration_secs": 30}, http=http, sleep=lambda s: None) == "V1"
+    start, upload, finish = http.post.call_args_list
+    assert start.kwargs["data"]["upload_phase"] == "start"
+    assert upload.args[0].startswith("https://rupload.facebook.com/video-upload/") and upload.args[0].endswith("/V1")
+    assert upload.kwargs["headers"]["Authorization"] == "OAuth TOK" and upload.kwargs["headers"]["offset"] == "0"
+    assert finish.kwargs["data"]["upload_phase"] == "finish" and finish.kwargs["data"]["video_state"] == "PUBLISHED"
+    assert finish.kwargs["data"]["is_ai_generated"] == "true" and "AI-generated" in finish.kwargs["data"]["description"]
+
+
+def test_facebook_errors_and_slow_processing_never_double_post(vid):
+    from aurora.publish import facebook as fb, instagram as ig
+
+    acct = {"page_id": "P", "access_token": "T"}
+    http = MagicMock()
+    with pytest.raises(fb.ReelOutOfRange):
+        fb.publish_reel(acct, vid, {"title": "T", "duration_secs": 91}, http=http)
+    assert not http.post.called
+    http.post.side_effect = [_meta_resp({"video_id": "V"}), _meta_resp({"success": True}), _meta_resp({"success": True})]
+    http.get.return_value = _meta_resp({"status": {"video_status": "processing"}})
+    assert fb.publish_reel(acct, vid, {"title": "T"}, http=http, sleep=lambda s: None, max_polls=2) == "V"  # accepted: no retry
+    http.post.side_effect = [_meta_resp({"video_id": "V"}), _meta_resp({"success": True}), _meta_resp({"success": True})]
+    http.get.side_effect = [TimeoutError("net"), _meta_resp({"status": {"publishing_phase": {"status": "complete"}}})]
+    assert fb.publish_reel(acct, vid, {"title": "T"}, http=http, sleep=lambda s: None) == "V"  # a failed check is not a failed Reel
+    http.get.side_effect = None
+    http.post.side_effect = [_meta_resp({"video_id": "V"}), _meta_resp({"success": True}), _meta_resp({"success": True})]
+    http.get.return_value = _meta_resp({"status": {"video_status": "error"}})
+    with pytest.raises(fb.InstagramError):
+        fb.publish_reel(acct, vid, {"title": "T"}, http=http, sleep=lambda s: None)
+    http.post.side_effect = [_meta_resp({"error": {"code": 4, "message": "limit"}}, 400)]
+    with pytest.raises(ig.RateLimited):
+        fb.publish_reel(acct, vid, {"title": "T"}, http=http)
+
+
+def test_facebook_dispatch_parks_too_long_reels_and_reports_platform(q, vid, workspace_tmp_path, monkeypatch):
+    from aurora.publish import facebook as fb
+
+    ok = q.enqueue("facts", vid, {"title": "Ok", "sha256": "a"}, now=NOW, platform="facebook")
+    long = q.enqueue("facts", vid, {"title": "Long", "sha256": "b"}, now=NOW, platform="facebook")
+
+    def pub(it):
+        if it["id"] == long["id"]:
+            raise fb.ReelOutOfRange("too long")
+        return "FB1"
+
+    r = autopilot.publish_due(q, now=NOW + timedelta(days=2), fb_publisher=pub, service_factory=lambda c: object())
+    assert r["published"] == [ok["id"]] and r["failed"] == [long["id"]]
+    assert q.get(ok["id"])["video_id"] == "FB1" and q.get(long["id"])["status"] == "failed"
+    monkeypatch.setattr(fb, "load_account", lambda ch: {})
+    n = autopilot.collect_analytics(q, fb_stats_fn=lambda a, ids: {"FB1": {"likeCount": 3}}, service_factory=lambda c: object())
+    assert n == 1 and q.get(ok["id"])["stats"]["likeCount"] == 3
+    md = autopilot.write_daily_report(q, now=NOW + timedelta(days=2), nim_credits=0, report_dir=workspace_tmp_path,
+                                      events_dir=workspace_tmp_path).read_text(encoding="utf-8")
+    assert "[facts/facebook] Long: too long" in md
+
+
+def test_backfill_queues_from_part_one_and_refuses_disabled_series(workspace_tmp_path, vid):
+    cfg = {"autopilot": {"publish": {"enabled": True, "slots": ["12:30", "18:30"]}, "channels": [
+        {"name": "c", "series": [{"slug": "good"}, {"slug": "veer", "enabled": False}]}]}}
+    q3 = PublishQueue(workspace_tmp_path / "b.json", cfg)
+    made = {}
+    for part, story, series in ((2, "good", "Good"), (1, "good", "Good"), (3, None, "Good"), (4, None, "Other")):
+        it = q3.enqueue("c", vid, {"title": f"P{part}", "sha256": f"s{part}", "kind": "short", "chapter": 1, "part": part, "duration_secs": 30,
+                                   "story": story, "series": series}, now=NOW)
+        q3.mark_published(it["id"], f"Y{part}")
+        made[part] = it
+    q3.veto(q3.enqueue("c", vid, {"title": "Vetoed", "sha256": "v", "kind": "short", "chapter": 1, "part": 9, "story": "good", "series": "Good"}, now=NOW)["id"])
+    assert len(autopilot.backfill(q3, "c", "instagram", "good", dry_run=True, now=NOW)) == 3
+    assert not [i for i in q3.list() if i["platform"] == "instagram"]
+    out = autopilot.backfill(q3, "c", "instagram", "good", limit=2, now=NOW)
+    assert [i["part"] for i in out] == [1, 2] and out[0]["publish_at"] < out[1]["publish_at"] and out[0]["story"] == "good"
+    assert [i["part"] for i in autopilot.backfill(q3, "c", "instagram", "good", dry_run=True, now=NOW)] == [3]
+    assert [i["part"] for i in autopilot.backfill(q3, "c", "instagram", "good", now=NOW)] == [3]  # resumes, never twice
+    with pytest.raises(PermissionError):
+        autopilot.backfill(q3, "c", "instagram", "veer", now=NOW)
+    with pytest.raises(ValueError):
+        autopilot.backfill(q3, "c", "youtube", "good", now=NOW)
+
+
 def test_presign_is_deterministic_and_expiring():
     from aurora.publish import hosting
 
