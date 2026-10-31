@@ -54,15 +54,11 @@ Import `PublishQueue` from `aurora.publish.queue` (thread-safe, file-backed).
 | `GET /api/publish/health` | per-channel: token file exists (`youtube.token_path(ch).exists()`), count scheduled/failed |
 UI "Queue" tab: card per item with video preview (`path`), title, countdown to `publish_at` (show IST), big **Stop** button while `scheduled`, **Restore** when `vetoed`, red banner for `failed`/missing token, and views/likes once published. Auth-protected like the other endpoints. Push notification to the phone when an item is queued is optional (item's `created_at`).
 
-## Instagram Reels (code ready, never posted live in tests)
+## Instagram Reels (first live post 2026-10-31)
 Add `instagram` to a channel's `platforms:`; `render` then queues one item per platform (own slot + veto, same file, dedupe per platform).
-Code: `aurora/publish/instagram.py` (Graph API v21.0: create REELS container -> poll `status_code=FINISHED` -> `media_publish`),
-`aurora/publish/hosting.py` (temporary public HTTPS URL), dispatch in `autopilot.publish_due`. Rate-limit errors (about 25 Reels/day) defer 12 h;
-missing account/hosting config keeps the item scheduled and retries hourly. Meta has no API flag for the "AI info" label, so the caption gets an
-"AI-generated content" line; also switch on Instagram's auto-label in the app.
+Code: `aurora/publish/instagram.py` `publish_reel_file` (Graph API v26.0: create resumable REELS container -> upload the local file to rupload.facebook.com -> poll `status_code=FINISHED` -> `media_publish`), dispatch in `autopilot.publish_due`. Rate-limit errors defer 12 h; a missing account file keeps the item scheduled and retries hourly. Direct upload needs a Page token from Facebook Login for Business, so R2 is not needed. Meta has no API flag for the "AI info" label, so the caption gets an "AI-generated content" line; also switch on Instagram's auto-label in the app.
 
-Why hosting: Meta downloads the video itself from a public HTTPS URL. Aurora uploads the file to a private bucket, gives Meta a presigned URL that expires in 1 h, then deletes the object.
-Free option: **Cloudflare R2** (10 GB free, no egress fees). Alternative without hosting code: **Metricool** API (paid plan) which handles hosting + tokens for IG/FB/TikTok/YouTube; say so and an adapter replaces `instagram.py`.
+`publish_reel` and `aurora/publish/hosting.py` (public URL via Cloudflare R2) remain as an unused alternative.
 
 ### One-time setup (Instagram) — user steps
 1. Convert the Instagram account to **Professional (Business or Creator)**: Instagram app -> Settings -> Account type and tools.
@@ -72,7 +68,7 @@ Free option: **Cloudflare R2** (10 GB free, no egress fees). Alternative without
 5. Make it long-lived (60 days): Tools -> Access Token Debugger -> "Extend Access Token" (or call `GET /oauth/access_token?grant_type=fb_exchange_token&client_id=APP_ID&client_secret=APP_SECRET&fb_exchange_token=SHORT_TOKEN`). Diary reminder: renew every ~50 days (a Page token derived from a long-lived user token does not expire; prefer that: `GET /me/accounts` and use the Page's `access_token`).
 6. Find your IG user id: `GET /me/accounts?fields=instagram_business_account` -> `instagram_business_account.id`.
 7. Save `C:\Rupesh\App\Video creation\outputs\tokens\instagram_<channel>.json` as `{"ig_user_id": "1784...", "access_token": "EAAG..."}`.
-8. Cloudflare R2: dash.cloudflare.com -> R2 -> create bucket (e.g. `aurora-tmp`, keep **private**), add a lifecycle rule "delete objects after 1 day" as a backstop; R2 -> Manage API tokens -> Object Read & Write for that bucket. Put in `.env`:
+8. Only for the unused URL flow, Cloudflare R2: dash.cloudflare.com -> R2 -> create bucket (e.g. `aurora-tmp`, keep **private**), add a lifecycle rule "delete objects after 1 day" as a backstop; R2 -> Manage API tokens -> Object Read & Write for that bucket. Put in `.env`:
    `HOST_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com`, `HOST_BUCKET=aurora-tmp`, `HOST_ACCESS_KEY=...`, `HOST_SECRET_KEY=...`
 9. Test safely: `python -m aurora.autopilot render --limit 1`, then `python -m aurora.autopilot publish-due --dry-run --at <future ISO>` shows the exact caption it would post.
 

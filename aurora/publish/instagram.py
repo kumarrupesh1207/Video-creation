@@ -1,7 +1,8 @@
 """Instagram Reels via the Instagram Graph API (Business/Creator account linked to a Facebook Page).
 
 Per-channel credentials in outputs/tokens/instagram_<channel>.json (git-ignored): {"ig_user_id": "...", "access_token": "..."}
-Flow: POST /{ig-user}/media (REELS, public video_url) -> poll status_code=FINISHED -> POST /{ig-user}/media_publish.
+Flow: POST /{ig-user}/media (REELS, resumable) -> upload the file to rupload.facebook.com -> poll status_code=FINISHED
+-> POST /{ig-user}/media_publish. `publish_reel` is the same flow from a public URL.
 Meta has no API field for the "AI info" label, so the caption carries an explicit AI-generated line.
 """
 from __future__ import annotations
@@ -14,6 +15,7 @@ from pathlib import Path
 from aurora.publish.youtube import TOKEN_DIR
 
 GRAPH = "https://graph.facebook.com/v26.0"
+RUPLOAD = GRAPH.replace("graph.facebook.com", "rupload.facebook.com/ig-api-upload")
 RATE_LIMIT_CODES = {4, 17, 32, 613, 9}  # app/user/page call limits; 9 = Reels publish limit (about 25/day)
 YOUTUBE_ONLY = re.compile(r"playlist|https?://|youtu\.?be|ai-generated|perfect if you like|^keywords:", re.I)  # dropped from Meta captions
 
@@ -68,7 +70,7 @@ def _check(resp) -> dict:
 
 def publish_reel(account: dict, video_url: str, meta: dict, http=None, sleep=time.sleep,
                  poll_secs: float = 10, max_polls: int = 60) -> str:
-    """Create container, wait until processed, publish; returns the IG media id."""
+    """Create container from a public URL, wait until processed, publish; returns the IG media id."""
     import requests
 
     http = http or requests
@@ -76,7 +78,28 @@ def publish_reel(account: dict, video_url: str, meta: dict, http=None, sleep=tim
     c = _check(http.post(f"{GRAPH}/{uid}/media", data={
         "media_type": "REELS", "video_url": video_url, "caption": build_caption(meta),
         "share_to_feed": "true", "access_token": tok}, timeout=60))
-    cid = c["id"]
+    return _finish(http, tok, uid, c["id"], sleep, poll_secs, max_polls)
+
+
+def publish_reel_file(account: dict, path: str | Path, meta: dict, http=None, sleep=time.sleep,
+                      poll_secs: float = 10, max_polls: int = 60) -> str:
+    """Resumable upload of a local file (no public hosting; needs a Facebook Login for Business token); returns the IG media id."""
+    import requests
+
+    http = http or requests
+    tok, uid = account["access_token"], account["ig_user_id"]
+    cid = _check(http.post(f"{GRAPH}/{uid}/media", data={
+        "media_type": "REELS", "upload_type": "resumable", "caption": build_caption(meta),
+        "share_to_feed": "true", "access_token": tok}, timeout=60))["id"]
+    with open(path, "rb") as f:
+        up = _check(http.post(f"{RUPLOAD}/{cid}", data=f, timeout=600, headers={
+            "Authorization": f"OAuth {tok}", "offset": "0", "file_size": str(Path(path).stat().st_size)}))
+    if not up.get("success"):
+        raise InstagramError(f"upload failed: {up}")
+    return _finish(http, tok, uid, cid, sleep, poll_secs, max_polls)
+
+
+def _finish(http, tok: str, uid: str, cid: str, sleep, poll_secs: float, max_polls: int) -> str:
     for _ in range(max_polls):
         s = _check(http.get(f"{GRAPH}/{cid}", params={"fields": "status_code,status", "access_token": tok}, timeout=60))
         if s.get("status_code") == "FINISHED":

@@ -828,8 +828,8 @@ def publish_one(queue: PublishQueue, item_id: str, privacy: str = "private", con
 
 
 def _publish_meta(queue: PublishQueue, it: dict, result: dict, publisher=None) -> None:
-    """Instagram (Meta fetches a temporary public URL) or Facebook (direct upload)."""
-    from aurora.publish import facebook as fb, hosting, instagram as ig
+    """Instagram or Facebook; both upload the local file directly."""
+    from aurora.publish import facebook as fb, instagram as ig
 
     if not Path(it["path"]).exists():
         queue.mark_failed(it["id"], "video file missing", retry_in=None)
@@ -842,9 +842,7 @@ def _publish_meta(queue: PublishQueue, it: dict, result: dict, publisher=None) -
         elif it["platform"] == "facebook":
             media_id = fb.publish_reel(fb.load_account(it["channel"]), it["path"], it)
         else:
-            account = ig.load_account(it["channel"])
-            with hosting.temporary_public_url(it["path"]) as url:
-                media_id = ig.publish_reel(account, url, it)
+            media_id = ig.publish_reel_file(ig.load_account(it["channel"]), it["path"], it)
         queue.mark_published(it["id"], media_id)
         result["published"].append(it["id"])
         print(f"[autopilot] {it['channel']}/{it['platform']}: published {media_id}")
@@ -854,7 +852,7 @@ def _publish_meta(queue: PublishQueue, it: dict, result: dict, publisher=None) -
     except ig.RateLimited as e:
         queue.defer(it["id"], QUOTA_BACKOFF, f"rate limit: {e}")
         result["deferred"].append(it["id"])
-    except (hosting.HostingNotConfigured, ig.InstagramError) as e:  # config problem: keep scheduled, don't burn attempts
+    except ig.InstagramError as e:  # config problem: keep scheduled, don't burn attempts
         queue.defer(it["id"], timedelta(hours=1), str(e))
         result["deferred"].append(it["id"])
     except Exception as e:  # noqa: BLE001

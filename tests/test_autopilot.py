@@ -233,6 +233,25 @@ def _meta_resp(js, code=200):
     return r
 
 
+def test_instagram_uploads_a_local_file_without_hosting(vid):
+    from aurora.publish import instagram as ig
+
+    http = MagicMock()
+    http.post.side_effect = [_meta_resp({"id": "C1"}), _meta_resp({"success": True}), _meta_resp({"id": "M1"})]
+    http.get.side_effect = [_meta_resp({"status_code": "IN_PROGRESS"}), _meta_resp({"status_code": "FINISHED"})]
+    acct = {"ig_user_id": "U", "access_token": "TOK"}
+    assert ig.publish_reel_file(acct, vid, {"title": "T"}, http=http, sleep=lambda s: None) == "M1"
+    create, upload, publish = http.post.call_args_list
+    assert create.kwargs["data"]["upload_type"] == "resumable" and create.kwargs["data"]["media_type"] == "REELS"
+    assert "video_url" not in create.kwargs["data"] and "AI-generated" in create.kwargs["data"]["caption"]
+    assert upload.args[0].startswith("https://rupload.facebook.com/ig-api-upload/") and upload.args[0].endswith("/C1")
+    assert upload.kwargs["headers"]["Authorization"] == "OAuth TOK" and upload.kwargs["headers"]["offset"] == "0"
+    assert publish.args[0].endswith("/U/media_publish") and publish.kwargs["data"]["creation_id"] == "C1"
+    http.post.side_effect = [_meta_resp({"id": "C2"}), _meta_resp({"success": False, "debug_info": {"retriable": False}})]
+    with pytest.raises(ig.InstagramError):
+        ig.publish_reel_file(acct, vid, {"title": "T"}, http=http, sleep=lambda s: None)
+
+
 def test_meta_caption_drops_youtube_lines_and_keeps_one_disclosure():
     from aurora.publish import instagram as ig
 
