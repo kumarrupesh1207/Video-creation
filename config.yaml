@@ -257,7 +257,7 @@ autopilot:
       expected_handle: "@ShinobiMindset1"   # upload is refused if the token belongs to another channel
       niche: "original anime short stories with original characters (no existing copyrighted characters): epic battles, emotional moments, power-ups, mysterious worlds"
       language: en
-      platforms: [youtube]
+      platforms: [youtube, facebook]   # add instagram after R2 hosting is set up
       reels_per_day: 2        # 2 Shorts/day
       slots: ["12:30", "18:30"]   # IST
       # long_episode: {weekday: saturday, time: "18:00"}   # OFF: replaced by the Saturday 18:00 CHAPTER COMPILATION (aurora/chapter.py); aurora/episode.py stays for manual use

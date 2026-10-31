@@ -280,6 +280,34 @@ def test_partial_research_chapter_is_repaired_from_the_series_state_not_skipped(
     assert not any("missing" in w for w in story.lint("demo", series_dir=sd)["warnings"])
 
 
+def test_scheduler_refuses_the_offline_template_and_retries_cleanly(packs, workspace_tmp_path, monkeypatch):
+    tmp = workspace_tmp_path
+    make_pack(packs, "demo", parts=0)
+    cfg = {"comic": {"cast_lock": False, "image_mode": "nim"}, "research": {}, "cost_dir": str(tmp / "costs"), "providers": {"nvidia_nim": {"max_credits_per_day": 50}}}
+    sd, client, seen = tmp / "ser", FakeClient(), []
+
+    def down(*a, **k):
+        raise RuntimeError("503 UNAVAILABLE")
+
+    def reel(channel, premise, out_dir, comic=None, chapter=None, series_dir=None, **kw):
+        seen.append(comic)
+        side = tmp / f"part{chapter['part']}.json"
+        side.write_text(json.dumps({"hook": comic.get("hook"), "panels": comic["panels"]}), encoding="utf-8")
+        research.record_part(channel, comic, chapter, {"part": chapter["part"], "video": "v.mp4", "sidecar": str(side), "title": "t"}, series_dir)
+        return {"sidecar": str(side), "title": "t"}
+
+    monkeypatch.setattr(comic, "make_comic_reel", reel)
+    monkeypatch.setattr(research, "_call_json", down)
+    channel = {"name": "c", "series": ["demo"]}
+    with pytest.raises(RuntimeError, match="no real script.*503"):
+        story.render_for_channel(cfg, channel, Board(tmp), tmp / "out", series_dir=sd, music=False, client=client)
+    state = research.load_series("demo", sd)
+    assert seen == [] and not state.get("chapter") and not state.get("draft_part")  # no template outline, no panels paid
+    monkeypatch.setattr(research, "_call_json", lambda c, model, prompt, schema: c.generate(prompt, schema))
+    assert story.render_for_channel(cfg, channel, Board(tmp), tmp / "out", series_dir=sd, music=False, client=client)["title"] == "t"
+    assert len(seen) == 1
+
+
 def test_authored_chapter_with_a_gap_stays_strict_and_a_lint_failure_is_reported(packs, workspace_tmp_path):
     tmp = workspace_tmp_path
     d = make_pack(packs, "demo", parts=0)

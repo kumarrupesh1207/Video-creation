@@ -243,6 +243,8 @@ def test_meta_caption_drops_youtube_lines_and_keeps_one_disclosure():
     assert "playlist" not in cap and "synthetic media" not in cap and cap.lower().count("ai-generated") == 1
     assert cap.endswith("AI-generated content\n\n#EchoesOfTheAether #anime #animestory")
     assert "#echoes of" not in cap  # keyword tags with spaces are not hashtags
+    old = ig.build_caption({"title": "T", "description": "Story.\n\nPerfect if you like anime story.\n\n#Shorts #anime"})
+    assert "Perfect if" not in old and "#Shorts" not in old and old.endswith("#anime")
     prose = ig.build_caption({"title": "T", "description": "Rule #2 holds.\n\n#anime"})
     assert "Rule #2 holds." in prose and prose.endswith("AI-generated content\n\n#anime")
     long = ig.build_caption({"title": "T", "description": "x" * 5000 + "\n\n#tag"})

@@ -15,7 +15,7 @@ from aurora.publish.youtube import TOKEN_DIR
 
 GRAPH = "https://graph.facebook.com/v26.0"
 RATE_LIMIT_CODES = {4, 17, 32, 613, 9}  # app/user/page call limits; 9 = Reels publish limit (about 25/day)
-YOUTUBE_ONLY = re.compile(r"playlist|https?://|youtu\.?be|ai-generated", re.I)  # dropped from Meta captions
+YOUTUBE_ONLY = re.compile(r"playlist|https?://|youtu\.?be|ai-generated|perfect if you like|^keywords:", re.I)  # dropped from Meta captions
 
 
 class InstagramError(Exception):
@@ -49,6 +49,7 @@ def build_caption(meta: dict) -> str:
     disclose = meta.get("ai_disclosure", True) or "ai-generated" in desc.lower()
     tags = list(dict.fromkeys(w for ln in lines if is_tags(ln) for w in ln.split())) or [
         t if t.startswith("#") else f"#{t}" for t in meta.get("tags", []) if " " not in t]
+    tags = [t for t in tags if t.lower() != "#shorts"]
     tail = ("AI-generated content" if disclose else "", " ".join(tags))
     body = "\n\n".join(p.strip() for p in re.split(r"\n\s*\n", text) if p.strip())
     limit = 2200 - sum(len(t) + 2 for t in tail)

@@ -486,9 +486,10 @@ def _start_chapter(pack: dict, state: dict, number: int, script: dict | None, pa
 
 
 def render_next(key: str, cfg: dict | None = None, out_dir: Path | None = None, switchboard=None, music: bool = True, series_dir: Path | None = None,
-                root: Path | None = None, voice: str | None = None, force: bool = False, client=None, **kw) -> dict:
+                root: Path | None = None, voice: str | None = None, force: bool = False, client=None, offline_ok: bool = True, **kw) -> dict:
     """Render the NEXT part of a series from its pack: authored script if present, else research (saved back into the pack).
-    Raises PackError for an invalid pack and RuntimeError when the shared NIM cap leaves less than the series' reserve."""
+    Raises PackError for an invalid pack and RuntimeError when the shared NIM cap leaves less than the series' reserve.
+    offline_ok=False (scheduler): a template script from research_part raises RuntimeError before any credit is spent, and the state stays as it was."""
     from aurora import cast as cast_mod
     from aurora import comic, manga
     from aurora.costs import COST_DIR, credits_today
@@ -536,7 +537,11 @@ def render_next(key: str, cfg: dict | None = None, out_dir: Path | None = None, 
         info = {"number": int(ch["number"]), "title": ch["title"], "part": m, "parts": int(ch["parts"]),
                 "beat": {"role": "script", "summary": spart["title"]}, "series_title": s["title"], "final": m >= int(ch["parts"])}
     else:
+        before = research.load_series(sk, sdir)
         r = research.research_part(sk, "", language=s["language"], panels=panels_n, cfg=cfg, client=client, series_dir=sdir, world=pack["world"], rules=pack_rules(pack), guard=make_guard(pack))
+        if r["source"] != "gemini" and not offline_ok:  # never publish the offline template; the next run tries again
+            research._write_state(sk, before, sdir)
+            raise RuntimeError(f"{key}: no real script for the next part, nothing rendered ({r['note']})")
         comic_dict, info = _research_to_lines(r["comic"], pack), r["chapter"]
         if s.get("opening_card"):
             comic_dict["cover_note"] = s["opening_card"]
@@ -578,7 +583,7 @@ def render_for_channel(cfg: dict, channel: dict, switchboard, out_dir: Path, voi
         if invalid:
             return None
         raise RuntimeError(f"{channel['name']}: every series is at its daily cadence (nothing due)")
-    return render_next(entry["slug"], cfg, out_dir, switchboard, series_dir=series_dir, voice=voice, **kw)
+    return render_next(entry["slug"], cfg, out_dir, switchboard, series_dir=series_dir, voice=voice, offline_ok=False, **kw)
 
 
 def main(argv: list[str] | None = None) -> int:
