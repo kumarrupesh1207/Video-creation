@@ -20,7 +20,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ITEMS = [".env", "presets.json", ".claude/skills", "outputs/tokens", "outputs/series", "outputs/publish_queue.json", "outputs/publish_state",
-         "outputs/costs", "outputs/reports", "outputs/episodes", "outputs/final/shinobi", "assets/music", "assets/voices"]
+         "outputs/costs", "outputs/reports", "outputs/episodes", "outputs/final/shinobi", "outputs/music_cache", "outputs/voice_cache",
+         "assets/music", "assets/voices"]
 MEMORY_PREFIX = "claude_memory/"
 MANIFEST = "aurora_manifest.json"
 PATH_JSON = ["outputs/publish_queue.json", "outputs/series", "outputs/publish_state", "outputs/episodes", "outputs/final"]

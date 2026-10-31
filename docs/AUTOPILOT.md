@@ -54,6 +54,8 @@ Import `PublishQueue` from `aurora.publish.queue` (thread-safe, file-backed).
 | `GET /api/publish/health` | per-channel: token file exists (`youtube.token_path(ch).exists()`), count scheduled/failed |
 UI "Queue" tab: card per item with video preview (`path`), title, countdown to `publish_at` (show IST), big **Stop** button while `scheduled`, **Restore** when `vetoed`, red banner for `failed`/missing token, and views/likes once published. Auth-protected like the other endpoints. Push notification to the phone when an item is queued is optional (item's `created_at`).
 
+Moving to another PC: docs/SETUP_NEW_PC.md (stop the tasks on the old PC first, or everything posts twice).
+
 ## Instagram Reels (first live post 2026-10-31)
 Add `instagram` to a channel's `platforms:`; `render` then queues one item per platform (own slot + veto, same file, dedupe per platform).
 Code: `aurora/publish/instagram.py` `publish_reel_file` (Graph API v26.0: create resumable REELS container -> upload the local file to rupload.facebook.com -> poll `status_code=FINISHED` -> `media_publish`), dispatch in `autopilot.publish_due`. Rate-limit errors defer 12 h; a missing account file keeps the item scheduled and retries hourly. Direct upload needs a Page token from Facebook Login for Business, so R2 is not needed. Meta has no API flag for the "AI info" label, so the caption gets an "AI-generated content" line; also switch on Instagram's auto-label in the app.

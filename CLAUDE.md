@@ -66,6 +66,7 @@ Runs on a CPU-only Windows PC (Ryzen 5 5600G, 16 GB, no NVIDIA GPU). History/sta
 - `docs/UI_SPEC.md` — mobile-first UI spec.
 - `docs/TEST_PLAN.md` — test strategy and acceptance criteria.
 - `docs/SETUP_AUDIT.md` — dependencies/config/secrets audit.
+- `docs/SETUP_NEW_PC.md` — move Aurora to another PC (private backup + restore).
 - `docs/PERF_BASELINE.md` — performance before/after numbers.
 - `docs/research/GPU_BACKENDS.md` — models, GPU providers, cost per clip.
 - `docs/solutions/` — notes on solved problems (index in its README).
