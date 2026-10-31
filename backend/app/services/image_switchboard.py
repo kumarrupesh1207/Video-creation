@@ -58,7 +58,7 @@ class ImageSwitchboard:
         })
 
         if self.reuse_existing_asset and not force_new_image:
-            cached = self._lookup_cached_asset(normalized, style, resolution, negative_prompt)
+            cached = self._lookup_cached_asset(normalized, style, resolution, negative_prompt, seed)
             if cached:
                 self._append_event(job_id, "asset_cache_hit", {
                     "asset_key": cached["asset_key"],
@@ -203,6 +203,7 @@ class ImageSwitchboard:
         style: str,
         resolution: list[int],
         negative_prompt: str,
+        seed: int | None = None,
     ) -> dict | None:
         for provider_name in self.fallback_order:
             descriptor = self._provider_descriptor(provider_name, style, resolution, negative_prompt)
@@ -215,7 +216,7 @@ class ImageSwitchboard:
                 model=descriptor["model"],
                 width=descriptor["width"],
                 height=descriptor["height"],
-                seed=descriptor["seed"],
+                seed=seed or descriptor["seed"],  # assets are registered under the seed actually used
                 negative_prompt=descriptor["negative_prompt"],
             )
             cached = find_asset(asset_key)

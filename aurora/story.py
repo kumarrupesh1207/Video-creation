@@ -536,6 +536,9 @@ def render_next(key: str, cfg: dict | None = None, out_dir: Path | None = None, 
         research.finish_retention(comic_dict, (ch or {}).get("recaps", []), m)
         info = {"number": int(ch["number"]), "title": ch["title"], "part": m, "parts": int(ch["parts"]),
                 "beat": {"role": "script", "summary": spart["title"]}, "series_title": s["title"], "final": m >= int(ch["parts"])}
+    elif (draft := state.get("draft_part") or {}).get("key") == [(state.get("chapter") or {}).get("number"), m]:
+        comic_dict, info = draft["comic"], draft["info"]  # same script -> same prompts -> the panels a failed attempt paid for come from the image cache
+        print(f"[story] {key}: reusing the saved script of Ch.{info['number']} Part {m} (last attempt failed)", file=sys.stderr)
     else:
         before = research.load_series(sk, sdir)
         r = research.research_part(sk, "", language=s["language"], panels=panels_n, cfg=cfg, client=client, series_dir=sdir, world=pack["world"], rules=pack_rules(pack), guard=make_guard(pack))
@@ -547,6 +550,9 @@ def render_next(key: str, cfg: dict | None = None, out_dir: Path | None = None, 
             comic_dict["cover_note"] = s["opening_card"]
         if s["format"] == "manga":
             comic_dict["end_card"] = list(research.end_card_for(info["number"], info["part"], info["parts"]))
+        st = research.load_series(sk, sdir)  # saved BEFORE any panel is paid for; a successful part clears it
+        st["draft_part"] = {"key": [info["number"], info["part"]], "comic": comic_dict, "info": info}
+        research._write_state(sk, st, sdir)
     comic_dict["playlist"] = s["playlist"]
     cap = int(os.environ.get("AURORA_NIM_DAILY_CAP") or cfg.get("providers", {}).get("nvidia_nim", {}).get("max_credits_per_day", 25))
     need, reserve = len(comic_dict["panels"]), int(s.get("reserve_credits", 0))
@@ -554,8 +560,15 @@ def render_next(key: str, cfg: dict | None = None, out_dir: Path | None = None, 
     if reserve and not force and used + need > cap - reserve:
         raise RuntimeError(f"NIM credits: {used} used today + {need} needed > cap {cap} - {reserve} kept for the other series; try again after the reset (or --force)")
     out_dir = Path(out_dir or ROOT / "outputs" / "final" / s["channel"] / "story" / pack["slug"])
-    res = comic.make_comic_reel(sk, "", out_dir, cfg=cfg, language=s["language"], voice=voice or (s.get("narrator") or {}).get("voice", "en-US-AvaNeural"),
-                                comic=comic_dict, chapter=info, switchboard=switchboard, music=music, series_dir=sdir, **kw)
+    try:
+        res = comic.make_comic_reel(sk, "", out_dir, cfg=cfg, language=s["language"], voice=voice or (s.get("narrator") or {}).get("voice", "en-US-AvaNeural"),
+                                    comic=comic_dict, chapter=info, switchboard=switchboard, music=music, series_dir=sdir, **kw)
+    except Exception as exc:
+        if "CONTENT_FILTERED" in f"{exc} {exc.__cause__}":  # NIM blocked this script: the same prompts would block again, so the next attempt writes a new one
+            st = research.load_series(sk, sdir)
+            st.pop("draft_part", None)
+            research._write_state(sk, st, sdir)
+        raise
     side_path = Path(res["sidecar"])
     side = json.loads(side_path.read_text(encoding="utf-8"))
     side.update(story=pack["slug"], series_key=sk, channel=s["channel"] or side.get("channel"), playlist=s["playlist"])
@@ -563,6 +576,7 @@ def render_next(key: str, cfg: dict | None = None, out_dir: Path | None = None, 
     if not authored:  # write the WHOLE chapter so far (all parts of the series state, in order), atomically
         sync_chapter_md(pack, research.load_series(sk, sdir), info["number"])
     st = research.load_series(sk, sdir)
+    st.pop("draft_part", None)
     daily = st.setdefault("daily", {})
     daily[date.today().isoformat()] = int(daily.get(date.today().isoformat(), 0)) + 1
     research._write_state(sk, st, sdir)

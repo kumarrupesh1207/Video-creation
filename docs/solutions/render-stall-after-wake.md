@@ -13,5 +13,9 @@ and the first ffprobe hit its 30 s limit. The same probe takes 0.09 s now, so th
 **Not a scheduler bug:** the niche text in `render_failed` is only `idea["topic"]`, the placeholder from `get_ideas` for comic
 channels. `render_idea` still goes through `story.render_for_channel`; the work dir was `shinobi-ch2-part2-echoes-of-the-aether`.
 
-**Known cost:** a part with no authored script (`CH_02.md` has only Part 1) gets a new Gemini script on every attempt, so panels
-paid for by a failed attempt do not hit the image cache on the next one. Attempt 2 cost 6 credits and a retry pays again.
+**Paid panels were lost on every retry, for two reasons, both fixed:**
+- A part with no authored script (`CH_02.md` has only Part 1) got a new Gemini script on each attempt. `story.render_next` now
+  saves it as `draft_part` in the series state before any panel is paid for, reuses it until the part succeeds, then clears it.
+  A `CONTENT_FILTERED` failure drops it instead, because the same prompts would be blocked again.
+- The image cache had never hit (0 hits, 117 misses in the render log): `ImageSwitchboard` looked assets up with seed 0 but
+  registered them under the real seed. Lookup now uses the seed passed in. Recomputing the keys of real panels confirmed it.

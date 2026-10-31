@@ -20,4 +20,4 @@ One line per solved problem. Update an existing note instead of adding a duplica
 - [STORY_PACKS.md](../STORY_PACKS.md) — content-driven series: packs, lint, cadence, zero-code new series
 - [youtube-seo-guidelines.md](youtube-seo-guidelines.md) — SEO text follows YouTube's guidelines (hook+keyword, unique body, 3 hashtags, 5-10 tags + misspellings, one AI line); data lives in series.yaml.
 - [template-script-on-gemini-outage.md](template-script-on-gemini-outage.md) — Gemini 503 sent the offline template to YouTube; the scheduler now refuses it and retries next run.
-- [render-stall-after-wake.md](render-stall-after-wake.md) — 0 videos: first render right after PC wake stalled ffprobe past 30 s -> one longer retry; failed AI-written parts re-pay panels.
+- [render-stall-after-wake.md](render-stall-after-wake.md) — 0 videos: first render right after PC wake stalled ffprobe past 30 s -> one longer retry; retries now reuse the script and paid panels (image cache had never hit).

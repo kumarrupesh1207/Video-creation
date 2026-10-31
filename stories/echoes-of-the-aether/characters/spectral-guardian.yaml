@@ -1,0 +1,12 @@
+name: Spectral Guardian
+role: side character
+description: An ethereal armored entity made of shifting dark smoke with glowing violet eyes, wielding a massive blade of
+  solid golden light.
+distinguishing_marks: ''
+personality: ''
+voice_notes: ''
+first_story: Echoes of the Aether
+references:
+- file: spectral-guardian_ref1.jpg
+  from_panel: 2
+  use: first appearance

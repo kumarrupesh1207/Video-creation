@@ -108,6 +108,83 @@ class Board:
         return SimpleNamespace(output_path=str(p), provider="nvidia_nim", latency_ms=1)
 
 
+def _draft_setup(packs, tmp, monkeypatch):
+    """A research-written part (no authored script) with make_comic_reel replaced: `outcome` is an exception to raise, else it succeeds."""
+    make_pack(packs, "demo", parts=0)
+    monkeypatch.setattr(research, "_call_json", lambda client, model, prompt, schema: client.generate(prompt, schema))
+    cfg = {"comic": {"cast_lock": False, "image_mode": "nim"}, "research": {}, "cost_dir": str(tmp / "costs"), "providers": {"nvidia_nim": {"max_credits_per_day": 50}}}
+    sd, client, seen = tmp / "ser", FakeClient(), []
+    outcome = [None]
+
+    def reel(channel, premise, out_dir, comic=None, chapter=None, series_dir=None, **kw):
+        seen.append(comic)
+        if outcome[0]:
+            raise outcome[0]
+        side = tmp / f"part{chapter['part']}.json"
+        side.write_text(json.dumps({"hook": comic.get("hook"), "panels": comic["panels"]}), encoding="utf-8")
+        research.record_part(channel, comic, chapter, {"part": chapter["part"], "video": "v.mp4", "sidecar": str(side), "title": "t"}, series_dir)
+        return {"sidecar": str(side), "title": "t"}
+
+    monkeypatch.setattr(comic, "make_comic_reel", reel)
+    return (lambda: story.render_next("demo", cfg, tmp / "out", Board(tmp), music=False, series_dir=sd, client=client)), client, seen, outcome, sd
+
+
+def test_failed_part_keeps_its_script_until_it_succeeds(packs, workspace_tmp_path, monkeypatch):  # 2026-10-31: a retry re-paid 6 NIM credits for a new script
+    render, client, seen, outcome, sd = _draft_setup(packs, workspace_tmp_path, monkeypatch)
+    outcome[0] = TimeoutError("ffprobe timed out")
+    with pytest.raises(TimeoutError):
+        render()
+    asked = len(client.prompts)
+    with pytest.raises(TimeoutError):
+        render()
+    assert len(client.prompts) == asked and seen[1]["panels"] == seen[0]["panels"]  # no new Gemini script: same prompts for the image cache
+    outcome[0] = None
+    render()
+    assert seen[2]["panels"] == seen[0]["panels"] and "draft_part" not in research.load_series("demo", sd)
+    render()  # the next part writes its own script
+    assert len(client.prompts) > asked and seen[3]["series"]["part"] == 2
+
+
+def test_filter_blocked_part_gets_a_new_script(packs, workspace_tmp_path, monkeypatch):
+    render, client, seen, outcome, sd = _draft_setup(packs, workspace_tmp_path, monkeypatch)
+    blocked = RuntimeError("NIM failed after 1/6 panels")
+    blocked.__cause__ = RuntimeError("[NVIDIA NIM] Generation blocked: CONTENT_FILTERED")
+    outcome[0] = blocked
+    with pytest.raises(RuntimeError):
+        render()
+    assert "draft_part" not in research.load_series("demo", sd)
+    asked = len(client.prompts)
+    with pytest.raises(RuntimeError):
+        render()
+    assert len(client.prompts) > asked
+
+
+def test_seeded_image_comes_from_the_cache_at_no_cost(workspace_tmp_path, monkeypatch):  # lookup used seed 0, assets are stored under the real seed: 0 hits ever
+    from backend.app.providers.base import ImageResult
+    from backend.app.services.image_switchboard import ImageSwitchboard
+
+    tmp = workspace_tmp_path.resolve()
+    monkeypatch.chdir(tmp)  # the manifest path is relative: never the real one
+    model = "black-forest-labs/flux.2-klein-4b"
+    calls = []
+
+    class Nim:
+        def generate_with_params(self, prompt, style, res, job, negative_prompt="", seed=None):
+            calls.append(seed)
+            p = tmp / f"{job}.jpg"
+            Image.effect_noise((768, 1344), 50).convert("RGB").save(p)
+            return ImageResult("nvidia_nim", model, style, 5, str(p), width=768, height=1344, seed=seed, negative_prompt=negative_prompt)
+
+    board = ImageSwitchboard({"providers": {"nvidia_nim": {"models": {"anime": model}}}})
+    board.fallback_order, board.providers = ["nvidia_nim"], {"nvidia_nim": Nim()}
+    args = ("a panel", "anime", [1024, 1088])
+    first = board.generate(*args, "j1", negative_prompt="lowres", seed=77)
+    again = board.generate(*args, "j2", negative_prompt="lowres", seed=77)
+    assert calls == [77] and again.latency_ms == 0 and again.output_path == first.output_path  # latency 0 = no NIM credit logged
+    board.generate(*args, "j3", negative_prompt="lowres", seed=78)  # the filter retry's new seed still reaches NIM
+    assert calls == [77, 78]
+
+
 def test_authored_chapters_are_used_as_is_and_missing_ones_are_researched_and_saved_back(packs, workspace_tmp_path, monkeypatch):
     tmp = workspace_tmp_path
     d = make_pack(packs, "demo", parts=2)
