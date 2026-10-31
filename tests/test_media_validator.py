@@ -4,7 +4,8 @@ import subprocess
 import pytest
 from PIL import Image
 
-from aurora.monitoring.media_validator import KNOWN_MOCK_MD5, validate_image, validate_video
+from aurora.monitoring import media_validator
+from aurora.monitoring.media_validator import FFPROBE_TIMEOUTS, KNOWN_MOCK_MD5, validate_image, validate_video
 from aurora.pipeline import run
 from backend.app.providers.nvidia_nim import NvidiaNIMProvider
 
@@ -30,6 +31,33 @@ def test_validate_image_rejects_garbage(workspace_tmp_path):
     p.write_bytes(b"not an image")
     assert not validate_image(p).ok
     assert not validate_image(workspace_tmp_path / "missing.png").ok
+
+
+def test_ffprobe_retries_once_after_a_stall(monkeypatch):  # 2026-10-31: 0 videos, ffprobe stalled 30 s on a 20 KB mp3 right after wake
+    calls = []
+
+    def fake_run(cmd, timeout, **kw):
+        calls.append(timeout)
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(cmd, timeout)
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"format": {"duration": "3.48"}}', stderr="")
+
+    monkeypatch.setattr(media_validator.subprocess, "run", fake_run)
+    assert media_validator._ffprobe("voice_0.mp3", "ffprobe")["format"]["duration"] == "3.48"
+    assert calls == list(FFPROBE_TIMEOUTS)
+
+
+def test_ffprobe_second_stall_still_fails_loud(monkeypatch):
+    calls = []
+
+    def fake_run(cmd, timeout, **kw):
+        calls.append(timeout)
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    monkeypatch.setattr(media_validator.subprocess, "run", fake_run)
+    with pytest.raises(subprocess.TimeoutExpired):
+        media_validator._ffprobe("voice_0.mp3", "ffprobe")
+    assert calls == list(FFPROBE_TIMEOUTS)
 
 
 def test_validate_video_rejects_fake_mp4(workspace_tmp_path):

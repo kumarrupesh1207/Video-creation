@@ -19,3 +19,4 @@ One line per solved problem. Update an existing note instead of adding a duplica
 - [veer-manga-dialogue.md](veer-manga-dialogue.md) — scripted manga series: per-character voices, timed bubbles, respect-charter guard
 - [STORY_PACKS.md](../STORY_PACKS.md) — content-driven series: packs, lint, cadence, zero-code new series
 - [youtube-seo-guidelines.md](youtube-seo-guidelines.md) — SEO text follows YouTube's guidelines (hook+keyword, unique body, 3 hashtags, 5-10 tags + misspellings, one AI line); data lives in series.yaml.
+- [render-stall-after-wake.md](render-stall-after-wake.md) — 0 videos: first render right after PC wake stalled ffprobe past 30 s -> one longer retry; failed AI-written parts re-pay panels.

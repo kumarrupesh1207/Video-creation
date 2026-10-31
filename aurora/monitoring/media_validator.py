@@ -13,6 +13,7 @@ KNOWN_MOCK_MD5 = frozenset({
     "9a75c418be5f8b5a2735d437737461df",
     "8bf5672dfac1e2b2b4acba88861d21f1",
 })
+FFPROBE_TIMEOUTS = (30, 180)  # seconds: normal try, then one retry
 
 
 @dataclass
@@ -54,10 +55,11 @@ def default_ffprobe() -> str:
 
 def _ffprobe(path: Path, ffprobe: str | None = None) -> dict:
     exe = ffprobe or default_ffprobe()
-    proc = subprocess.run(
-        [exe, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", str(path)],
-        capture_output=True, text=True, timeout=30,
-    )
+    cmd = [exe, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", str(path)]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=FFPROBE_TIMEOUTS[0])
+    except subprocess.TimeoutExpired:  # the PC stalled (just woken, all catch-up tasks running), not a bad file: one longer try
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=FFPROBE_TIMEOUTS[1])
     if proc.returncode != 0:
         raise ValueError(proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "ffprobe failed")
     return json.loads(proc.stdout)
